@@ -50,17 +50,30 @@ Defines the supported games.
 ```json
 // Family Feud
 {
-  "rounds_per_game": 5,
+  "rounds_per_game": 4,
+  "face_off_mode": "buzzer",
   "max_strikes": 3,
-  "face_off_enabled": true,
-  "steal_enabled": true
+  "steal_mode": "one_guess",
+  "steal_timer_seconds": 30,
+  "round_multipliers": {"1": 1, "2": 1, "3": 2, "4": 3},
+  "fast_money_enabled": true,
+  "fast_money_player1_seconds": 20,
+  "fast_money_player2_seconds": 25,
+  "fast_money_target_score": 200,
+  "play_or_pass_enabled": true,
+  "answers_per_question": 8
 }
 
 // America Says
 {
-  "timer_seconds": 30,
-  "passes_allowed": 1,
-  "answers_per_question": 7
+  "questions_per_game": 10,
+  "answers_per_question": 7,
+  "control_timer_seconds": 30,
+  "steal_timer_seconds": 10,
+  "steal_points_percentage": 50,
+  "points_per_answer": 100,
+  "gameplay_mode": "host_reveal",
+  "winning_condition": "most_points_after_questions"
 }
 
 // Oodles
@@ -108,6 +121,7 @@ The master question bank.
 | question_text | text | The prompt shown to players |
 | difficulty | enum | easy, medium, hard |
 | answer_letter | char(1) | For Oodles: the letter (A-Z), nullable |
+| is_fast_money | boolean | For Family Feud: Fast Money question |
 | metadata | json | Game-specific data |
 | created_by | FK | References users |
 | is_active | boolean | |
@@ -119,6 +133,7 @@ The master question bank.
 - `game_type_id`
 - `category_id`
 - `answer_letter` (for Oodles card generation)
+- `is_fast_money` (for Family Feud Fast Money selection)
 - `is_active`
 
 ---
@@ -268,18 +283,37 @@ Current game status (singleton per session).
 ```json
 // Family Feud
 {
+  "current_round": 2,
+  "round_multiplier": 1,
+  "phase": "playing",
+  "controlling_team_id": 1,
+  "other_team_id": 2,
   "strikes": 2,
-  "is_steal_mode": false,
-  "controlling_team_id": 5,
-  "face_off_winner": null,
-  "round_points_pool": 127
+  "point_pool": 127,
+  "revealed_answer_ids": [101, 103, 105],
+  "face_off_state": {
+    "player1_team_id": 1,
+    "player2_team_id": 2,
+    "player1_answer_id": 101,
+    "winner_team_id": 1
+  },
+  "member_rotation_index": 3,
+  "fast_money": null
 }
 
 // America Says
 {
-  "timer_paused": false,
-  "remaining_seconds": 18,
-  "pass_count": 1
+  "current_question_index": 3,
+  "team_order": [1, 3, 2, 4],
+  "team_rotation_index": 2,
+  "controlling_team_id": 2,
+  "phase": "control",
+  "stealing_team_id": null,
+  "timer_mode": "control",
+  "timer_deadline": "2024-12-26T20:15:30Z",
+  "revealed_answer_ids": [101, 103, 105],
+  "answers_guessed_by_controller": 3,
+  "answers_guessed_by_stealer": 0
 }
 
 // Oodles
