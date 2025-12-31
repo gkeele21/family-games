@@ -67,9 +67,10 @@ class GameState extends Model
             return $this->timer_duration;
         }
 
-        $elapsed = now()->diffInSeconds($this->timer_started_at);
+        // Use Unix timestamps for reliable calculation (avoids timezone issues)
+        $elapsed = now()->timestamp - $this->timer_started_at->timestamp;
         $remaining = $this->timer_duration - $elapsed;
 
-        return max(0, $remaining);
+        return max(0, (int) $remaining);
     }
 }

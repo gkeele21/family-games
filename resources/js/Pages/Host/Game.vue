@@ -3,7 +3,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import Scoreboard from '@/Components/Scoreboard.vue';
 import GameTimer from '@/Components/GameTimer.vue';
 import { Head } from '@inertiajs/vue3';
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import axios from 'axios';
 
 interface Team {
@@ -28,6 +28,8 @@ interface GameState {
     timer_duration: number;
     remaining_seconds: number | null;
     state_data: Record<string, any>;
+    is_steal_round: boolean;
+    steal_points_percentage: number;
 }
 
 interface CurrentQuestion {
@@ -78,27 +80,73 @@ const gameState = ref<GameState | null>(null);
 const currentQuestion = ref<CurrentQuestion | null>(null);
 const currentCard = ref<CurrentCard | null>(null);
 const totalCards = ref(0);
+const currentQuestionNumber = ref<number | null>(null);
+const totalQuestions = ref<number | null>(null);
 const selectedControllingTeams = ref<number[]>([]);
 const showControlModal = ref(false);
 const selectedAllPlayTeams = ref<number[]>([]);
+const showStealModal = ref(false);
+const timerExpiredHandled = ref(false);
 let pollInterval: number | null = null;
 
 const isOodles = props.gameSession.game_type.slug === 'oodles';
+const isAmericaSays = props.gameSession.game_type.slug === 'america-says';
+
+// Check if we're in steal round
+const isStealRound = computed(() => gameState.value?.is_steal_round ?? false);
+
+// Get the steal points percentage
+const stealPointsPercentage = computed(() => gameState.value?.steal_points_percentage ?? 50);
+
+// Check if all answers are revealed
+const allAnswersRevealed = computed(() => {
+    if (!currentQuestion.value) return false;
+    return currentQuestion.value.answers.every(a => a.revealed);
+});
+
+// Get controlling team name
+const getControllingTeamName = computed(() => {
+    if (!currentQuestion.value?.controlling_team_id) return null;
+    const team = teams.value.find(t => t.id === currentQuestion.value?.controlling_team_id);
+    return team?.name ?? null;
+});
 
 const fetchState = async () => {
     try {
         const response = await axios.get(route('host.state', props.gameSession.id));
+
         teams.value = response.data.teams;
         gameState.value = response.data.gameState;
         currentQuestion.value = response.data.currentQuestion;
         currentCard.value = response.data.currentCard;
         totalCards.value = response.data.totalCards || 0;
+        currentQuestionNumber.value = response.data.currentQuestionNumber;
+        totalQuestions.value = response.data.totalQuestions;
     } catch (error) {
         console.error('Failed to fetch state:', error);
     }
 };
 
+// Handle timer expiration - called by GameTimer component
+const onTimerExpired = () => {
+    // Only handle once per timer cycle
+    if (timerExpiredHandled.value) return;
+
+    // For America Says: show steal modal when control round timer expires
+    if (isAmericaSays && currentQuestion.value && !allAnswersRevealed.value) {
+        const isSteal = gameState.value?.is_steal_round;
+
+        if (!isSteal) {
+            // Control round ended - show steal modal
+            timerExpiredHandled.value = true;
+            showStealModal.value = true;
+        }
+        // Note: If steal round timer expires, host can manually end the round
+    }
+};
+
 const startTimer = async () => {
+    timerExpiredHandled.value = false; // Reset so we can detect expiration again
     await axios.post(route('host.timer.start', props.gameSession.id));
     fetchState();
 };
@@ -109,6 +157,7 @@ const pauseTimer = async () => {
 };
 
 const resetTimer = async () => {
+    timerExpiredHandled.value = false; // Reset so we can detect expiration again
     await axios.post(route('host.timer.reset', props.gameSession.id));
     fetchState();
 };
@@ -145,6 +194,8 @@ const nextQuestion = async () => {
     if (response.data.game_complete) {
         window.location.href = route('games.index');
     }
+    // Reset timer for the new question (timerExpiredHandled resets when timer starts)
+    await axios.post(route('host.timer.reset', props.gameSession.id));
     fetchState();
 };
 
@@ -279,6 +330,44 @@ const updateTeamScore = async (teamId: number, newScore: number) => {
     }
 };
 
+const startStealRound = async () => {
+    try {
+        showStealModal.value = false; // Close modal first
+        await axios.post(route('host.steal.start', props.gameSession.id));
+        fetchState();
+    } catch (error: any) {
+        console.error('Failed to start steal round:', error);
+        alert('Error starting steal round: ' + (error.response?.data?.error || error.message));
+    }
+};
+
+const skipStealRound = async () => {
+    showStealModal.value = false;
+    // Just move to next question without steal round
+    await nextQuestion();
+};
+
+const endStealRound = async () => {
+    try {
+        await axios.post(route('host.steal.end', props.gameSession.id));
+        fetchState();
+    } catch (error: any) {
+        console.error('Failed to end steal round:', error);
+        alert('Error ending steal round: ' + (error.response?.data?.error || error.message));
+    }
+};
+
+const endStealAndNextQuestion = async () => {
+    try {
+        // End the steal round first, then move to next question
+        await axios.post(route('host.steal.end', props.gameSession.id));
+        await nextQuestion();
+    } catch (error: any) {
+        console.error('Failed to end steal round:', error);
+        alert('Error: ' + (error.response?.data?.error || error.message));
+    }
+};
+
 onMounted(() => {
     fetchState();
     pollInterval = window.setInterval(fetchState, 1000);
@@ -372,6 +461,7 @@ onUnmounted(() => {
                                 @start="startTimer"
                                 @pause="pauseTimer"
                                 @reset="resetTimer"
+                                @expired="onTimerExpired"
                             />
                         </div>
 
@@ -413,6 +503,12 @@ onUnmounted(() => {
                             <div v-if="currentQuestion">
                                 <!-- Question Header -->
                                 <div class="mb-6">
+                                    <!-- Question Counter for America Says -->
+                                    <div v-if="isAmericaSays && currentQuestionNumber && totalQuestions" class="text-center mb-2">
+                                        <span class="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                                            Question {{ currentQuestionNumber }} of {{ totalQuestions }}
+                                        </span>
+                                    </div>
                                     <h3 class="text-2xl font-bold text-center">
                                         {{ currentQuestion.question_text }}
                                     </h3>
@@ -579,7 +675,57 @@ onUnmounted(() => {
                                     </div>
                                 </div>
 
-                                <!-- Answer display (for non-Oodles games or reference) -->
+                                <!-- America Says: Steal Round Indicator -->
+                                <div v-if="isAmericaSays && isStealRound" class="mb-4 p-4 bg-orange-100 border-2 border-orange-400 rounded-lg">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <span class="text-xl font-bold text-orange-700">STEAL ROUND!</span>
+                                            <p class="text-orange-600">
+                                                {{ getControllingTeamName }} can steal for {{ stealPointsPercentage }}% points
+                                            </p>
+                                        </div>
+                                        <button
+                                            @click="endStealAndNextQuestion"
+                                            class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                                        >
+                                            Next Question
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- America Says: All Answers Revealed -->
+                                <div v-else-if="isAmericaSays && allAnswersRevealed" class="mb-4 p-4 bg-green-100 border-2 border-green-400 rounded-lg">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <span class="text-xl font-bold text-green-700">All Answers Revealed!</span>
+                                            <p class="text-green-600">Great job! Ready for the next question?</p>
+                                        </div>
+                                        <button
+                                            @click="nextQuestion"
+                                            class="px-6 py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700"
+                                        >
+                                            Next Question
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- America Says: Control Round Indicator -->
+                                <div v-else-if="isAmericaSays && currentQuestion.controlling_team_id" class="mb-4 p-4 bg-blue-100 border-2 border-blue-400 rounded-lg">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <span class="text-xl font-bold text-blue-700">{{ getControllingTeamName }}'s Turn</span>
+                                            <p class="text-blue-600">Full points for correct answers</p>
+                                        </div>
+                                        <button
+                                            @click="showStealModal = true"
+                                            class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
+                                        >
+                                            Start Steal Round
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Answer display (for non-Oodles games like America Says, Family Feud) -->
                                 <div v-if="!isOodles" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <button
                                         v-for="answer in currentQuestion.answers"
@@ -590,14 +736,21 @@ onUnmounted(() => {
                                         :class="{
                                             'bg-green-100 border-2 border-green-500': answer.revealed,
                                             'bg-gray-100 hover:bg-blue-100 cursor-pointer': !answer.revealed,
+                                            'bg-orange-50 hover:bg-orange-100': !answer.revealed && isStealRound,
                                         }"
                                     >
                                         <div class="flex justify-between items-center">
                                             <span class="font-semibold">
-                                                {{ answer.revealed ? answer.answer_text : '???' }}
+                                                {{ answer.answer_text }}
                                             </span>
-                                            <span class="text-lg font-bold">
-                                                {{ answer.points }} pts
+                                            <span class="text-lg font-bold" :class="{ 'text-orange-600': isStealRound && !answer.revealed }">
+                                                <template v-if="isStealRound && !answer.revealed">
+                                                    {{ Math.floor(answer.points * stealPointsPercentage / 100) }} pts
+                                                    <span class="text-sm text-gray-400 line-through ml-1">{{ answer.points }}</span>
+                                                </template>
+                                                <template v-else>
+                                                    {{ answer.points }} pts
+                                                </template>
                                             </span>
                                         </div>
                                     </button>
@@ -681,6 +834,34 @@ onUnmounted(() => {
                         class="px-4 py-2 bg-yellow-500 text-black font-bold rounded-lg hover:bg-yellow-400 disabled:opacity-50"
                     >
                         Save Control
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Steal Round Modal -->
+        <div
+            v-if="showStealModal"
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        >
+            <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+                <h3 class="text-xl font-bold mb-2 text-orange-600">Start Steal Round?</h3>
+                <p class="text-gray-600 mb-4">
+                    Time's up! The other team can now try to steal remaining answers for {{ stealPointsPercentage }}% of the points.
+                </p>
+
+                <div class="flex justify-end gap-3">
+                    <button
+                        @click="skipStealRound"
+                        class="px-4 py-2 text-gray-700 hover:text-gray-900"
+                    >
+                        Skip to Next Question
+                    </button>
+                    <button
+                        @click="startStealRound"
+                        class="px-4 py-2 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600"
+                    >
+                        Start Steal Round
                     </button>
                 </div>
             </div>

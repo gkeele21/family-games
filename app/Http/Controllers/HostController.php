@@ -92,6 +92,17 @@ class HostController extends Controller
         $currentQuestion = $state?->currentQuestion;
         $currentCard = $state?->currentCard;
 
+        // Get question progress for America Says
+        $currentQuestionNumber = null;
+        $totalQuestions = null;
+        if ($gameSession->gameType->slug === 'america-says') {
+            $allQuestions = $gameSession->sessionQuestions()->orderBy('display_order')->get();
+            $totalQuestions = $allQuestions->count();
+            if ($currentQuestion) {
+                $currentQuestionNumber = $allQuestions->search(fn ($q) => $q->id === $currentQuestion->id) + 1;
+            }
+        }
+
         // Get questions for the current card (Oodles)
         $cardQuestions = [];
         if ($currentCard) {
@@ -119,6 +130,8 @@ class HostController extends Controller
                 'timer_duration' => $state?->timer_duration,
                 'remaining_seconds' => $state?->getRemainingSeconds(),
                 'state_data' => $state?->state_data,
+                'is_steal_round' => $state?->getStateValue('is_steal_round', false),
+                'steal_points_percentage' => $gameSession->getConfig('steal_points_percentage', 50),
             ],
             'currentQuestion' => $currentQuestion ? [
                 'id' => $currentQuestion->id,
@@ -144,6 +157,8 @@ class HostController extends Controller
                 'questions' => $cardQuestions,
             ] : null,
             'totalCards' => $gameSession->sessionCards->count(),
+            'currentQuestionNumber' => $currentQuestionNumber,
+            'totalQuestions' => $totalQuestions,
         ]);
     }
 
@@ -204,23 +219,107 @@ class HostController extends Controller
 
         // Get the answer to find points
         $answer = $currentQuestion->question->answers()->find($validated['answer_id']);
-        $points = $answer->points ?? 0;
+        $basePoints = $answer->points ?? 0;
+
+        // Check if we're in steal round - reduce points if so
+        $isStealRound = $state->getStateValue('is_steal_round', false);
+        if ($isStealRound) {
+            $stealPercentage = $gameSession->getConfig('steal_points_percentage', 50);
+            $points = (int) floor($basePoints * $stealPercentage / 100);
+        } else {
+            $points = $basePoints;
+        }
+
+        // Determine which team gets points (use controlling team if not specified)
+        $teamId = $validated['team_id'] ?? $currentQuestion->controlling_team_id ?? $state->active_team_id;
 
         // Create the reveal
         $currentQuestion->answerReveals()->create([
             'answer_id' => $validated['answer_id'],
-            'team_id' => $validated['team_id'] ?? null,
+            'team_id' => $teamId,
             'revealed_at' => now(),
             'points_awarded' => $points,
         ]);
 
-        // Award points to team if specified
-        if ($validated['team_id']) {
-            $team = Team::find($validated['team_id']);
+        // Award points to team
+        if ($teamId) {
+            $team = Team::find($teamId);
             $team?->addScore($points);
         }
 
-        return response()->json(['success' => true, 'points' => $points]);
+        return response()->json([
+            'success' => true,
+            'points' => $points,
+            'base_points' => $basePoints,
+            'is_steal_round' => $isStealRound,
+        ]);
+    }
+
+    public function startStealRound(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $currentQuestion = $state->currentQuestion;
+
+        if (!$currentQuestion) {
+            return response()->json(['error' => 'No active question'], 400);
+        }
+
+        // Get all teams and find the next team
+        $teams = $gameSession->teams()->orderBy('display_order')->get();
+        $currentTeamId = $currentQuestion->controlling_team_id ?? $state->active_team_id;
+
+        // Find the next team in rotation
+        $currentIndex = $teams->search(fn($t) => $t->id === $currentTeamId);
+        $nextIndex = ($currentIndex + 1) % $teams->count();
+        $nextTeam = $teams[$nextIndex];
+
+        // Update controlling team for the steal round
+        // Keep control_status as 'team_control' since a team does have control
+        // The is_steal_round flag in state_data indicates it's a steal round
+        $currentQuestion->update([
+            'controlling_team_id' => $nextTeam->id,
+            'controlling_team_ids' => null,
+            'control_status' => 'team_control',
+        ]);
+
+        // Update game state
+        $state->update(['active_team_id' => $nextTeam->id]);
+
+        // Set steal round flag and reset timer
+        $stealTimerSeconds = $gameSession->getConfig('steal_timer_seconds', 10);
+        $state->setStateValue('is_steal_round', true);
+        $state->update([
+            'timer_duration' => $stealTimerSeconds,
+            'timer_started_at' => now(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'steal_team_id' => $nextTeam->id,
+            'steal_team_name' => $nextTeam->name,
+            'steal_timer_seconds' => $stealTimerSeconds,
+        ]);
+    }
+
+    public function endStealRound(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+
+        // Clear steal round flag
+        $state->setStateValue('is_steal_round', false);
+
+        // Stop the timer
+        $state->update(['timer_started_at' => null]);
+
+        return response()->json(['success' => true]);
     }
 
     public function endGame(GameSession $gameSession)
