@@ -213,6 +213,10 @@ const markCorrect = async (teamId: number) => {
             team_id: teamId,
         });
         console.log('markCorrect response:', response.data);
+        // Reset timer for the next question (Oodles auto-advances)
+        if (isOodles) {
+            await axios.post(route('host.timer.reset', props.gameSession.id));
+        }
     } catch (error: any) {
         console.error('markCorrect error:', error.response?.data || error);
         alert('Error: ' + (error.response?.data?.error || error.message));
@@ -231,6 +235,10 @@ const markCorrectMultiple = async () => {
         });
         console.log('markCorrectMultiple response:', response.data);
         selectedAllPlayTeams.value = [];
+        // Reset timer for the next question (Oodles auto-advances)
+        if (isOodles) {
+            await axios.post(route('host.timer.reset', props.gameSession.id));
+        }
     } catch (error: any) {
         console.error('markCorrectMultiple error:', error.response?.data || error);
         alert('Error: ' + (error.response?.data?.error || error.message));

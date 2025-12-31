@@ -553,7 +553,14 @@ const openSettingsModal = () => {
                                         </div>
                                         <div>
                                             <span class="text-gray-500">Points:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.points_per_answer }}</span>
+                                            <span class="font-medium text-gray-700 ml-1">
+                                                <template v-if="settingsForm.settings.points_mode === 'database'">
+                                                    From database
+                                                </template>
+                                                <template v-else>
+                                                    {{ settingsForm.settings.points_per_answer }} per answer
+                                                </template>
+                                            </span>
                                         </div>
                                         <div>
                                             <span class="text-gray-500">Multi-Team:</span>
@@ -1242,16 +1249,49 @@ const openSettingsModal = () => {
                             </div>
 
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Points Per Answer
+                                <label class="block text-sm font-medium text-gray-700 mb-3">
+                                    Points Mode
                                 </label>
-                                <input
-                                    v-model.number="settingsForm.settings.points_per_answer"
-                                    type="number"
-                                    min="1"
-                                    max="1000"
-                                    class="w-full rounded-lg border-gray-300"
-                                />
+                                <div class="space-y-3">
+                                    <label class="flex items-start gap-3 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="points_mode"
+                                            value="database"
+                                            v-model="settingsForm.settings.points_mode"
+                                            class="mt-1 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <div>
+                                            <span class="font-medium text-gray-700">Use database values</span>
+                                            <p class="text-sm text-gray-500">Each question uses its own point value (100-300 based on difficulty)</p>
+                                        </div>
+                                    </label>
+
+                                    <div class="flex items-start gap-3">
+                                        <input
+                                            type="radio"
+                                            name="points_mode"
+                                            value="fixed"
+                                            v-model="settingsForm.settings.points_mode"
+                                            class="mt-1 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <div class="flex-1">
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-medium text-gray-700">Fixed points:</span>
+                                                <input
+                                                    v-model.number="settingsForm.settings.points_per_answer"
+                                                    type="number"
+                                                    min="1"
+                                                    max="1000"
+                                                    class="w-24 rounded-lg border-gray-300 text-center"
+                                                    @focus="settingsForm.settings.points_mode = 'fixed'"
+                                                />
+                                                <span class="text-gray-700">per answer</span>
+                                            </div>
+                                            <p class="text-sm text-gray-500 mt-1">All questions worth the same amount</p>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <div>

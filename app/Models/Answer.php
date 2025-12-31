@@ -16,6 +16,7 @@ class Answer extends Model
         'answer_text',
         'points',
         'display_order',
+        'times_revealed',
     ];
 
     protected $casts = [
@@ -31,5 +32,25 @@ class Answer extends Model
     public function reveals(): HasMany
     {
         return $this->hasMany(AnswerReveal::class);
+    }
+
+    /**
+     * Record that this answer was revealed/guessed
+     */
+    public function recordReveal(): void
+    {
+        $this->increment('times_revealed');
+    }
+
+    /**
+     * Get the reveal percentage (how often this answer is guessed out of all times the question was used)
+     */
+    public function getRevealPercentageAttribute(): ?float
+    {
+        $questionTimesUsed = $this->question->times_used;
+        if ($questionTimesUsed === 0) {
+            return null;
+        }
+        return round(($this->times_revealed / $questionTimesUsed) * 100, 1);
     }
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import GameTimer from '@/Components/GameTimer.vue';
-import { computed } from 'vue';
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 
 interface Team {
     id: number;
@@ -37,6 +37,83 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+
+// Timer state for local calculation
+const remainingTime = ref(props.gameState?.timer_duration || 30);
+const buzzerPlayed = ref(false);
+let timerInterval: number | null = null;
+let audioContext: AudioContext | null = null;
+
+// Play buzzer sound using Web Audio API
+const playBuzzer = () => {
+    if (buzzerPlayed.value) return;
+    buzzerPlayed.value = true;
+
+    try {
+        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+        // Resume context if suspended (browser autoplay policy)
+        if (audioContext.state === 'suspended') {
+            audioContext.resume();
+        }
+
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        // Buzzer sound: low frequency square wave
+        oscillator.type = 'square';
+        oscillator.frequency.setValueAtTime(220, audioContext.currentTime);
+
+        // Volume envelope
+        gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1);
+
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 1);
+    } catch (e) {
+        console.error('Could not play buzzer sound:', e);
+    }
+};
+
+// Calculate remaining time based on timer_started_at
+const calculateRemainingTime = () => {
+    if (!props.gameState?.timer_started_at) {
+        remainingTime.value = props.gameState?.timer_duration || 30;
+        return;
+    }
+
+    const startTime = new Date(props.gameState.timer_started_at).getTime();
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const prevTime = remainingTime.value;
+    remainingTime.value = Math.max(0, (props.gameState?.timer_duration || 30) - elapsed);
+
+    // Play buzzer when timer crosses from >0 to 0
+    if (prevTime > 0 && remainingTime.value === 0) {
+        playBuzzer();
+    }
+};
+
+// Reset buzzer when timer restarts
+watch(() => props.gameState?.timer_started_at, (newVal, oldVal) => {
+    if (newVal && !oldVal) {
+        // Timer just started, reset buzzer flag
+        buzzerPlayed.value = false;
+    }
+});
+
+onMounted(() => {
+    calculateRemainingTime();
+    timerInterval = window.setInterval(calculateRemainingTime, 100);
+});
+
+onUnmounted(() => {
+    if (timerInterval) {
+        clearInterval(timerInterval);
+    }
+});
 
 const sortedTeams = computed(() => {
     return [...props.teams].sort((a, b) => b.total_score - a.total_score);
@@ -150,8 +227,8 @@ const hasMultipleTeamControl = computed(() => {
                 </div>
             </div>
 
-            <!-- Question -->
-            <div v-if="currentQuestion" class="flex-1 flex items-center justify-center">
+            <!-- Question (only shown when timer is running) -->
+            <div v-if="currentQuestion && gameState?.timer_started_at" class="flex-1 flex items-center justify-center">
                 <div class="text-center max-w-4xl">
                     <h2 class="text-6xl font-bold leading-tight">
                         {{ currentQuestion.question_text }}
@@ -159,6 +236,15 @@ const hasMultipleTeamControl = computed(() => {
                     <p class="text-3xl text-yellow-400 mt-6 font-semibold">
                         Answer starts with "{{ currentCard?.letter }}"
                     </p>
+                </div>
+            </div>
+
+            <!-- Waiting for timer to start -->
+            <div v-else-if="currentQuestion && !gameState?.timer_started_at" class="flex-1 flex items-center justify-center">
+                <div class="text-center">
+                    <div class="text-8xl mb-6 animate-bounce">🎯</div>
+                    <p class="text-5xl text-white font-black mb-4">Get Ready!</p>
+                    <p class="text-2xl text-teal-300">Answer starts with "{{ currentCard?.letter }}"</p>
                 </div>
             </div>
 

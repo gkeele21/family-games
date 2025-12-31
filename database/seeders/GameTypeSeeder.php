@@ -75,6 +75,7 @@ class GameTypeSeeder extends Seeder
                 'control_timer_seconds' => 10,
                 'all_play_timer_seconds' => 10,
                 'steal_points_percentage' => 100,
+                'points_mode' => 'fixed', // 'fixed' = use points_per_answer, 'database' = use points from question
                 'points_per_answer' => 100,
                 'multi_team_scoring' => 'full', // 'full' = all teams get full points, 'split' = points split among teams
                 'winning_condition' => 'most_points_after_cards',

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 
 interface Team {
     id: number;
@@ -40,7 +40,43 @@ const props = defineProps<Props>();
 
 // Timer state
 const remainingTime = ref(props.gameState?.timer_duration || 30);
+const buzzerPlayed = ref(false);
 let timerInterval: number | null = null;
+let audioContext: AudioContext | null = null;
+
+// Play buzzer sound using Web Audio API
+const playBuzzer = () => {
+    if (buzzerPlayed.value) return;
+    buzzerPlayed.value = true;
+
+    try {
+        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+        // Resume context if suspended (browser autoplay policy)
+        if (audioContext.state === 'suspended') {
+            audioContext.resume();
+        }
+
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        // Buzzer sound: low frequency square wave
+        oscillator.type = 'square';
+        oscillator.frequency.setValueAtTime(220, audioContext.currentTime);
+
+        // Volume envelope
+        gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1);
+
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 1);
+    } catch (e) {
+        console.error('Could not play buzzer sound:', e);
+    }
+};
 
 // Calculate remaining time based on timer_started_at
 const calculateRemainingTime = () => {
@@ -51,8 +87,22 @@ const calculateRemainingTime = () => {
 
     const startTime = new Date(props.gameState.timer_started_at).getTime();
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const prevTime = remainingTime.value;
     remainingTime.value = Math.max(0, (props.gameState?.timer_duration || 30) - elapsed);
+
+    // Play buzzer when timer crosses from >0 to 0
+    if (prevTime > 0 && remainingTime.value === 0) {
+        playBuzzer();
+    }
 };
+
+// Reset buzzer when timer restarts
+watch(() => props.gameState?.timer_started_at, (newVal, oldVal) => {
+    if (newVal && !oldVal) {
+        // Timer just started, reset buzzer flag
+        buzzerPlayed.value = false;
+    }
+});
 
 // Timer display
 const timerDisplay = computed(() => {
