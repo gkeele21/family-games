@@ -74,7 +74,7 @@ class GameInitializationService
                 $numQuestions = rand($minQuestions, $maxQuestions);
             }
 
-            // Get random questions for this letter
+            // Get random questions for this letter (never reuse questions)
             $questions = Question::where('game_type_id', $gameSession->game_type_id)
                 ->where('is_active', true)
                 ->where('answer_letter', $letter)
@@ -83,20 +83,7 @@ class GameInitializationService
                 ->limit($numQuestions)
                 ->get();
 
-            // If we don't have enough unused questions, allow reuse
-            if ($questions->count() < $numQuestions) {
-                $needed = $numQuestions - $questions->count();
-                $additionalQuestions = Question::where('game_type_id', $gameSession->game_type_id)
-                    ->where('is_active', true)
-                    ->where('answer_letter', $letter)
-                    ->whereIn('id', $usedQuestionIds)
-                    ->inRandomOrder()
-                    ->limit($needed)
-                    ->get();
-                $questions = $questions->concat($additionalQuestions);
-            }
-
-            // Create session questions
+            // Create session questions (only using available unique questions)
             foreach ($questions as $index => $question) {
                 SessionQuestion::create([
                     'game_session_id' => $gameSession->id,

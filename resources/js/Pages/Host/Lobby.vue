@@ -503,6 +503,23 @@ const openSettingsModal = () => {
                                             <span class="text-gray-500">Points/Answer:</span>
                                             <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.points_per_answer }}</span>
                                         </div>
+                                        <div>
+                                            <span class="text-gray-500">Gameplay:</span>
+                                            <span class="font-medium text-gray-700 ml-1">
+                                                {{ settingsForm.settings.gameplay_mode === 'host_reveal' ? 'Host reveals' : 'Team buzzer' }}
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <span class="text-gray-500">Win Condition:</span>
+                                            <span class="font-medium text-gray-700 ml-1">
+                                                <template v-if="settingsForm.settings.winning_condition === 'most_points_after_questions'">
+                                                    Most points after {{ settingsForm.settings.winning_condition_options?.questions_to_play || settingsForm.settings.questions_per_game }} questions
+                                                </template>
+                                                <template v-else-if="settingsForm.settings.winning_condition === 'first_to_points'">
+                                                    First to {{ settingsForm.settings.winning_condition_options?.first_to_points }} points
+                                                </template>
+                                            </span>
+                                        </div>
                                     </template>
 
                                     <!-- Oodles Settings -->
@@ -967,18 +984,6 @@ const openSettingsModal = () => {
                         <div v-else-if="gameSlug === 'america-says'" class="space-y-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Control Timer (seconds)
-                                </label>
-                                <input
-                                    v-model.number="settingsForm.settings.control_timer_seconds"
-                                    type="number"
-                                    min="15"
-                                    max="120"
-                                    class="w-full rounded-lg border-gray-300"
-                                />
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
                                     Answers Per Question
                                 </label>
                                 <select
@@ -990,6 +995,139 @@ const openSettingsModal = () => {
                                     <option :value="7">7 Answers</option>
                                     <option :value="8">8 Answers</option>
                                 </select>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">
+                                    Gameplay Mode
+                                </label>
+                                <select
+                                    v-model="settingsForm.settings.gameplay_mode"
+                                    class="w-full rounded-lg border-gray-300"
+                                >
+                                    <option value="host_reveal">Host Reveals Answers</option>
+                                    <option value="team_buzzer">Teams Buzz In</option>
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">
+                                    {{ settingsForm.settings.gameplay_mode === 'host_reveal'
+                                        ? 'Host manually reveals correct answers'
+                                        : 'Teams buzz in to give their answers' }}
+                                </p>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        Control Timer (seconds)
+                                    </label>
+                                    <input
+                                        v-model.number="settingsForm.settings.control_timer_seconds"
+                                        type="number"
+                                        min="10"
+                                        max="120"
+                                        class="w-full rounded-lg border-gray-300"
+                                    />
+                                    <p class="text-xs text-gray-500 mt-1">Time for the controlling team</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        Steal Timer (seconds)
+                                    </label>
+                                    <input
+                                        v-model.number="settingsForm.settings.steal_timer_seconds"
+                                        type="number"
+                                        min="5"
+                                        max="60"
+                                        class="w-full rounded-lg border-gray-300"
+                                    />
+                                    <p class="text-xs text-gray-500 mt-1">Time for steal round</p>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        Points Per Answer
+                                    </label>
+                                    <input
+                                        v-model.number="settingsForm.settings.points_per_answer"
+                                        type="number"
+                                        min="1"
+                                        max="1000"
+                                        class="w-full rounded-lg border-gray-300"
+                                    />
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        Steal Points (%)
+                                    </label>
+                                    <input
+                                        v-model.number="settingsForm.settings.steal_points_percentage"
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        class="w-full rounded-lg border-gray-300"
+                                    />
+                                    <p class="text-xs text-gray-500 mt-1">% of points during steal round</p>
+                                </div>
+                            </div>
+
+                            <!-- Winning Condition -->
+                            <div class="border-t pt-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-3">
+                                    Winning Condition
+                                </label>
+                                <div class="space-y-3">
+                                    <label class="flex items-start gap-3 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="winning_condition"
+                                            value="most_points_after_questions"
+                                            v-model="settingsForm.settings.winning_condition"
+                                            class="mt-1 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <div class="flex-1">
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-medium text-gray-700">Most points after</span>
+                                                <input
+                                                    v-model.number="settingsForm.settings.questions_per_game"
+                                                    type="number"
+                                                    min="1"
+                                                    max="50"
+                                                    class="w-20 rounded-lg border-gray-300 text-center"
+                                                    @focus="settingsForm.settings.winning_condition = 'most_points_after_questions'"
+                                                />
+                                                <span class="text-gray-700">questions</span>
+                                            </div>
+                                        </div>
+                                    </label>
+
+                                    <label class="flex items-start gap-3 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="winning_condition"
+                                            value="first_to_points"
+                                            v-model="settingsForm.settings.winning_condition"
+                                            class="mt-1 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <div class="flex-1">
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-medium text-gray-700">First team to</span>
+                                                <input
+                                                    v-model.number="settingsForm.settings.winning_condition_options.first_to_points"
+                                                    type="number"
+                                                    min="100"
+                                                    max="10000"
+                                                    step="100"
+                                                    placeholder="1000"
+                                                    class="w-24 rounded-lg border-gray-300 text-center"
+                                                    @focus="settingsForm.settings.winning_condition = 'first_to_points'"
+                                                />
+                                                <span class="text-gray-700">points</span>
+                                            </div>
+                                        </div>
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
