@@ -264,6 +264,21 @@ const saveControllingTeams = async () => {
     fetchState();
 };
 
+const updateTeamScore = async (teamId: number, newScore: number) => {
+    try {
+        await axios.patch(route('host.teams.score.update', {
+            gameSession: props.gameSession.id,
+            team: teamId,
+        }), {
+            score: newScore,
+        });
+        fetchState();
+    } catch (error: any) {
+        console.error('Failed to update score:', error);
+        alert('Error updating score: ' + (error.response?.data?.error || error.message));
+    }
+};
+
 onMounted(() => {
     fetchState();
     pollInterval = window.setInterval(fetchState, 1000);
@@ -304,6 +319,8 @@ onUnmounted(() => {
                             :teams="teams"
                             :active-team-id="gameState?.active_team_id"
                             :controlling-team-ids="currentQuestion?.controlling_team_ids || []"
+                            :editable="true"
+                            @update-score="updateTeamScore"
                         />
 
                         <!-- Set Control Button -->

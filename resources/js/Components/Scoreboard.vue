@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref } from 'vue';
+
 interface TeamMember {
     id: number;
     display_name: string;
@@ -18,11 +20,20 @@ interface Props {
     controllingTeamIds?: number[];
     playerTeamId?: number | null;
     showMembers?: boolean;
+    editable?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
     showMembers: false,
+    editable: false,
 });
+
+const emit = defineEmits<{
+    (e: 'update-score', teamId: number, newScore: number): void;
+}>();
+
+const editingTeamId = ref<number | null>(null);
+const editScore = ref<string>('');
 
 const hasControl = (teamId: number): boolean => {
     return props.controllingTeamIds?.includes(teamId) ?? false;
@@ -30,6 +41,35 @@ const hasControl = (teamId: number): boolean => {
 
 const isPlayerTeam = (teamId: number): boolean => {
     return props.playerTeamId === teamId;
+};
+
+const startEditing = (team: Team) => {
+    if (!props.editable) return;
+    editingTeamId.value = team.id;
+    editScore.value = String(team.total_score);
+};
+
+const saveScore = () => {
+    if (editingTeamId.value !== null) {
+        const newScore = parseInt(editScore.value, 10);
+        if (!isNaN(newScore) && newScore >= 0) {
+            emit('update-score', editingTeamId.value, newScore);
+        }
+        cancelEditing();
+    }
+};
+
+const cancelEditing = () => {
+    editingTeamId.value = null;
+    editScore.value = '';
+};
+
+const handleKeydown = (event: KeyboardEvent) => {
+    if (event.key === 'Enter') {
+        saveScore();
+    } else if (event.key === 'Escape') {
+        cancelEditing();
+    }
 };
 </script>
 
@@ -69,7 +109,27 @@ const isPlayerTeam = (teamId: number): boolean => {
                             CONTROL
                         </span>
                     </div>
-                    <span class="text-2xl font-bold text-white">{{ team.total_score }}</span>
+                    <!-- Editable Score -->
+                    <div v-if="editable && editingTeamId === team.id" class="flex items-center gap-2">
+                        <input
+                            v-model="editScore"
+                            type="number"
+                            min="0"
+                            class="w-20 px-2 py-1 text-xl font-bold text-center bg-white text-gray-900 rounded border-2 border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            @keydown="handleKeydown"
+                            @blur="saveScore"
+                            autofocus
+                        />
+                    </div>
+                    <span
+                        v-else
+                        class="text-2xl font-bold text-white"
+                        :class="{ 'cursor-pointer hover:text-blue-300 transition-colors': editable }"
+                        :title="editable ? 'Click to edit score' : undefined"
+                        @click="startEditing(team)"
+                    >
+                        {{ team.total_score }}
+                    </span>
                 </div>
 
                 <!-- Team Members -->

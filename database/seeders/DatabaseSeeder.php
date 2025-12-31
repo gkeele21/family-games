@@ -21,9 +21,11 @@ class DatabaseSeeder extends Seeder
             'email' => 'test@example.com',
         ]);
 
-        // Seed game types
+        // Seed game types and questions
         $this->call([
             GameTypeSeeder::class,
+            OodlesQuestionSeeder::class,
+            AmericaSaysQuestionSeeder::class,
         ]);
     }
 }

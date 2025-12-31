@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\GameSession;
+use App\Models\Team;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -476,7 +477,38 @@ class HostController extends Controller
             'controlling_team_ids' => null,
         ]);
 
+        // Reset and start the timer for All Play
+        $defaultDuration = $gameSession->getConfig('control_timer_seconds', 30);
+        $state->update([
+            'timer_duration' => $defaultDuration,
+            'timer_started_at' => now(),
+        ]);
+
         return response()->json(['success' => true]);
+    }
+
+    public function updateTeamScore(Request $request, GameSession $gameSession, Team $team)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        // Verify the team belongs to this game session
+        if ($team->game_session_id !== $gameSession->id) {
+            return response()->json(['error' => 'Team does not belong to this game session'], 400);
+        }
+
+        $validated = $request->validate([
+            'score' => 'required|integer|min:0',
+        ]);
+
+        $team->update(['total_score' => $validated['score']]);
+
+        return response()->json([
+            'success' => true,
+            'team_id' => $team->id,
+            'new_score' => $team->total_score,
+        ]);
     }
 
     public function nextQuestion(GameSession $gameSession)
@@ -493,6 +525,11 @@ class HostController extends Controller
             $currentQuestion->update(['status' => 'completed']);
         }
 
+        // Determine the controlling team for the next question
+        // Use active_team_id from state (the team that had/has control)
+        $stateData = $state->state_data ?? [];
+        $nextControllingTeamIds = $stateData['next_controlling_team_ids'] ?? null;
+
         // For card-based games (Oodles), find next question in current card
         if ($state->current_card_id) {
             $currentCard = $state->currentCard;
@@ -503,7 +540,29 @@ class HostController extends Controller
 
             if ($nextQuestion) {
                 $state->update(['current_question_id' => $nextQuestion->id]);
-                $nextQuestion->update(['status' => 'active']);
+
+                // Set up controlling team(s) for the next question
+                if ($nextControllingTeamIds && count($nextControllingTeamIds) > 1) {
+                    // Multiple teams have control (from All Play tie)
+                    $nextQuestion->update([
+                        'status' => 'active',
+                        'controlling_team_id' => null,
+                        'controlling_team_ids' => $nextControllingTeamIds,
+                        'control_status' => 'team_control',
+                    ]);
+                    // Clear the next_controlling_team_ids from state
+                    unset($stateData['next_controlling_team_ids']);
+                    $state->update(['state_data' => $stateData]);
+                } else {
+                    // Single team has control (use active_team_id)
+                    $nextQuestion->update([
+                        'status' => 'active',
+                        'controlling_team_id' => $state->active_team_id,
+                        'controlling_team_ids' => null,
+                        'control_status' => 'team_control',
+                    ]);
+                }
+
                 return response()->json(['success' => true, 'card_complete' => false]);
             }
 
