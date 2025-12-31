@@ -41,6 +41,7 @@ const selectGameType = (gameType: GameType) => {
 
     // Apply fallback defaults for Oodles settings
     if (gameType.slug === 'oodles') {
+        form.settings.points_mode = form.settings.points_mode ?? 'fixed';
         form.settings.points_per_answer = form.settings.points_per_answer ?? 100;
         form.settings.multi_team_scoring = form.settings.multi_team_scoring ?? 'full';
     }
@@ -575,16 +576,49 @@ const getGameTypeColor = (slug: string) => {
                                     </div>
 
                                     <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">
-                                            Points Per Answer
+                                        <label class="block text-sm font-medium text-gray-700 mb-3">
+                                            Points Mode
                                         </label>
-                                        <input
-                                            v-model.number="form.settings.points_per_answer"
-                                            type="number"
-                                            min="1"
-                                            max="1000"
-                                            class="w-full rounded-lg border-gray-300"
-                                        />
+                                        <div class="space-y-3">
+                                            <label class="flex items-start gap-3 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    name="points_mode"
+                                                    value="database"
+                                                    v-model="form.settings.points_mode"
+                                                    class="mt-1 text-blue-600 focus:ring-blue-500"
+                                                />
+                                                <div>
+                                                    <span class="font-medium text-gray-700">Use database values</span>
+                                                    <p class="text-sm text-gray-500">Each question uses its own point value (100-300 based on difficulty)</p>
+                                                </div>
+                                            </label>
+
+                                            <div class="flex items-start gap-3">
+                                                <input
+                                                    type="radio"
+                                                    name="points_mode"
+                                                    value="fixed"
+                                                    v-model="form.settings.points_mode"
+                                                    class="mt-1 text-blue-600 focus:ring-blue-500"
+                                                />
+                                                <div class="flex-1">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="font-medium text-gray-700">Fixed points:</span>
+                                                        <input
+                                                            v-model.number="form.settings.points_per_answer"
+                                                            type="number"
+                                                            min="1"
+                                                            max="1000"
+                                                            class="w-24 rounded-lg border-gray-300 text-center"
+                                                            @focus="form.settings.points_mode = 'fixed'"
+                                                        />
+                                                        <span class="text-gray-700">per answer</span>
+                                                    </div>
+                                                    <p class="text-sm text-gray-500 mt-1">All questions worth the same amount</p>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <div>

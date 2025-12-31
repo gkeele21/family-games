@@ -241,6 +241,9 @@ class HostController extends Controller
             'points_awarded' => $points,
         ]);
 
+        // Track answer statistics
+        $answer->recordReveal();
+
         // Award points to team
         if ($teamId) {
             $team = Team::find($teamId);
@@ -508,9 +511,18 @@ class HostController extends Controller
             return response()->json(['error' => 'Invalid team(s)'], 400);
         }
 
-        // Get points for this question (default 100 for Oodles)
-        // Use ?: instead of ?? because points_available defaults to 0 in the database
-        $totalPoints = $currentQuestion->points_available ?: $gameSession->getConfig('points_per_answer', 100);
+        // Get points for this question
+        // Check points_mode: 'database' uses the answer's points, 'fixed' uses points_per_answer setting
+        $pointsMode = $gameSession->getConfig('points_mode', 'fixed');
+
+        if ($pointsMode === 'database') {
+            // Get points from the answer in the database (first answer for Oodles questions)
+            $answer = $currentQuestion->question->answers()->first();
+            $totalPoints = $answer?->points ?? $gameSession->getConfig('points_per_answer', 100);
+        } else {
+            // Use the fixed points_per_answer setting, or points_available if set on the session question
+            $totalPoints = $currentQuestion->points_available ?: $gameSession->getConfig('points_per_answer', 100);
+        }
 
         // Check multi-team scoring setting: 'full' = all get full points, 'split' = divide among teams
         $multiTeamScoring = $gameSession->getConfig('multi_team_scoring', 'full');
@@ -527,6 +539,9 @@ class HostController extends Controller
         foreach ($teams as $team) {
             $team->addScore($pointsPerTeam);
         }
+
+        // Track question statistics - question was answered correctly
+        $currentQuestion->question->recordCorrect();
 
         // Mark question as completed
         $currentQuestion->update(['status' => 'completed']);
@@ -568,6 +583,9 @@ class HostController extends Controller
         if (!$currentQuestion) {
             return response()->json(['error' => 'No active question'], 400);
         }
+
+        // Track question statistics - question was answered incorrectly (went to All Play)
+        $currentQuestion->question->recordWrong();
 
         // Switch to All Play mode - clear controlling team
         $currentQuestion->update([

@@ -22,6 +22,8 @@ class Question extends Model
         'created_by',
         'is_active',
         'times_used',
+        'times_correct',
+        'times_wrong',
     ];
 
     protected $casts = [
@@ -53,5 +55,41 @@ class Question extends Model
     public function sessionQuestions(): HasMany
     {
         return $this->hasMany(SessionQuestion::class);
+    }
+
+    /**
+     * Increment the times_used counter
+     */
+    public function incrementUsed(): void
+    {
+        $this->increment('times_used');
+    }
+
+    /**
+     * Record a correct answer
+     */
+    public function recordCorrect(): void
+    {
+        $this->increment('times_correct');
+    }
+
+    /**
+     * Record a wrong answer (went to All Play)
+     */
+    public function recordWrong(): void
+    {
+        $this->increment('times_wrong');
+    }
+
+    /**
+     * Get the correct answer percentage
+     */
+    public function getCorrectPercentageAttribute(): ?float
+    {
+        $total = $this->times_correct + $this->times_wrong;
+        if ($total === 0) {
+            return null;
+        }
+        return round(($this->times_correct / $total) * 100, 1);
     }
 }

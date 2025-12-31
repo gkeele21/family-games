@@ -93,6 +93,9 @@ class GameInitializationService
                     'status' => 'pending',
                 ]);
 
+                // Track question usage statistics
+                $question->incrementUsed();
+
                 $usedQuestionIds[] = $question->id;
             }
         }
@@ -132,6 +135,9 @@ class GameInitializationService
                 'status' => 'pending',
                 'points_available' => $this->calculateRoundMultiplier($index + 1, $config),
             ]);
+
+            // Track question usage statistics
+            $question->incrementUsed();
         }
 
         // Add fast money questions if enabled
@@ -152,6 +158,9 @@ class GameInitializationService
                     'status' => 'pending',
                     'control_status' => 'fast_money',
                 ]);
+
+                // Track question usage statistics
+                $question->incrementUsed();
             }
         }
 
@@ -184,6 +193,9 @@ class GameInitializationService
                 'display_order' => $index + 1,
                 'status' => 'pending',
             ]);
+
+            // Track question usage statistics
+            $question->incrementUsed();
         }
 
         // Set the first question as current
