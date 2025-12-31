@@ -16,11 +16,11 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         // Create test user
-        User::factory()->create([
-            'first_name' => 'Test',
-            'last_name' => 'User',
-            'email' => 'test@example.com',
-        ]);
+//        User::factory()->create([
+//            'first_name' => 'Test',
+//            'last_name' => 'User',
+//            'email' => 'test@example.com',
+//        ]);
 
         // Seed game types and questions
         $this->call([
