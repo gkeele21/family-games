@@ -636,6 +636,26 @@ const getGameTypeColor = (slug: string) => {
                                             <option value="split">Split points among teams</option>
                                         </select>
                                     </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">
+                                            Last Question Bonus
+                                        </label>
+                                        <p class="text-sm text-gray-500 mb-2">
+                                            Extra points for answering the last question on a card correctly
+                                        </p>
+                                        <div class="flex items-center gap-2">
+                                            <input
+                                                v-model.number="form.settings.last_question_bonus"
+                                                type="number"
+                                                min="0"
+                                                max="1000"
+                                                class="w-24 rounded-lg border-gray-300 text-center"
+                                            />
+                                            <span class="text-gray-500">bonus points</span>
+                                        </div>
+                                        <p class="text-xs text-gray-400 mt-1">Set to 0 for no bonus</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>

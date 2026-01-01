@@ -546,6 +546,28 @@ class HostController extends Controller
         // Mark question as completed
         $currentQuestion->update(['status' => 'completed']);
 
+        // Check if this was the last question on the card (for Oodles)
+        // Award bonus points if configured
+        $bonusPoints = 0;
+        if ($state->current_card_id) {
+            $remainingQuestions = $gameSession->sessionQuestions()
+                ->where('session_card_id', $state->current_card_id)
+                ->where('status', 'pending')
+                ->count();
+
+            if ($remainingQuestions === 0) {
+                // This was the last question on the card
+                $lastQuestionBonus = $gameSession->getConfig('last_question_bonus', 0);
+                if ($lastQuestionBonus > 0) {
+                    // Award bonus to each winning team
+                    foreach ($teams as $team) {
+                        $team->addScore($lastQuestionBonus);
+                    }
+                    $bonusPoints = $lastQuestionBonus;
+                }
+            }
+        }
+
         // Clear current question from game state
         $state->update(['current_question_id' => null]);
 
@@ -567,7 +589,8 @@ class HostController extends Controller
             'success' => true,
             'team_names' => $teams->pluck('name')->toArray(),
             'points_per_team' => $pointsPerTeam,
-            'total_points' => $pointsPerTeam * $teams->count(),
+            'bonus_points' => $bonusPoints,
+            'total_points' => ($pointsPerTeam + $bonusPoints) * $teams->count(),
         ]);
     }
 

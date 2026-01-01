@@ -77,6 +77,7 @@ class GameTypeSeeder extends Seeder
                 'steal_points_percentage' => 100,
                 'points_mode' => 'fixed', // 'fixed' = use points_per_answer, 'database' = use points from question
                 'points_per_answer' => 100,
+                'last_question_bonus' => 0, // Bonus points for answering the last question on a card correctly
                 'multi_team_scoring' => 'full', // 'full' = all teams get full points, 'split' = points split among teams
                 'winning_condition' => 'most_points_after_cards',
                 'winning_condition_options' => [
