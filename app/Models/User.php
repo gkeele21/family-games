@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Models\Scorekeeper\Household;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -29,6 +30,40 @@ class User extends Authenticatable
     public function gameSessions(): HasMany
     {
         return $this->hasMany(GameSession::class, 'host_user_id');
+    }
+
+    /**
+     * Scorekeeper households this user belongs to (with their role).
+     */
+    public function households(): BelongsToMany
+    {
+        return $this->belongsToMany(Household::class, 'household_user')
+            ->withPivot('role')
+            ->withTimestamps();
+    }
+
+    /**
+     * Returns the user's first household; creates a default one if they have
+     * none. Called on first authenticated load so the scorekeeper is usable.
+     */
+    public function ensureDefaultHousehold(): Household
+    {
+        $existing = $this->households()->first();
+        if ($existing) {
+            return $existing;
+        }
+
+        $household = Household::create([
+            'name' => trim($this->first_name) !== ''
+                ? "{$this->first_name}'s Household"
+                : 'My Household',
+            'owner_user_id' => $this->id,
+        ]);
+
+        $household->members()->attach($this->id, ['role' => 'owner']);
+        $household->ensureRosterPlayer($this);
+
+        return $household;
     }
 
     /**
