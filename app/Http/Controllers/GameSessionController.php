@@ -22,7 +22,7 @@ class GameSessionController extends Controller
             ->orderBy('created_at', 'desc')
             ->get();
 
-        $gameTypes = GameType::all();
+        $gameTypes = GameType::online()->get();
 
         return Inertia::render('GameSessions/Index', [
             'sessions' => $sessions,
@@ -32,7 +32,7 @@ class GameSessionController extends Controller
 
     public function create(): Response
     {
-        $gameTypes = GameType::all();
+        $gameTypes = GameType::online()->get();
 
         return Inertia::render('GameSessions/Create', [
             'gameTypes' => $gameTypes,

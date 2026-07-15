@@ -39,6 +39,18 @@ const showingNavigationDropdown = ref(false);
                                 >
                                     Dashboard
                                 </NavLink>
+                                <NavLink
+                                    :href="route('games.index')"
+                                    :active="route().current('games.*')"
+                                >
+                                    Trivia
+                                </NavLink>
+                                <NavLink
+                                    :href="route('scorekeeper.home')"
+                                    :active="route().current('scorekeeper.*')"
+                                >
+                                    Scorekeeper
+                                </NavLink>
                             </div>
                         </div>
 
@@ -145,6 +157,18 @@ const showingNavigationDropdown = ref(false);
                             :active="route().current('dashboard')"
                         >
                             Dashboard
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink
+                            :href="route('games.index')"
+                            :active="route().current('games.*')"
+                        >
+                            Trivia
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink
+                            :href="route('scorekeeper.home')"
+                            :active="route().current('scorekeeper.*')"
+                        >
+                            Scorekeeper
                         </ResponsiveNavLink>
                     </div>
 
