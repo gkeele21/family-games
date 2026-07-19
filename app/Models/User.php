@@ -72,11 +72,117 @@ class User extends Authenticatable
      * @var list<string>
      */
     protected $fillable = [
+        'name',
         'first_name',
         'last_name',
         'email',
         'password',
+        'role',
+        'guest_token',
+        'avatar',
     ];
+
+    /**
+     * Global role tier (PropOff): manager > admin > user > guest. Distinct
+     * from per-household roles, which live on the household pivot.
+     */
+    public function isGuest(): bool
+    {
+        return $this->role === 'guest';
+    }
+
+    public function isManager(): bool
+    {
+        return $this->role === 'manager';
+    }
+
+    public function hasAdminAccess(): bool
+    {
+        return in_array($this->role, ['admin', 'manager'], true);
+    }
+
+    /**
+     * Split a single entered name into first/last the same way everywhere
+     * (PropOff join flows take one name field).
+     */
+    public static function splitName(string $name): array
+    {
+        $parts = preg_split('/\s+/', trim($name), 2) ?: [];
+
+        return [
+            'first_name' => $parts[0] ?? '',
+            'last_name'  => $parts[1] ?? '',
+        ];
+    }
+
+    // ---- PropOff module -----------------------------------------------
+
+    public function propoffGroups(): BelongsToMany
+    {
+        return $this->belongsToMany(\App\Models\PropOff\Group::class, 'propoff_group_user', 'user_id', 'group_id')
+            ->withPivot('joined_at', 'is_captain')
+            ->withTimestamps();
+    }
+
+    public function captainGroups(): BelongsToMany
+    {
+        return $this->propoffGroups()->wherePivot('is_captain', true);
+    }
+
+    /** Source-app alias for captainGroups(). */
+    public function captainOf(): BelongsToMany
+    {
+        return $this->captainGroups();
+    }
+
+    public function isCaptainOf(\App\Models\PropOff\Group|int $group): bool
+    {
+        $groupId = $group instanceof \App\Models\PropOff\Group ? $group->id : $group;
+
+        return $this->captainGroups()->where('propoff_groups.id', $groupId)->exists();
+    }
+
+    public function isCaptain(): bool
+    {
+        return $this->captainGroups()->exists();
+    }
+
+    public function propoffEntries(): HasMany
+    {
+        return $this->hasMany(\App\Models\PropOff\Entry::class, 'user_id');
+    }
+
+    public function canEditEntry(\App\Models\PropOff\Entry $entry): bool
+    {
+        // Must own the entry, the group must still accept entries, and the
+        // event must not be completed (source-app semantics).
+        if ($this->id !== $entry->user_id) {
+            return false;
+        }
+        if (! $entry->group->acceptingEntries()) {
+            return false;
+        }
+        if ($entry->event->status === 'completed') {
+            return false;
+        }
+
+        return true;
+    }
+
+    public function createdGroups(): HasMany
+    {
+        return $this->hasMany(\App\Models\PropOff\Group::class, 'created_by');
+    }
+
+    public function createdEvents(): HasMany
+    {
+        return $this->hasMany(\App\Models\PropOff\Event::class, 'created_by');
+    }
+
+    public function createdQuestionTemplates(): HasMany
+    {
+        return $this->hasMany(\App\Models\PropOff\QuestionTemplate::class, 'created_by');
+    }
 
     /**
      * The accessors to append to the model's array form.
@@ -96,6 +202,17 @@ class User extends Authenticatable
     }
 
     /**
+     * Writing a single name transparently splits it — PropOff flows (and its
+     * tests) address users by one name field.
+     */
+    public function setNameAttribute(string $value): void
+    {
+        $split = self::splitName($value);
+        $this->attributes['first_name'] = $split['first_name'];
+        $this->attributes['last_name'] = $split['last_name'];
+    }
+
+    /**
      * The attributes that should be hidden for serialization.
      *
      * @var list<string>
@@ -103,6 +220,7 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'guest_token',
     ];
 
     /**

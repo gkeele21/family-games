@@ -2,10 +2,12 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import DeleteUserForm from './Partials/DeleteUserForm.vue';
 import UpdatePasswordForm from './Partials/UpdatePasswordForm.vue';
+import SetPasswordForm from './Partials/SetPasswordForm.vue';
 import UpdateProfileInformationForm from './Partials/UpdateProfileInformationForm.vue';
 import { Head } from '@inertiajs/vue3';
 
 defineProps<{
+    hasPassword?: boolean;
     mustVerifyEmail?: boolean;
     status?: string;
 }>();
@@ -38,7 +40,8 @@ defineProps<{
                 <div
                     class="bg-white p-4 shadow sm:rounded-lg sm:p-8"
                 >
-                    <UpdatePasswordForm class="max-w-xl" />
+                    <UpdatePasswordForm v-if="hasPassword !== false" class="max-w-xl" />
+                    <SetPasswordForm v-else class="max-w-xl" />
                 </div>
 
                 <div

@@ -51,6 +51,12 @@ const showingNavigationDropdown = ref(false);
                                 >
                                     Scorekeeper
                                 </NavLink>
+                                <NavLink
+                                    :href="route('propoff.home')"
+                                    :active="route().current('propoff.*')"
+                                >
+                                    PropOff
+                                </NavLink>
                             </div>
                         </div>
 
@@ -169,6 +175,12 @@ const showingNavigationDropdown = ref(false);
                             :active="route().current('scorekeeper.*')"
                         >
                             Scorekeeper
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink
+                            :href="route('propoff.home')"
+                            :active="route().current('propoff.*')"
+                        >
+                            PropOff
                         </ResponsiveNavLink>
                     </div>
 

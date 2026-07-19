@@ -1,3 +1,152 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+
+/*
+ * PropOff module theme — ported from the source app with one structural
+ * change: every token that lived on :root/html is scoped to the
+ * .propoff-app wrapper, so the dark mode exists ONLY inside the module.
+ * Colors are RGB triplets so Tailwind opacity modifiers work
+ * (rgb(var(--color-x) / <alpha-value>)).
+ */
+
+@layer base {
+    .propoff-app {
+        /* Backgrounds - layered surface hierarchy */
+        --color-bg: 64 64 64;
+        --color-surface: 31 31 31;
+        --color-surface-elevated: 38 38 38;
+        --color-surface-overlay: 51 51 51;
+        --color-surface-inset: 15 15 15;
+        --color-surface-header: 23 23 23;
+
+        /* Text */
+        --color-text: 245 245 245;
+        --color-text-muted: 163 163 163;
+        --color-text-subtle: 115 115 115;
+
+        /* Borders */
+        --color-border: 64 64 64;
+        --color-border-strong: 82 82 82;
+
+        /* Semantic (consistent across accent themes) */
+        --color-success: 87 208 37;
+        --color-warning: 244 118 18;
+        --color-danger: 239 68 68;
+        --color-info: 59 130 246;
+
+        /* Theme-adaptive primary (default green) */
+        --color-primary: 87 208 37;
+        --color-primary-hover: 77 184 32;
+
+        /* The wrapper IS the page ground inside the module */
+        background-color: rgb(var(--color-bg));
+        color: rgb(var(--color-text));
+        min-height: 100vh;
+    }
+}
+
+@layer components {
+    .bg-surface-base {
+        background-color: rgb(var(--color-bg));
+    }
+
+    .bg-surface-card {
+        background-color: rgb(var(--color-surface));
+    }
+
+    .bg-surface-elevated {
+        background-color: rgb(var(--color-surface-elevated));
+    }
+
+    .border-themed {
+        border-color: rgb(var(--color-border));
+    }
+
+    .text-themed {
+        color: rgb(var(--color-text));
+    }
+
+    .text-themed-muted {
+        color: rgb(var(--color-text-muted));
+    }
+
+    .focus-glow:focus {
+        box-shadow:
+            0 0 0 1px rgb(var(--color-text)),
+            0 0 0 3px rgb(var(--color-primary)),
+            0 0 15px rgb(var(--color-primary) / 0.3) !important;
+        border-color: transparent !important;
+    }
+
+    .checked-glow {
+        box-shadow:
+            0 0 0 1px rgb(var(--color-text)),
+            0 0 0 3px rgb(var(--color-primary)),
+            0 0 15px rgb(var(--color-primary) / 0.3);
+    }
+
+    .checked-glow-info {
+        box-shadow:
+            0 0 0 1px rgb(var(--color-text)),
+            0 0 0 3px rgb(var(--color-info)),
+            0 0 15px rgb(var(--color-info) / 0.3);
+    }
+
+    .checked-glow-success {
+        box-shadow:
+            0 0 0 1px rgb(var(--color-text)),
+            0 0 0 3px rgb(var(--color-success)),
+            0 0 15px rgb(var(--color-success) / 0.3);
+    }
+
+    .focus-glow-sm:focus {
+        box-shadow:
+            0 0 0 2px rgb(var(--color-primary)),
+            0 0 8px rgb(var(--color-primary) / 0.4) !important;
+        outline: none !important;
+    }
+
+    .focus-within-glow:focus-within {
+        box-shadow:
+            0 0 0 1px rgb(var(--color-text)),
+            0 0 0 3px rgb(var(--color-primary)),
+            0 0 15px rgb(var(--color-primary) / 0.3) !important;
+        border-color: transparent !important;
+    }
+
+    .focus-within-glow-info:focus-within {
+        box-shadow:
+            0 0 0 1px rgb(var(--color-text)),
+            0 0 0 3px rgb(var(--color-info)),
+            0 0 15px rgb(var(--color-info) / 0.3) !important;
+        border-color: transparent !important;
+    }
+}
+
+/* Accent themes + background modes — element-agnostic classes applied to the
+ * .propoff-app wrapper by useTheme. Outside @layer for cascade priority. */
+
+.theme-green {
+    --color-primary: 87 208 37;
+    --color-primary-hover: 77 184 32;
+}
+
+.theme-blue {
+    --color-primary: 59 130 246;
+    --color-primary-hover: 37 99 235;
+}
+
+.theme-orange {
+    --color-primary: 244 118 18;
+    --color-primary-hover: 234 88 12;
+}
+
+.bg-mode-slate {
+    /* default — uses base values */
+}
+
+.bg-mode-cream {
+    --color-bg: 245 243 239;
+}

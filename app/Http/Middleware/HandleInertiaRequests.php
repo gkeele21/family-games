@@ -37,6 +37,12 @@ class HandleInertiaRequests extends Middleware
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
+                // PropOff join/guest flows
+                'info' => fn () => $request->session()->get('info'),
+                'magic_link' => fn () => $request->session()->get('magic_link'),
+                'show_magic_link' => fn () => $request->session()->get('show_magic_link'),
+                'step' => fn () => $request->session()->get('step'),
+                'verifyEntry' => fn () => $request->session()->get('verifyEntry'),
             ],
             // Scorekeeper household switcher (band dropdown).
             'households' => fn () => $request->user()

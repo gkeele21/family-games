@@ -1,0 +1,100 @@
+<template>
+    <teleport defer to="#propoff-app">
+        <transition leave-active-class="duration-200">
+            <div v-show="show" class="fixed inset-0 overflow-y-auto px-4 py-6 sm:px-0 z-50" scroll-region>
+                <!-- Backdrop -->
+                <transition
+                    enter-active-class="ease-out duration-300"
+                    enter-from-class="opacity-0"
+                    enter-to-class="opacity-100"
+                    leave-active-class="ease-in duration-200"
+                    leave-from-class="opacity-100"
+                    leave-to-class="opacity-0"
+                >
+                    <div v-show="show" class="fixed inset-0 transform transition-all" @click="close">
+                        <div class="absolute inset-0 bg-black opacity-50" />
+                    </div>
+                </transition>
+
+                <!-- Modal Panel -->
+                <transition
+                    enter-active-class="ease-out duration-300"
+                    enter-from-class="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                    enter-to-class="opacity-100 translate-y-0 sm:scale-100"
+                    leave-active-class="ease-in duration-200"
+                    leave-from-class="opacity-100 translate-y-0 sm:scale-100"
+                    leave-to-class="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                >
+                    <div
+                        v-show="show"
+                        class="mb-6 bg-surface rounded-lg overflow-hidden shadow-xl transform transition-all sm:w-full sm:mx-auto border border-border"
+                        :class="maxWidthClass"
+                    >
+                        <!-- Close button -->
+                        <button
+                            v-if="showCloseButton && closeable"
+                            @click="close"
+                            class="absolute top-4 right-4 text-subtle hover:text-body transition-colors z-10"
+                            type="button"
+                        >
+                            <Icon name="xmark" size="lg" />
+                            <span class="sr-only">Close</span>
+                        </button>
+
+                        <slot v-if="show" />
+                    </div>
+                </transition>
+            </div>
+        </transition>
+    </teleport>
+</template>
+
+<script setup>
+import { computed, onMounted, onUnmounted, watch } from 'vue';
+import Icon from '@/Components/PropOff/Base/Icon.vue';
+
+const props = defineProps({
+    show: { type: Boolean, default: false },
+    maxWidth: { type: String, default: '2xl' },
+    closeable: { type: Boolean, default: true },
+    showCloseButton: { type: Boolean, default: false },
+});
+
+const emit = defineEmits(['close']);
+
+watch(() => props.show, (isOpen) => {
+    document.body.style.overflow = isOpen ? 'hidden' : null;
+});
+
+const close = () => {
+    if (props.closeable) {
+        emit('close');
+    }
+};
+
+const closeOnEscape = (e) => {
+    if (e.key === 'Escape' && props.show) {
+        close();
+    }
+};
+
+onMounted(() => document.addEventListener('keydown', closeOnEscape));
+
+onUnmounted(() => {
+    document.removeEventListener('keydown', closeOnEscape);
+    document.body.style.overflow = null;
+});
+
+const maxWidthClass = computed(() => {
+    return {
+        'sm': 'sm:max-w-sm',
+        'md': 'sm:max-w-md',
+        'lg': 'sm:max-w-lg',
+        'xl': 'sm:max-w-xl',
+        '2xl': 'sm:max-w-2xl',
+        '3xl': 'sm:max-w-3xl',
+        '4xl': 'sm:max-w-4xl',
+        'full': 'sm:max-w-full sm:mx-4',
+    }[props.maxWidth] || 'sm:max-w-2xl';
+});
+</script>

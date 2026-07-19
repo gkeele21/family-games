@@ -19,6 +19,12 @@ class HouseholdController extends Controller
     public function home(Request $request)
     {
         $user = $request->user();
+
+        // PropOff guests are lightweight accounts — no household provisioning.
+        if ($user->isGuest()) {
+            return redirect('/');
+        }
+
         $user->ensureDefaultHousehold();
 
         if ($user->households()->count() === 1) {

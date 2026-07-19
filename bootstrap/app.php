@@ -12,15 +12,20 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
         then: function () {
             Route::middleware('web')->group(base_path('routes/scorekeeper.php'));
+            Route::middleware('web')->group(base_path('routes/propoff.php'));
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->web(append: [
+            \App\Http\Middleware\GuestCookieMiddleware::class,
             \App\Http\Middleware\HandleInertiaRequests::class,
             \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
         ]);
 
-        //
+        $middleware->alias([
+            'admin'   => \App\Http\Middleware\IsAdmin::class,
+            'manager' => \App\Http\Middleware\IsManager::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

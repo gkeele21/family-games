@@ -158,7 +158,7 @@ onMounted(() => {
             </p>
 
             <!-- The two halves of the product -->
-            <div class="mb-14 grid grid-cols-1 gap-6 text-left md:grid-cols-2">
+            <div class="mb-14 grid grid-cols-1 gap-6 text-left md:grid-cols-3">
                 <!-- Party games -->
                 <div
                     class="flex flex-col rounded-2xl border-t-4 border-[#d24141] bg-[#fffdf7] p-8 text-gray-800 shadow-2xl"
@@ -225,6 +225,41 @@ onMounted(() => {
                             class="rounded-full bg-[#0b5d3b] px-6 py-2.5 text-sm font-bold text-[#f7f1e3] shadow hover:bg-[#0d6f47]"
                         >
                             Start keeping score
+                        </Link>
+                    </div>
+                </div>
+
+                <!-- PropOff (dark, matching its in-module design) -->
+                <div
+                    class="flex flex-col rounded-2xl border-t-4 border-[#57d025] bg-[#1f1f1f] p-8 text-gray-200 shadow-2xl"
+                >
+                    <div class="mb-3 text-4xl">🏈</div>
+                    <h2 class="mb-1 text-2xl font-extrabold text-[#f5f5f5]">
+                        PropOff
+                    </h2>
+                    <p class="mb-4 text-sm font-semibold uppercase tracking-wide text-[#57d025]">
+                        Predict the big game
+                    </p>
+                    <ul class="mb-6 space-y-2 text-sm text-gray-400">
+                        <li>• Prop-bet style predictions for any event</li>
+                        <li>• Captains run groups; friends join with a link — no
+                            account needed</li>
+                        <li>• Grade the answers live and crown a champion</li>
+                    </ul>
+                    <div class="mt-auto flex flex-wrap gap-3">
+                        <Link
+                            v-if="$page.props.auth.user"
+                            :href="route('propoff.home')"
+                            class="rounded-full bg-[#57d025] px-6 py-2.5 text-sm font-bold text-[#0f0f0f] shadow hover:bg-[#4db820]"
+                        >
+                            Make your picks
+                        </Link>
+                        <Link
+                            v-else-if="canRegister"
+                            :href="route('register')"
+                            class="rounded-full bg-[#57d025] px-6 py-2.5 text-sm font-bold text-[#0f0f0f] shadow hover:bg-[#4db820]"
+                        >
+                            Start predicting
                         </Link>
                     </div>
                 </div>

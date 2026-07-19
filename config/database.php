@@ -43,6 +43,21 @@ return [
             'transaction_mode' => 'DEFERRED',
         ],
 
+        // Source connection for the one-time PropOff production import
+        // (point at a local restore of the prod dump).
+        'propoff_source' => [
+            'driver' => 'mysql',
+            'host' => env('PROPOFF_SOURCE_HOST', '127.0.0.1'),
+            'port' => env('PROPOFF_SOURCE_PORT', '3306'),
+            'database' => env('PROPOFF_SOURCE_DATABASE', 'propoff'),
+            'username' => env('PROPOFF_SOURCE_USERNAME', env('DB_USERNAME')),
+            'password' => env('PROPOFF_SOURCE_PASSWORD', env('DB_PASSWORD')),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'strict' => true,
+        ],
+
         'mysql' => [
             'driver' => 'mysql',
             'url' => env('DB_URL'),
