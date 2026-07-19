@@ -5,6 +5,7 @@ namespace App\Mail;
 use App\Models\Scorekeeper\HouseholdInvite;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
+use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
@@ -19,8 +20,14 @@ class HouseholdInvitation extends Mailable
 
     public function envelope(): Envelope
     {
+        // Replies go to a real inbox, not the sending address.
+        $replyTo = config('mail.reply_to.address')
+            ? [new Address(config('mail.reply_to.address'), config('mail.reply_to.name'))]
+            : [];
+
         return new Envelope(
             subject: "You're invited to join {$this->invite->household->name}",
+            replyTo: $replyTo,
         );
     }
 

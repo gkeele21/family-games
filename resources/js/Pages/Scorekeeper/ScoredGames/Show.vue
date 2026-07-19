@@ -250,6 +250,16 @@ const membersFor = (competitorId: number): string =>
         ?.members.map((m) => m.name)
         .join(', ') ?? '';
 
+// Players in this game without an account — invitable even after the game
+// completes, so a finished game night can still turn into sign-ups.
+const uninvitedMembers = computed(() =>
+    props.competitors.flatMap((c) =>
+        c.members
+            .filter((m) => !m.has_account)
+            .map((m) => ({ ...m, competitor: c.name })),
+    ),
+);
+
 // Colors stay attached to a competitor (by its Manage position), not the column
 // slot — so sorting the grid doesn't reshuffle anyone's color.
 const colorFor = (competitorId: number) => colorAt(colorIndexFor(competitorId));
@@ -1093,6 +1103,47 @@ const deleteGame = () => {
                             />
                         </div>
                     </div>
+                </div>
+
+                <!-- Invite players from a completed game -->
+                <div
+                    v-if="
+                        game.is_complete &&
+                        can.score_all &&
+                        uninvitedMembers.length
+                    "
+                    class="overflow-hidden bg-white shadow-sm sm:rounded-lg"
+                >
+                    <div class="border-b px-6 py-4">
+                        <h3 class="text-lg font-medium text-[#0b5d3b]">
+                            Invite players
+                        </h3>
+                        <p class="mt-1 text-sm text-gray-500">
+                            These players don't have accounts yet — invite them
+                            and they'll see this game (and their scores) when
+                            they sign up.
+                        </p>
+                    </div>
+                    <ul class="divide-y divide-gray-100">
+                        <li
+                            v-for="m in uninvitedMembers"
+                            :key="m.id"
+                            class="flex items-center justify-between gap-3 px-6 py-3"
+                        >
+                            <span class="text-gray-900">
+                                {{ m.name }}
+                                <span
+                                    v-if="game.team_based"
+                                    class="text-sm text-gray-400"
+                                    >· {{ m.competitor }}</span
+                                >
+                            </span>
+                            <InvitePlayerControl
+                                :household-id="household.id"
+                                :player-id="m.id"
+                            />
+                        </li>
+                    </ul>
                 </div>
 
                 <!-- Actions (scorekeepers only) -->
