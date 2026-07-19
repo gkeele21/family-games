@@ -25,8 +25,9 @@ class ScoreGameService
         GameTemplate $template,
         array $competitors,
         User $creator,
+        ?string $playedAt = null,
     ): ScoredGame {
-        return DB::transaction(function () use ($household, $template, $competitors, $creator) {
+        return DB::transaction(function () use ($household, $template, $competitors, $creator, $playedAt) {
             $game = ScoredGame::create([
                 'household_id'           => $household->id,
                 'game_template_id'       => $template->id,
@@ -38,7 +39,8 @@ class ScoreGameService
                 'score_fields'           => $template->score_fields,
                 'team_based'             => $template->team_based,
                 'allow_self_scoring'     => (bool) $template->allow_self_scoring,
-                'started_at'             => now(),
+                // Play date: backdatable so past game nights can be recorded.
+                'started_at'             => $playedAt ? \Carbon\Carbon::parse($playedAt) : now(),
                 'is_complete'            => false,
                 'created_by_user_id'     => $creator->id,
             ]);

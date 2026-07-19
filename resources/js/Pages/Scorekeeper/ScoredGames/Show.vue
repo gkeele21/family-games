@@ -7,7 +7,7 @@ import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
-import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 
 interface ScoreField {
@@ -39,6 +39,7 @@ const props = defineProps<{
         is_complete: boolean;
         team_based: boolean;
         allow_self_scoring: boolean;
+        started_at: string | null;
         score_fields: ScoreField[];
         household_id: number;
     };
@@ -192,6 +193,31 @@ const rules = computed(() => {
     if (props.game.team_based) parts.push('teams');
     return parts.join(' · ');
 });
+
+// Play date: displayed next to the rules, editable by scorers.
+const playedOnLabel = computed(() =>
+    props.game.started_at
+        ? new Date(`${props.game.started_at}T00:00:00`).toLocaleDateString(
+              undefined,
+              { year: 'numeric', month: 'short', day: 'numeric' },
+          )
+        : '',
+);
+const editingDate = ref(false);
+const dateForm = useForm({
+    played_at: props.game.started_at ?? new Date().toISOString().slice(0, 10),
+});
+const startEditDate = () => {
+    dateForm.played_at =
+        props.game.started_at ?? new Date().toISOString().slice(0, 10);
+    editingDate.value = true;
+};
+const saveDate = () => {
+    dateForm.patch(route('scorekeeper.games.playdate.update', props.game.id), {
+        preserveScroll: true,
+        onSuccess: () => (editingDate.value = false),
+    });
+};
 
 const winners = computed(() =>
     props.game.is_complete ? props.standings.filter((s) => s.rank === 1) : [],
@@ -465,6 +491,44 @@ const deleteGame = () => {
                         {{ game.name }}
                     </h2>
                     <span class="text-sm text-gray-500">{{ rules }}</span>
+                    <span
+                        class="flex items-center gap-1.5 text-sm text-gray-500"
+                    >
+                        <template v-if="!editingDate">
+                            <span v-if="playedOnLabel">· {{ playedOnLabel }}</span>
+                            <button
+                                v-if="can.score_all"
+                                type="button"
+                                class="text-gray-400 hover:text-[#0b5d3b]"
+                                title="Edit play date"
+                                @click="startEditDate"
+                            >
+                                ✎
+                            </button>
+                        </template>
+                        <template v-else>
+                            <input
+                                v-model="dateForm.played_at"
+                                type="date"
+                                class="rounded-md border-gray-300 py-0.5 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            />
+                            <button
+                                type="button"
+                                class="font-medium text-[#0b5d3b] hover:text-[#084a2f] disabled:opacity-40"
+                                :disabled="dateForm.processing"
+                                @click="saveDate"
+                            >
+                                Save
+                            </button>
+                            <button
+                                type="button"
+                                class="text-gray-400 hover:text-gray-600"
+                                @click="editingDate = false"
+                            >
+                                Cancel
+                            </button>
+                        </template>
+                    </span>
                 </div>
                 <div
                     v-if="page.props.flash?.success"

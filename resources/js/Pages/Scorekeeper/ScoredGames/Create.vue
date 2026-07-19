@@ -29,6 +29,7 @@ const props = defineProps<{
 
 const form = useForm({
     game_template_id: props.templates[0]?.id ?? null,
+    played_at: new Date().toISOString().slice(0, 10), // today; backdatable
     player_ids: [] as number[],
     teams: [] as Array<{ name: string; player_ids: number[] }>,
 });
@@ -218,6 +219,25 @@ const createTemplate = () => {
                         <InputError
                             class="mt-1"
                             :message="form.errors.game_template_id"
+                        />
+                    </div>
+
+                    <!-- Play date (backdatable for games played earlier) -->
+                    <div>
+                        <InputLabel for="played-at" value="Play date" />
+                        <input
+                            id="played-at"
+                            v-model="form.played_at"
+                            type="date"
+                            class="mt-1 block rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                        />
+                        <p class="mt-1 text-xs text-gray-500">
+                            Recording a game from a while back? Set the date it
+                            was actually played.
+                        </p>
+                        <InputError
+                            class="mt-1"
+                            :message="form.errors.played_at"
                         />
                     </div>
 

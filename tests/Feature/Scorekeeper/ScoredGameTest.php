@@ -210,6 +210,94 @@ class ScoredGameTest extends TestCase
         $this->assertDatabaseMissing('scored_game_competitors', ['scored_game_id' => $game->id]);
     }
 
+    public function test_scorecard_shows_first_names_disambiguated_by_last_initials(): void
+    {
+        $user = User::factory()->create();
+        $household = $this->householdOwnedBy($user);
+        // Unique first name → first name only. Same first name → extend the
+        // last name letter by letter until distinct (Keele vs Kane → Ke/Ka).
+        $tara = $household->players()->create(['name' => 'Tara Smith']);
+        $g1 = $household->players()->create(['name' => 'Grant Keele']);
+        $g2 = $household->players()->create(['name' => 'Grant Kane']);
+        $template = GameTemplate::create([
+            'name' => 'T', 'household_id' => $household->id, 'is_system' => false,
+            'low_score_wins' => false,
+            'score_fields' => [['key' => 'score', 'label' => 'Score', 'counts_toward_total' => true]],
+        ]);
+
+        $this->actingAs($user)->post(
+            route('scorekeeper.households.games.store', $household),
+            ['game_template_id' => $template->id, 'player_ids' => [$tara->id, $g1->id, $g2->id]],
+        );
+        $game = ScoredGame::firstOrFail();
+
+        $this->actingAs($user)
+            ->get(route('scorekeeper.games.show', $game))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('competitors.0.name', 'Tara')
+                ->where('competitors.1.name', 'Grant Ke')
+                ->where('competitors.2.name', 'Grant Ka'));
+    }
+
+    public function test_game_can_be_backdated_with_a_play_date(): void
+    {
+        $user = User::factory()->create();
+        $household = $this->householdOwnedBy($user);
+        $alice = $household->players()->create(['name' => 'Alice']);
+        $bob = $household->players()->create(['name' => 'Bob']);
+        $template = GameTemplate::create([
+            'name' => 'T', 'household_id' => $household->id, 'is_system' => false,
+            'low_score_wins' => false,
+            'score_fields' => [['key' => 'score', 'label' => 'Score', 'counts_toward_total' => true]],
+        ]);
+
+        $this->actingAs($user)->post(
+            route('scorekeeper.households.games.store', $household),
+            [
+                'game_template_id' => $template->id,
+                'player_ids'       => [$alice->id, $bob->id],
+                'played_at'        => '2026-03-14',
+            ],
+        )->assertRedirect();
+
+        $game = ScoredGame::firstOrFail();
+        $this->assertSame('2026-03-14', $game->started_at->toDateString());
+    }
+
+    public function test_play_date_can_be_edited_by_scorer_only(): void
+    {
+        $user = User::factory()->create();
+        $household = $this->householdOwnedBy($user);
+        $alice = $household->players()->create(['name' => 'Alice']);
+        $bob = $household->players()->create(['name' => 'Bob']);
+        $template = GameTemplate::create([
+            'name' => 'T', 'household_id' => $household->id, 'is_system' => false,
+            'low_score_wins' => false,
+            'score_fields' => [['key' => 'score', 'label' => 'Score', 'counts_toward_total' => true]],
+        ]);
+        $this->actingAs($user)->post(
+            route('scorekeeper.households.games.store', $household),
+            ['game_template_id' => $template->id, 'player_ids' => [$alice->id, $bob->id]],
+        );
+        $game = ScoredGame::firstOrFail();
+
+        $this->actingAs($user)
+            ->patch(route('scorekeeper.games.playdate.update', $game), [
+                'played_at' => '2026-01-02',
+            ])
+            ->assertRedirect();
+        $this->assertSame('2026-01-02', $game->fresh()->started_at->toDateString());
+
+        // Guests can't rewrite history.
+        $guest = User::factory()->create();
+        $household->members()->attach($guest->id, ['role' => 'guest']);
+        $this->actingAs($guest)
+            ->patch(route('scorekeeper.games.playdate.update', $game), [
+                'played_at' => '2026-02-03',
+            ])
+            ->assertForbidden();
+    }
+
     public function test_non_member_cannot_start_game(): void
     {
         $owner = User::factory()->create();

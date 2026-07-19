@@ -70,11 +70,21 @@ class ScoredGameController extends Controller
 
         $rosterIds = $household->players()->pluck('players.id')->all();
 
+        $validated = $request->validate([
+            'played_at' => 'nullable|date',
+        ]);
+
         $competitors = $template->team_based
             ? $this->teamCompetitors($request, $rosterIds)
             : $this->individualCompetitors($request, $household, $rosterIds);
 
-        $game = $this->service->startFromTemplate($household, $template, $competitors, $request->user());
+        $game = $this->service->startFromTemplate(
+            $household,
+            $template,
+            $competitors,
+            $request->user(),
+            $validated['played_at'] ?? null,
+        );
 
         return redirect()
             ->route('scorekeeper.games.show', $game)
@@ -139,16 +149,36 @@ class ScoredGameController extends Controller
 
         $scoredGame->load(['competitors.players', 'rounds.scores']);
 
+        // First-name-only display, disambiguated across everyone in the game.
+        $display = $this->displayNames($scoredGame->competitors->flatMap->players);
+
         $competitors = $scoredGame->competitors->map(fn ($c) => [
             'id'            => $c->id,
-            'name'          => $c->name,
+            // Individual columns show the player's short name; teams keep
+            // their team name.
+            'name'          => $scoredGame->team_based
+                ? $c->name
+                : ($display[$c->players->first()?->id] ?? $c->name),
             'display_order' => $c->display_order,
             'members'       => $c->players->map(fn ($p) => [
                 'id'          => $p->id,
-                'name'        => $p->name,
+                'name'        => $display[$p->id] ?? $p->name,
                 'has_account' => $p->user_id !== null,
             ])->values(),
         ])->values();
+
+        $standings = $this->service->standings($scoredGame);
+        if (! $scoredGame->team_based) {
+            $byId = $scoredGame->competitors->keyBy('id');
+            $standings = array_map(function ($row) use ($byId, $display) {
+                $playerId = $byId[$row['competitor_id']]?->players->first()?->id;
+                if ($playerId !== null && isset($display[$playerId])) {
+                    $row['name'] = $display[$playerId];
+                }
+
+                return $row;
+            }, $standings);
+        }
 
         // Roster players not already in the game — offered for mid-game adds.
         $participatingIds = $scoredGame->competitors
@@ -180,6 +210,7 @@ class ScoredGameController extends Controller
                 'is_complete'    => $scoredGame->is_complete,
                 'team_based'     => $scoredGame->team_based,
                 'allow_self_scoring' => $scoredGame->allow_self_scoring,
+                'started_at'     => $scoredGame->started_at?->toDateString(),
                 'score_fields'   => $scoredGame->score_fields,
                 'household_id'   => $scoredGame->household_id,
             ],
@@ -193,7 +224,7 @@ class ScoredGameController extends Controller
             'rounds'         => $rounds,
             'totals'         => $this->service->totals($scoredGame),
             'fieldSubtotals' => $this->service->fieldSubtotals($scoredGame),
-            'standings'      => $this->service->standings($scoredGame),
+            'standings'      => $standings,
             'completionMet'  => $this->service->completionMet($scoredGame),
         ]);
     }
@@ -244,6 +275,25 @@ class ScoredGameController extends Controller
         return back();
     }
 
+    /**
+     * Correct the play date of a game (works on completed games too, so
+     * history can be fixed after the fact). Scorers only.
+     */
+    public function updatePlayDate(Request $request, ScoredGame $scoredGame)
+    {
+        $this->ensureScorer($request, $scoredGame->household);
+
+        $validated = $request->validate([
+            'played_at' => 'required|date',
+        ]);
+
+        $scoredGame->update([
+            'started_at' => \Carbon\Carbon::parse($validated['played_at']),
+        ]);
+
+        return back()->with('success', 'Play date updated.');
+    }
+
     public function complete(Request $request, ScoredGame $scoredGame)
     {
         $this->ensureScorer($request, $scoredGame->household);
@@ -267,6 +317,52 @@ class ScoredGameController extends Controller
         return redirect()
             ->route('scorekeeper.households.games.index', $householdId)
             ->with('success', 'Game deleted.');
+    }
+
+    /**
+     * Scorecard display names: first name only — extended with just enough of
+     * the last name (letter by letter) to tell same-named people apart.
+     *
+     * @param  \Illuminate\Support\Collection  $players
+     * @return array<int, string>  [player_id => display name]
+     */
+    private function displayNames($players): array
+    {
+        $parsed = $players->unique('id')->map(function ($p) {
+            $parts = preg_split('/\s+/', trim($p->name)) ?: [];
+            $first = array_shift($parts) ?: $p->name;
+
+            return ['id' => $p->id, 'first' => $first, 'last' => implode('', $parts)];
+        })->values();
+
+        $out = [];
+        foreach ($parsed->groupBy(fn ($n) => mb_strtolower($n['first'])) as $group) {
+            if ($group->count() === 1) {
+                $out[$group->first()['id']] = $group->first()['first'];
+                continue;
+            }
+
+            // Same first name: extend last-name prefixes together until the
+            // group is unambiguous (or we run out of letters).
+            $maxLen = $group->max(fn ($n) => mb_strlen($n['last']));
+            $len = 1;
+            while ($len < $maxLen) {
+                $candidates = $group->map(
+                    fn ($n) => mb_strtolower(mb_substr($n['last'], 0, $len)),
+                );
+                if ($candidates->unique()->count() === $group->count()) {
+                    break;
+                }
+                $len++;
+            }
+
+            foreach ($group as $n) {
+                $suffix = mb_substr($n['last'], 0, $len);
+                $out[$n['id']] = $n['first'].($suffix !== '' ? ' '.$suffix : '');
+            }
+        }
+
+        return $out;
     }
 
     private function ensureMember(Request $request, Household $household): void

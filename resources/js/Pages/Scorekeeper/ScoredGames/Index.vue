@@ -35,9 +35,20 @@ const page = usePage();
                                 :href="route('scorekeeper.games.show', g.id)"
                                 class="flex items-center justify-between px-6 py-4 hover:bg-gray-50"
                             >
-                                <span class="font-medium text-gray-900">{{
-                                    g.name
-                                }}</span>
+                                <span class="flex items-baseline gap-3">
+                                    <span class="font-medium text-gray-900">{{
+                                        g.name
+                                    }}</span>
+                                    <span class="text-sm text-gray-500">{{
+                                        new Date(
+                                            g.started_at,
+                                        ).toLocaleDateString(undefined, {
+                                            year: 'numeric',
+                                            month: 'short',
+                                            day: 'numeric',
+                                        })
+                                    }}</span>
+                                </span>
                                 <span
                                     class="rounded-full px-2 py-0.5 text-xs font-medium"
                                     :class="

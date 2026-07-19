@@ -65,6 +65,8 @@ Route::prefix('scorekeeper')->name('scorekeeper.')->group(function () {
             ->name('games.rounds.update');
         Route::post('games/{scoredGame}/complete', [ScoredGameController::class, 'complete'])
             ->name('games.complete');
+        Route::patch('games/{scoredGame}/play-date', [ScoredGameController::class, 'updatePlayDate'])
+            ->name('games.playdate.update');
         Route::delete('games/{scoredGame}', [ScoredGameController::class, 'destroy'])
             ->name('games.destroy');
 
