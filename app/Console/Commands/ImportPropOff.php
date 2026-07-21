@@ -138,16 +138,28 @@ class ImportPropOff extends Command
                 'guest_token' => $old->guest_token,
                 'avatar'      => $old->avatar ?? null,
             ]);
-            // Copy the already-hashed password verbatim (bypass the cast).
-            if ($old->password) {
-                DB::table('users')->where('id', $new->id)
-                    ->update(['password' => $old->password]);
-            }
+            // Preserve the source auth/audit columns verbatim, bypassing the
+            // model (the 'hashed' password cast must not re-hash an already
+            // hashed value, and Eloquent would otherwise stamp created_at /
+            // updated_at with "now" instead of the original sign-up time).
+            DB::table('users')->where('id', $new->id)->update([
+                'password'          => $old->password,
+                'email_verified_at' => $old->email_verified_at,
+                'remember_token'    => $old->remember_token,
+                'created_at'        => $old->created_at,
+                'updated_at'        => $old->updated_at,
+            ]);
             $this->userMap[$old->id] = $new->id;
             $created++;
         }
 
         $this->line("users: {$matched} matched to existing, {$created} created");
+
+        // Persist the old->new id map for auditability and any follow-up FK
+        // reconciliation (the domain import below remaps in-process).
+        $path = storage_path('app/propoff_user_id_map.json');
+        file_put_contents($path, json_encode($this->userMap, JSON_PRETTY_PRINT));
+        $this->line("user id map written to {$path}");
     }
 
     /**
