@@ -2,13 +2,13 @@
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Card from '@/Components/PropOff/Base/Card.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import Select from '@/Components/PropOff/Form/Select.vue';
-import Radio from '@/Components/PropOff/Form/Radio.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
+import Button from '@/Components/Base/Button.vue';
+import Card from '@/Components/Base/Card.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import Select from '@/Components/Form/Select.vue';
+import Radio from '@/Components/Form/Radio.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
 
 const props = defineProps({
     group: {

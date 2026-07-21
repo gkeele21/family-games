@@ -1,14 +1,14 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
 import { Head, Link, useForm, router } from '@inertiajs/vue3';
 import { ref, computed, watch } from 'vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import FormLabel from '@/Components/PropOff/Form/FormLabel.vue';
-import NumberInput from '@/Components/PropOff/Form/NumberInput.vue';
-import Confirm from '@/Components/PropOff/Feedback/Confirm.vue';
+import Button from '@/Components/Base/Button.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import FormLabel from '@/Components/Form/FormLabel.vue';
+import NumberInput from '@/Components/Form/NumberInput.vue';
+import Confirm from '@/Components/Feedback/Confirm.vue';
 
 const props = defineProps({
     template: {

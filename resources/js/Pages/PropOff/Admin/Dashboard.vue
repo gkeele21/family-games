@@ -1,8 +1,8 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
 import StatCard from '@/Components/PropOff/Domain/StatCard.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
+import Badge from '@/Components/Base/Badge.vue';
 import { Head } from '@inertiajs/vue3';
 
 const props = defineProps({

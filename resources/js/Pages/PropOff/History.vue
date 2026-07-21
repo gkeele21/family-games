@@ -2,10 +2,10 @@
 import { computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
-import Card from '@/Components/PropOff/Base/Card.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import Select from '@/Components/PropOff/Form/Select.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
+import Card from '@/Components/Base/Card.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import Select from '@/Components/Form/Select.vue';
 
 const props = defineProps({
     stats: Object,

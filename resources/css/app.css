@@ -12,7 +12,8 @@
  */
 
 @layer base {
-    .propoff-app {
+    .propoff-app,
+    .keeler-app {
         /* Backgrounds - layered surface hierarchy */
         --color-bg: 64 64 64;
         --color-surface: 31 31 31;
@@ -35,6 +36,7 @@
         --color-warning: 244 118 18;
         --color-danger: 239 68 68;
         --color-info: 59 130 246;
+        --color-gold: 234 179 8;   /* trophy / winner accent (added for Keeler) */
 
         /* Theme-adaptive primary (default green) */
         --color-primary: 87 208 37;

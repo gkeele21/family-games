@@ -1,13 +1,13 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
 import { Head, Link, useForm, router } from '@inertiajs/vue3';
 import { ref, computed } from 'vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import Select from '@/Components/PropOff/Form/Select.vue';
-import DatePicker from '@/Components/PropOff/Form/DatePicker.vue';
-import Confirm from '@/Components/PropOff/Feedback/Confirm.vue';
+import Button from '@/Components/Base/Button.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import Select from '@/Components/Form/Select.vue';
+import DatePicker from '@/Components/Form/DatePicker.vue';
+import Confirm from '@/Components/Feedback/Confirm.vue';
 
 const eventTypeOptions = [
     { value: 'GameQuiz', label: 'Game Quiz' },

@@ -1,7 +1,7 @@
 <script setup>
-import Button from '@/Components/PropOff/Base/Button.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
+import Button from '@/Components/Base/Button.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import Icon from '@/Components/Base/Icon.vue';
 import { useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 

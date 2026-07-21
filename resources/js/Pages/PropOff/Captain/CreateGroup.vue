@@ -1,14 +1,14 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import TextArea from '@/Components/PropOff/Form/TextArea.vue';
-import Radio from '@/Components/PropOff/Form/Radio.vue';
-import DatePicker from '@/Components/PropOff/Form/DatePicker.vue';
-import Card from '@/Components/PropOff/Base/Card.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
+import Button from '@/Components/Base/Button.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import TextArea from '@/Components/Form/TextArea.vue';
+import Radio from '@/Components/Form/Radio.vue';
+import DatePicker from '@/Components/Form/DatePicker.vue';
+import Card from '@/Components/Base/Card.vue';
+import Badge from '@/Components/Base/Badge.vue';
+import Icon from '@/Components/Base/Icon.vue';
 import { Head, useForm } from '@inertiajs/vue3';
 
 const props = defineProps({

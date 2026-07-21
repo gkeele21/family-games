@@ -16,6 +16,9 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Unauthenticated users hit the landing page with the auth drawer opened.
+        $middleware->redirectGuestsTo(fn () => '/?auth=login');
+
         $middleware->web(append: [
             \App\Http\Middleware\GuestCookieMiddleware::class,
             \App\Http\Middleware\HandleInertiaRequests::class,

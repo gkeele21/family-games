@@ -160,8 +160,8 @@
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import Badge from '@/Components/Base/Badge.vue';
 
 const props = defineProps({
     modelValue: { type: [String, Number], default: '' },

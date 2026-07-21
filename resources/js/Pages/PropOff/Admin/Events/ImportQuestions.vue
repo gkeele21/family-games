@@ -246,13 +246,13 @@ import { ref, computed } from 'vue';
 import { Head } from '@inertiajs/vue3';
 import { router } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import Checkbox from '@/Components/PropOff/Form/Checkbox.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
-import Modal from '@/Components/PropOff/Base/Modal.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import Checkbox from '@/Components/Form/Checkbox.vue';
+import Button from '@/Components/Base/Button.vue';
+import Badge from '@/Components/Base/Badge.vue';
+import Modal from '@/Components/Base/Modal.vue';
+import Icon from '@/Components/Base/Icon.vue';
 import axios from 'axios';
 
 const props = defineProps({

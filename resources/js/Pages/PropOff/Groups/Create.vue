@@ -188,7 +188,7 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
 
 const props = defineProps({
     events: {

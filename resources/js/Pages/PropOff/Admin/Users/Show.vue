@@ -201,12 +201,12 @@
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import Modal from '@/Components/PropOff/Base/Modal.vue';
-import Select from '@/Components/PropOff/Form/Select.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
+import Button from '@/Components/Base/Button.vue';
+import Badge from '@/Components/Base/Badge.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import Modal from '@/Components/Base/Modal.vue';
+import Select from '@/Components/Form/Select.vue';
 
 const props = defineProps({
     user: Object,

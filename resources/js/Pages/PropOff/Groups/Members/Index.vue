@@ -2,15 +2,15 @@
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
 import { Head, router } from '@inertiajs/vue3';
 import { ref } from 'vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
-import Card from '@/Components/PropOff/Base/Card.vue';
-import Modal from '@/Components/PropOff/Base/Modal.vue';
-import Confirm from '@/Components/PropOff/Feedback/Confirm.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import Toast from '@/Components/PropOff/Feedback/Toast.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
+import Button from '@/Components/Base/Button.vue';
+import Badge from '@/Components/Base/Badge.vue';
+import Card from '@/Components/Base/Card.vue';
+import Modal from '@/Components/Base/Modal.vue';
+import Confirm from '@/Components/Feedback/Confirm.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import Toast from '@/Components/Feedback/Toast.vue';
 import { useFlashToast } from '@/composables/useFlashToast';
 
 const { showErrorToast, showSuccessToast, errorMessage, successMessage, showFlashMessages } = useFlashToast();

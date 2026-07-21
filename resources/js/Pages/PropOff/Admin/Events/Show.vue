@@ -2,19 +2,19 @@
 import { ref } from 'vue';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
-import Card from '@/Components/PropOff/Base/Card.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import Radio from '@/Components/PropOff/Form/Radio.vue';
-import Modal from '@/Components/PropOff/Base/Modal.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
+import Button from '@/Components/Base/Button.vue';
+import Badge from '@/Components/Base/Badge.vue';
+import Card from '@/Components/Base/Card.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import Radio from '@/Components/Form/Radio.vue';
+import Modal from '@/Components/Base/Modal.vue';
 import QuestionCard from '@/Components/PropOff/Domain/QuestionCard.vue';
 import QuestionModal from '@/Components/PropOff/Domain/QuestionModal.vue';
-import Confirm from '@/Components/PropOff/Feedback/Confirm.vue';
-import Toast from '@/Components/PropOff/Feedback/Toast.vue';
-import StatTile from '@/Components/PropOff/Base/StatTile.vue';
+import Confirm from '@/Components/Feedback/Confirm.vue';
+import Toast from '@/Components/Feedback/Toast.vue';
+import StatTile from '@/Components/Base/StatTile.vue';
 
 const props = defineProps({
     event: {

@@ -279,16 +279,16 @@
 
 <script setup>
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import Select from '@/Components/PropOff/Form/Select.vue';
-import Dropdown from '@/Components/PropOff/Form/Dropdown.vue';
-import Pagination from '@/Components/PropOff/Base/Pagination.vue';
-import Toast from '@/Components/PropOff/Feedback/Toast.vue';
+import Button from '@/Components/Base/Button.vue';
+import Badge from '@/Components/Base/Badge.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import Select from '@/Components/Form/Select.vue';
+import Dropdown from '@/Components/Form/Dropdown.vue';
+import Pagination from '@/Components/Base/Pagination.vue';
+import Toast from '@/Components/Feedback/Toast.vue';
 import { ref, computed, watch } from 'vue';
 import { debounce } from 'lodash';
 

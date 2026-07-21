@@ -27,6 +27,7 @@ export default {
                 warning: 'rgb(var(--color-warning) / <alpha-value>)',
                 danger: 'rgb(var(--color-danger) / <alpha-value>)',
                 info: 'rgb(var(--color-info) / <alpha-value>)',
+                gold: 'rgb(var(--color-gold) / <alpha-value>)',
                 bg: 'rgb(var(--color-bg) / <alpha-value>)',
                 surface: {
                     DEFAULT: 'rgb(var(--color-surface) / <alpha-value>)',

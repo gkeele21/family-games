@@ -2,17 +2,17 @@
 import { ref, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
-import Card from '@/Components/PropOff/Base/Card.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
+import Button from '@/Components/Base/Button.vue';
+import Badge from '@/Components/Base/Badge.vue';
+import Card from '@/Components/Base/Card.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
 import QuestionCard from '@/Components/PropOff/Domain/QuestionCard.vue';
 import QuestionModal from '@/Components/PropOff/Domain/QuestionModal.vue';
-import Confirm from '@/Components/PropOff/Feedback/Confirm.vue';
-import Toast from '@/Components/PropOff/Feedback/Toast.vue';
-import StatTile from '@/Components/PropOff/Base/StatTile.vue';
-import Checkbox from '@/Components/PropOff/Form/Checkbox.vue';
+import Confirm from '@/Components/Feedback/Confirm.vue';
+import Toast from '@/Components/Feedback/Toast.vue';
+import StatTile from '@/Components/Base/StatTile.vue';
+import Checkbox from '@/Components/Form/Checkbox.vue';
 
 const props = defineProps({
     group: Object,

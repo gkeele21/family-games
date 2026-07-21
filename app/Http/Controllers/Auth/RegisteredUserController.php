@@ -18,9 +18,10 @@ class RegisteredUserController extends Controller
     /**
      * Display the registration view.
      */
-    public function create(): Response
+    public function create(): RedirectResponse
     {
-        return Inertia::render('Auth/Register');
+        // Registration lives in the landing-page slide drawer.
+        return redirect('/?auth=register');
     }
 
     /**

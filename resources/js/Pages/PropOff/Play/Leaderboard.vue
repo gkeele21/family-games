@@ -2,11 +2,11 @@
 import { computed, ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Card from '@/Components/PropOff/Base/Card.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
+import Badge from '@/Components/Base/Badge.vue';
+import Button from '@/Components/Base/Button.vue';
+import Card from '@/Components/Base/Card.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
+import Icon from '@/Components/Base/Icon.vue';
 
 const props = defineProps({
     group: Object,

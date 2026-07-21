@@ -239,10 +239,10 @@ import {
     ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline';
 import QRCode from 'qrcode';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
-import StatTile from '@/Components/PropOff/Base/StatTile.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
+import StatTile from '@/Components/Base/StatTile.vue';
+import Button from '@/Components/Base/Button.vue';
+import Icon from '@/Components/Base/Icon.vue';
 
 const props = defineProps({
     group: Object,

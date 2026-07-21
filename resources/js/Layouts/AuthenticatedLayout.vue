@@ -1,143 +1,114 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import ApplicationLogo from '@/Components/ApplicationLogo.vue';
-import Dropdown from '@/Components/Dropdown.vue';
-import DropdownLink from '@/Components/DropdownLink.vue';
-import NavLink from '@/Components/NavLink.vue';
-import ResponsiveNavLink from '@/Components/ResponsiveNavLink.vue';
-import { Link } from '@inertiajs/vue3';
+import KeelerLogo from '@/Components/KeelerLogo.vue';
+import { Link, usePage } from '@inertiajs/vue3';
+import { useTheme } from '@/composables/useTheme';
 
+const { theme } = useTheme();
 const showingNavigationDropdown = ref(false);
+const showingUserMenu = ref(false);
+
+const user = usePage().props.auth.user as { name: string; email: string };
+
+const navItems = [
+    { label: 'Dashboard', route: 'dashboard', active: 'dashboard' },
+    { label: 'Trivia', route: 'games.index', active: 'games.*' },
+    { label: 'Scorekeeper', route: 'scorekeeper.home', active: 'scorekeeper.*' },
+    { label: 'PropOff', route: 'propoff.home', active: 'propoff.*' },
+];
+
+const initials = user.name
+    .split(' ')
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 </script>
 
 <template>
-    <div>
-        <div class="min-h-screen bg-gray-100">
-            <nav
-                class="border-b border-gray-100 bg-white"
-            >
-                <!-- Primary Navigation Menu -->
+    <div class="keeler-app" :class="`theme-${theme}`">
+        <div class="min-h-screen bg-surface-inset">
+            <nav class="sticky top-0 z-30 border-b border-border bg-surface-header/85 backdrop-blur-md">
                 <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                     <div class="flex h-16 justify-between">
-                        <div class="flex">
-                            <!-- Logo -->
-                            <div class="flex shrink-0 items-center">
-                                <Link :href="route('dashboard')">
-                                    <ApplicationLogo
-                                        class="block h-9 w-auto fill-current text-gray-800"
-                                    />
-                                </Link>
-                            </div>
+                        <div class="flex items-center gap-8">
+                            <Link :href="route('dashboard')" class="flex shrink-0 items-center">
+                                <KeelerLogo variant="wordmark" class="h-10 w-auto" />
+                            </Link>
 
-                            <!-- Navigation Links -->
-                            <div
-                                class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex"
-                            >
-                                <NavLink
-                                    :href="route('dashboard')"
-                                    :active="route().current('dashboard')"
+                            <div class="hidden items-center gap-1 sm:flex">
+                                <Link
+                                    v-for="item in navItems"
+                                    :key="item.route"
+                                    :href="route(item.route)"
+                                    class="rounded-lg px-3 py-2 text-sm font-semibold transition"
+                                    :class="
+                                        route().current(item.active)
+                                            ? 'text-primary'
+                                            : 'text-muted hover:bg-white/5 hover:text-body'
+                                    "
                                 >
-                                    Dashboard
-                                </NavLink>
-                                <NavLink
-                                    :href="route('games.index')"
-                                    :active="route().current('games.*')"
-                                >
-                                    Trivia
-                                </NavLink>
-                                <NavLink
-                                    :href="route('scorekeeper.home')"
-                                    :active="route().current('scorekeeper.*')"
-                                >
-                                    Scorekeeper
-                                </NavLink>
-                                <NavLink
-                                    :href="route('propoff.home')"
-                                    :active="route().current('propoff.*')"
-                                >
-                                    PropOff
-                                </NavLink>
+                                    {{ item.label }}
+                                </Link>
                             </div>
                         </div>
 
-                        <div class="hidden sm:ms-6 sm:flex sm:items-center">
-                            <!-- Settings Dropdown -->
-                            <div class="relative ms-3">
-                                <Dropdown align="right" width="48">
-                                    <template #trigger>
-                                        <span class="inline-flex rounded-md">
-                                            <button
-                                                type="button"
-                                                class="inline-flex items-center rounded-md border border-transparent bg-white px-3 py-2 text-sm font-medium leading-4 text-gray-500 transition duration-150 ease-in-out hover:text-gray-700 focus:outline-none"
-                                            >
-                                                {{ $page.props.auth.user.name }}
+                        <!-- User menu -->
+                        <div class="hidden items-center sm:flex">
+                            <div class="relative">
+                                <button
+                                    type="button"
+                                    class="flex items-center gap-3 rounded-full border border-border py-1 pl-4 pr-1 text-sm font-semibold text-body transition hover:border-border-strong"
+                                    @click="showingUserMenu = !showingUserMenu"
+                                    @blur="setTimeout(() => (showingUserMenu = false), 150)"
+                                >
+                                    {{ user.name }}
+                                    <span
+                                        class="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-info to-primary text-xs font-extrabold text-white"
+                                    >
+                                        {{ initials }}
+                                    </span>
+                                </button>
 
-                                                <svg
-                                                    class="-me-0.5 ms-2 h-4 w-4"
-                                                    xmlns="http://www.w3.org/2000/svg"
-                                                    viewBox="0 0 20 20"
-                                                    fill="currentColor"
-                                                >
-                                                    <path
-                                                        fill-rule="evenodd"
-                                                        d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                                                        clip-rule="evenodd"
-                                                    />
-                                                </svg>
-                                            </button>
-                                        </span>
-                                    </template>
-
-                                    <template #content>
-                                        <DropdownLink
-                                            :href="route('profile.edit')"
-                                        >
-                                            Profile
-                                        </DropdownLink>
-                                        <DropdownLink
-                                            :href="route('logout')"
-                                            method="post"
-                                            as="button"
-                                        >
-                                            Log Out
-                                        </DropdownLink>
-                                    </template>
-                                </Dropdown>
+                                <div
+                                    v-show="showingUserMenu"
+                                    class="absolute right-0 mt-2 w-48 overflow-hidden rounded-xl border border-border bg-surface-elevated shadow-2xl"
+                                >
+                                    <Link
+                                        :href="route('profile.edit')"
+                                        class="block px-4 py-2.5 text-sm text-body transition hover:bg-white/5"
+                                    >
+                                        Profile
+                                    </Link>
+                                    <Link
+                                        :href="route('logout')"
+                                        method="post"
+                                        as="button"
+                                        class="block w-full px-4 py-2.5 text-left text-sm text-body transition hover:bg-white/5"
+                                    >
+                                        Log Out
+                                    </Link>
+                                </div>
                             </div>
                         </div>
 
                         <!-- Hamburger -->
-                        <div class="-me-2 flex items-center sm:hidden">
+                        <div class="-mr-2 flex items-center sm:hidden">
                             <button
-                                @click="
-                                    showingNavigationDropdown =
-                                        !showingNavigationDropdown
-                                "
-                                class="inline-flex items-center justify-center rounded-md p-2 text-gray-400 transition duration-150 ease-in-out hover:bg-gray-100 hover:text-gray-500 focus:bg-gray-100 focus:text-gray-500 focus:outline-none"
+                                type="button"
+                                class="inline-flex items-center justify-center rounded-md p-2 text-muted transition hover:bg-white/5 hover:text-body"
+                                @click="showingNavigationDropdown = !showingNavigationDropdown"
                             >
-                                <svg
-                                    class="h-6 w-6"
-                                    stroke="currentColor"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                >
+                                <svg class="h-6 w-6" stroke="currentColor" fill="none" viewBox="0 0 24 24">
                                     <path
-                                        :class="{
-                                            hidden: showingNavigationDropdown,
-                                            'inline-flex':
-                                                !showingNavigationDropdown,
-                                        }"
+                                        :class="{ hidden: showingNavigationDropdown, 'inline-flex': !showingNavigationDropdown }"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
                                         stroke-width="2"
                                         d="M4 6h16M4 12h16M4 18h16"
                                     />
                                     <path
-                                        :class="{
-                                            hidden: !showingNavigationDropdown,
-                                            'inline-flex':
-                                                showingNavigationDropdown,
-                                        }"
+                                        :class="{ hidden: !showingNavigationDropdown, 'inline-flex': showingNavigationDropdown }"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
                                         stroke-width="2"
@@ -149,83 +120,52 @@ const showingNavigationDropdown = ref(false);
                     </div>
                 </div>
 
-                <!-- Responsive Navigation Menu -->
-                <div
-                    :class="{
-                        block: showingNavigationDropdown,
-                        hidden: !showingNavigationDropdown,
-                    }"
-                    class="sm:hidden"
-                >
-                    <div class="space-y-1 pb-3 pt-2">
-                        <ResponsiveNavLink
-                            :href="route('dashboard')"
-                            :active="route().current('dashboard')"
+                <!-- Mobile menu -->
+                <div :class="{ block: showingNavigationDropdown, hidden: !showingNavigationDropdown }" class="sm:hidden">
+                    <div class="space-y-1 px-4 pb-3 pt-2">
+                        <Link
+                            v-for="item in navItems"
+                            :key="item.route"
+                            :href="route(item.route)"
+                            class="block rounded-lg px-3 py-2 text-base font-semibold transition"
+                            :class="
+                                route().current(item.active)
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'text-muted hover:bg-white/5 hover:text-body'
+                            "
                         >
-                            Dashboard
-                        </ResponsiveNavLink>
-                        <ResponsiveNavLink
-                            :href="route('games.index')"
-                            :active="route().current('games.*')"
-                        >
-                            Trivia
-                        </ResponsiveNavLink>
-                        <ResponsiveNavLink
-                            :href="route('scorekeeper.home')"
-                            :active="route().current('scorekeeper.*')"
-                        >
-                            Scorekeeper
-                        </ResponsiveNavLink>
-                        <ResponsiveNavLink
-                            :href="route('propoff.home')"
-                            :active="route().current('propoff.*')"
-                        >
-                            PropOff
-                        </ResponsiveNavLink>
+                            {{ item.label }}
+                        </Link>
                     </div>
-
-                    <!-- Responsive Settings Options -->
-                    <div
-                        class="border-t border-gray-200 pb-1 pt-4"
-                    >
-                        <div class="px-4">
-                            <div
-                                class="text-base font-medium text-gray-800"
-                            >
-                                {{ $page.props.auth.user.name }}
-                            </div>
-                            <div class="text-sm font-medium text-gray-500">
-                                {{ $page.props.auth.user.email }}
-                            </div>
-                        </div>
-
+                    <div class="border-t border-border px-4 py-4">
+                        <div class="text-base font-semibold text-body">{{ user.name }}</div>
+                        <div class="text-sm text-muted">{{ user.email }}</div>
                         <div class="mt-3 space-y-1">
-                            <ResponsiveNavLink :href="route('profile.edit')">
+                            <Link
+                                :href="route('profile.edit')"
+                                class="block rounded-lg px-3 py-2 text-base font-medium text-muted transition hover:bg-white/5 hover:text-body"
+                            >
                                 Profile
-                            </ResponsiveNavLink>
-                            <ResponsiveNavLink
+                            </Link>
+                            <Link
                                 :href="route('logout')"
                                 method="post"
                                 as="button"
+                                class="block w-full rounded-lg px-3 py-2 text-left text-base font-medium text-muted transition hover:bg-white/5 hover:text-body"
                             >
                                 Log Out
-                            </ResponsiveNavLink>
+                            </Link>
                         </div>
                     </div>
                 </div>
             </nav>
 
-            <!-- Page Heading -->
-            <header
-                class="bg-white shadow"
-                v-if="$slots.header"
-            >
+            <header v-if="$slots.header" class="border-b border-border bg-surface-header/60">
                 <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
                     <slot name="header" />
                 </div>
             </header>
 
-            <!-- Page Content -->
             <main>
                 <slot />
             </main>

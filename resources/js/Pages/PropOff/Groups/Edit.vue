@@ -89,14 +89,14 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
-import Card from '@/Components/PropOff/Base/Card.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import TextArea from '@/Components/PropOff/Form/TextArea.vue';
-import DatePicker from '@/Components/PropOff/Form/DatePicker.vue';
-import Radio from '@/Components/PropOff/Form/Radio.vue';
-import FormLabel from '@/Components/PropOff/Form/FormLabel.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
+import Card from '@/Components/Base/Card.vue';
+import Button from '@/Components/Base/Button.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import TextArea from '@/Components/Form/TextArea.vue';
+import DatePicker from '@/Components/Form/DatePicker.vue';
+import Radio from '@/Components/Form/Radio.vue';
+import FormLabel from '@/Components/Form/FormLabel.vue';
 
 const props = defineProps({
     group: {

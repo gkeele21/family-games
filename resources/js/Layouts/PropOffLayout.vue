@@ -1,11 +1,11 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { Link, usePage } from '@inertiajs/vue3';
-import Navigation from '@/Components/PropOff/Base/Navigation.vue';
+import Navigation from '@/Components/Base/Navigation.vue';
 import PreferencesModal from '@/Components/PropOff/Domain/PreferencesModal.vue';
-import Modal from '@/Components/PropOff/Base/Modal.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
+import Modal from '@/Components/Base/Modal.vue';
+import Button from '@/Components/Base/Button.vue';
+import Icon from '@/Components/Base/Icon.vue';
 import { useTheme } from '@/composables/useTheme';
 
 // Theme classes are bound onto the .propoff-app wrapper below,

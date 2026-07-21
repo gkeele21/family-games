@@ -1,12 +1,12 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
 import { useForm } from '@inertiajs/vue3';
-import Modal from '@/Components/PropOff/Base/Modal.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import NumberInput from '@/Components/PropOff/Form/NumberInput.vue';
-import Banner from '@/Components/PropOff/Feedback/Banner.vue';
+import Modal from '@/Components/Base/Modal.vue';
+import Button from '@/Components/Base/Button.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import NumberInput from '@/Components/Form/NumberInput.vue';
+import Banner from '@/Components/Feedback/Banner.vue';
 
 const props = defineProps({
     show: {

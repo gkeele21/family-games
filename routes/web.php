@@ -6,16 +6,16 @@ use App\Http\Controllers\GameSessionController;
 use App\Http\Controllers\HostController;
 use App\Http\Controllers\PlayerController;
 use App\Http\Controllers\ProfileController;
-use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', function () {
-    return Inertia::render('Welcome', [
+    $auth = request()->query('auth');
+
+    return Inertia::render('Index', [
         'canLogin' => Route::has('login'),
         'canRegister' => Route::has('register'),
-        'laravelVersion' => Application::VERSION,
-        'phpVersion' => PHP_VERSION,
+        'openAuth' => in_array($auth, ['login', 'register'], true) ? $auth : null,
     ]);
 });
 

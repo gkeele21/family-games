@@ -2,13 +2,13 @@
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
 import { Head, useForm, router } from '@inertiajs/vue3';
 import { ref } from 'vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import DatePicker from '@/Components/PropOff/Form/DatePicker.vue';
-import Toast from '@/Components/PropOff/Feedback/Toast.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
+import Button from '@/Components/Base/Button.vue';
+import Badge from '@/Components/Base/Badge.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import DatePicker from '@/Components/Form/DatePicker.vue';
+import Toast from '@/Components/Feedback/Toast.vue';
 
 const props = defineProps({
     event: {

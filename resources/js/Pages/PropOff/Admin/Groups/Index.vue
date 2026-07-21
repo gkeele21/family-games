@@ -1,15 +1,15 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ref } from 'vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Card from '@/Components/PropOff/Base/Card.vue';
-import Badge from '@/Components/PropOff/Base/Badge.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import DataTable from '@/Components/PropOff/Base/DataTable.vue';
-import Confirm from '@/Components/PropOff/Feedback/Confirm.vue';
+import Button from '@/Components/Base/Button.vue';
+import Card from '@/Components/Base/Card.vue';
+import Badge from '@/Components/Base/Badge.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import DataTable from '@/Components/Base/DataTable.vue';
+import Confirm from '@/Components/Feedback/Confirm.vue';
 
 const props = defineProps({
     groups: Object,

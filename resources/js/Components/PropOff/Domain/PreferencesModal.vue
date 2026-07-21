@@ -66,8 +66,8 @@
 </template>
 
 <script setup>
-import Modal from '@/Components/PropOff/Base/Modal.vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
+import Modal from '@/Components/Base/Modal.vue';
+import Button from '@/Components/Base/Button.vue';
 import { useTheme } from '@/composables/useTheme';
 
 defineProps({

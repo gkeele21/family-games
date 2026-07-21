@@ -1,12 +1,12 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ref } from 'vue';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import Icon from '@/Components/PropOff/Base/Icon.vue';
-import TextField from '@/Components/PropOff/Form/TextField.vue';
-import Select from '@/Components/PropOff/Form/Select.vue';
+import Button from '@/Components/Base/Button.vue';
+import Icon from '@/Components/Base/Icon.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import Select from '@/Components/Form/Select.vue';
 
 const roleFilterOptions = [
     { value: 'all', label: 'All Roles' },

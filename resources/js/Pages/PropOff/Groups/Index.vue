@@ -1,8 +1,8 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/PropOffLayout.vue';
 import { Head, router } from '@inertiajs/vue3';
-import Button from '@/Components/PropOff/Base/Button.vue';
-import PageHeader from '@/Components/PropOff/Base/PageHeader.vue';
+import Button from '@/Components/Base/Button.vue';
+import PageHeader from '@/Components/Base/PageHeader.vue';
 import { ref } from 'vue';
 
 const joinCode = ref('');
