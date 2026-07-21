@@ -4,7 +4,7 @@
             <div class="flex justify-between items-center h-16">
                 <!-- Logo (Left) -->
                 <div class="shrink-0 flex items-center">
-                    <Logo size="sm" link-to="/" />
+                    <Logo size="sm" link-to="/dashboard" />
                     <a
                         href="/dashboard"
                         class="ml-3 hidden text-xs font-medium text-muted hover:text-body sm:inline"

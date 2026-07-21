@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { onMounted, onUnmounted, ref } from 'vue';
+import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import KeelerLogo from '@/Components/KeelerLogo.vue';
 import GameWordmark from '@/Components/GameWordmark.vue';
 import TextField from '@/Components/Form/TextField.vue';
@@ -15,6 +15,9 @@ const props = defineProps<{
     canRegister?: boolean;
     openAuth?: 'login' | 'register' | null;
 }>();
+
+// Logged-in visitors see "Go to Dashboard" instead of the sign-in CTAs.
+const user = computed(() => (usePage().props.auth as { user?: unknown } | undefined)?.user);
 
 // ---- auth slider ----
 const drawerOpen = ref(false);
@@ -55,7 +58,7 @@ const onKey = (e: KeyboardEvent) => {
 onMounted(() => {
     document.addEventListener('keydown', onKey);
     // Opened here when a protected route bounced a guest to the landing page.
-    if (props.openAuth) openAuth(props.openAuth);
+    if (!user.value && props.openAuth) openAuth(props.openAuth);
 });
 onUnmounted(() => document.removeEventListener('keydown', onKey));
 
@@ -116,12 +119,19 @@ const games = [
                     </div>
 
                     <div class="flex shrink-0 gap-3 pt-3">
-                        <Button v-if="canRegister" variant="accent" size="md" @click="openAuth('register')">
-                            Get Started Free
-                        </Button>
-                        <Button v-if="canLogin" variant="success" size="md" @click="openAuth('login')">
-                            Sign In
-                        </Button>
+                        <template v-if="user">
+                            <Button variant="primary" size="md" @click="router.visit(route('dashboard'))">
+                                Go to Dashboard
+                            </Button>
+                        </template>
+                        <template v-else>
+                            <Button v-if="canRegister" variant="accent" size="md" @click="openAuth('register')">
+                                Get Started Free
+                            </Button>
+                            <Button v-if="canLogin" variant="success" size="md" @click="openAuth('login')">
+                                Sign In
+                            </Button>
+                        </template>
                     </div>
                 </header>
 
