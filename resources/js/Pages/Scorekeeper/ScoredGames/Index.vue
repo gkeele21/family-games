@@ -9,6 +9,7 @@ defineProps<{
         name: string;
         is_complete: boolean;
         started_at: string;
+        players: string[];
     }>;
 }>();
 
@@ -33,35 +34,49 @@ const page = usePage();
                         <li v-for="g in games" :key="g.id">
                             <Link
                                 :href="route('scorekeeper.games.show', g.id)"
-                                class="flex items-center justify-between px-6 py-4 hover:bg-gray-50"
+                                class="block px-6 py-4 hover:bg-gray-50"
                             >
-                                <span class="flex items-baseline gap-3">
-                                    <span class="font-medium text-gray-900">{{
-                                        g.name
-                                    }}</span>
-                                    <span class="text-sm text-gray-500">{{
-                                        new Date(
-                                            g.started_at,
-                                        ).toLocaleDateString(undefined, {
-                                            year: 'numeric',
-                                            month: 'short',
-                                            day: 'numeric',
-                                        })
-                                    }}</span>
+                                <span class="flex items-center justify-between">
+                                    <span class="flex items-baseline gap-3">
+                                        <span class="font-medium text-gray-900">{{
+                                            g.name
+                                        }}</span>
+                                        <span class="text-sm text-gray-500">{{
+                                            new Date(
+                                                g.started_at,
+                                            ).toLocaleDateString(undefined, {
+                                                year: 'numeric',
+                                                month: 'short',
+                                                day: 'numeric',
+                                            })
+                                        }}</span>
+                                    </span>
+                                    <span
+                                        class="rounded-full px-2 py-0.5 text-xs font-medium"
+                                        :class="
+                                            g.is_complete
+                                                ? 'bg-gray-100 text-gray-600'
+                                                : 'bg-[#d9f3e5] text-[#0b7a48]'
+                                        "
+                                        >{{
+                                            g.is_complete
+                                                ? 'Completed'
+                                                : 'In progress'
+                                        }}</span
+                                    >
                                 </span>
                                 <span
-                                    class="rounded-full px-2 py-0.5 text-xs font-medium"
-                                    :class="
-                                        g.is_complete
-                                            ? 'bg-gray-100 text-gray-600'
-                                            : 'bg-[#d9f3e5] text-[#0b7a48]'
-                                    "
-                                    >{{
-                                        g.is_complete
-                                            ? 'Completed'
-                                            : 'In progress'
-                                    }}</span
+                                    v-if="g.players.length"
+                                    class="mt-1 block text-sm text-gray-500"
                                 >
+                                    {{ g.players.length }}
+                                    {{
+                                        g.players.length === 1
+                                            ? 'player'
+                                            : 'players'
+                                    }}
+                                    · {{ g.players.join(', ') }}
+                                </span>
                             </Link>
                         </li>
                         <li

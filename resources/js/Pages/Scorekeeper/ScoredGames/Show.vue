@@ -154,10 +154,16 @@ sync();
 watch(() => props.rounds, sync, { deep: true });
 
 // Live refresh: poll for other people's saves while the game is in progress.
+const deleting = ref(false);
 const REFRESH_MS = 5000;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 const refresh = () => {
-    if (document.hidden || props.game.is_complete || savingRound.value !== null)
+    if (
+        deleting.value ||
+        document.hidden ||
+        props.game.is_complete ||
+        savingRound.value !== null
+    )
         return;
     router.reload({
         only: [
@@ -428,6 +434,39 @@ const addRound = () => {
     );
 };
 
+// Tab moves through all of a player's fields before advancing to the next
+// player (the DOM's natural order is the opposite — across players per
+// field). After the round's last cell, Tab lands on its Save button.
+const onScoreTab = (
+    e: KeyboardEvent,
+    roundId: number,
+    competitorId: number,
+    fieldKey: string,
+) => {
+    const cells = orderedCompetitors.value
+        .filter((c) => canEditCompetitor(c.id))
+        .flatMap((c) => fields.value.map((f) => ({ c: c.id, f: f.key })));
+    const idx = cells.findIndex(
+        (cell) => cell.c === competitorId && cell.f === fieldKey,
+    );
+    if (idx === -1) return;
+
+    const next = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
+    const target = next
+        ? document.querySelector<HTMLElement>(
+              `[data-cell="${roundId}:${next.c}:${next.f}"]`,
+          )
+        : e.shiftKey
+          ? null
+          : document.querySelector<HTMLElement>(
+                `[data-save-round="${roundId}"]`,
+            );
+    if (target) {
+        e.preventDefault();
+        target.focus();
+    }
+};
+
 const saveRound = (round: Round) => {
     const scores: Record<number, Record<string, number | null>> = {};
     props.competitors.forEach((c) => {
@@ -474,7 +513,12 @@ const deleteGame = () => {
         )
     )
         return;
-    router.delete(route('scorekeeper.games.destroy', props.game.id));
+    // Pause the live-refresh poll: once the game is deleted server-side, a
+    // poll against this page would 404 before the redirect lands.
+    deleting.value = true;
+    router.delete(route('scorekeeper.games.destroy', props.game.id), {
+        onError: () => (deleting.value = false),
+    });
 };
 </script>
 
@@ -789,8 +833,17 @@ const deleteGame = () => {
                                                     inputs[r.id][c.id][f.key]
                                                 "
                                                 type="number"
+                                                :data-cell="`${r.id}:${c.id}:${f.key}`"
                                                 @input="
                                                     markDirty(r.id, c.id, f.key)
+                                                "
+                                                @keydown.tab="
+                                                    onScoreTab(
+                                                        $event,
+                                                        r.id,
+                                                        c.id,
+                                                        f.key,
+                                                    )
                                                 "
                                                 class="no-spinner rounded-md border-gray-300 px-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                                 :class="fieldWidths[f.key]"
@@ -805,6 +858,7 @@ const deleteGame = () => {
                                             class="px-2 py-2 align-top"
                                         >
                                             <SecondaryButton
+                                                :data-save-round="r.id"
                                                 :disabled="savingRound === r.id"
                                                 @click="saveRound(r)"
                                                 >Save</SecondaryButton

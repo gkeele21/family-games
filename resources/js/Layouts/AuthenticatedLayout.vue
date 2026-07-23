@@ -32,7 +32,7 @@ const initials = user.name
                 <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                     <div class="flex h-16 justify-between">
                         <div class="flex items-center gap-8">
-                            <Link :href="route('dashboard')" class="flex shrink-0 items-center">
+                            <Link href="/" class="flex shrink-0 items-center">
                                 <KeelerLogo variant="wordmark" class="h-10 w-auto" />
                             </Link>
 

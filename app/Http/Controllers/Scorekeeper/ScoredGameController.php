@@ -27,14 +27,25 @@ class ScoredGameController extends Controller
         return Inertia::render('Scorekeeper/ScoredGames/Index', [
             'household' => $household->only(['id', 'name']),
             'games'     => $household->scoredGames()
+                ->with('competitors.players:players.id,players.name')
                 ->orderByDesc('started_at')
                 ->get()
-                ->map(fn (ScoredGame $g) => [
-                    'id'          => $g->id,
-                    'name'        => $g->template_name_snapshot,
-                    'is_complete' => $g->is_complete,
-                    'started_at'  => $g->started_at,
-                ]),
+                ->map(function (ScoredGame $g) {
+                    $players = $g->competitors->flatMap->players->unique('id')->values();
+                    // Same short names as the scorecard: first name only,
+                    // extended just enough to tell same-named people apart.
+                    $display = $this->displayNames($players);
+
+                    return [
+                        'id'          => $g->id,
+                        'name'        => $g->template_name_snapshot,
+                        'is_complete' => $g->is_complete,
+                        'started_at'  => $g->started_at,
+                        'players'     => $players
+                            ->map(fn ($p) => $display[$p->id] ?? $p->name)
+                            ->values(),
+                    ];
+                }),
         ]);
     }
 
