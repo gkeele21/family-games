@@ -7,9 +7,11 @@ defineProps<{
     games: Array<{
         id: number;
         name: string;
+        game_type: string | null;
         is_complete: boolean;
         started_at: string;
         players: string[];
+        winners: string[];
     }>;
 }>();
 
@@ -38,9 +40,6 @@ const page = usePage();
                             >
                                 <span class="flex items-center justify-between">
                                     <span class="flex items-baseline gap-3">
-                                        <span class="font-medium text-gray-900">{{
-                                            g.name
-                                        }}</span>
                                         <span class="text-sm text-gray-500">{{
                                             new Date(
                                                 g.started_at,
@@ -50,20 +49,39 @@ const page = usePage();
                                                 day: 'numeric',
                                             })
                                         }}</span>
+                                        <span class="font-medium text-gray-900">{{
+                                            g.name
+                                        }}</span>
+                                        <span
+                                            v-if="
+                                                g.game_type &&
+                                                g.game_type !== g.name
+                                            "
+                                            class="text-sm text-gray-500"
+                                            >{{ g.game_type }}</span
+                                        >
                                     </span>
-                                    <span
-                                        class="rounded-full px-2 py-0.5 text-xs font-medium"
-                                        :class="
-                                            g.is_complete
-                                                ? 'bg-gray-100 text-gray-600'
-                                                : 'bg-[#d9f3e5] text-[#0b7a48]'
-                                        "
-                                        >{{
-                                            g.is_complete
-                                                ? 'Completed'
-                                                : 'In progress'
-                                        }}</span
-                                    >
+                                    <span class="flex items-center gap-2">
+                                        <span
+                                            v-if="g.winners.length"
+                                            class="text-sm font-medium text-amber-600"
+                                            >🏆
+                                            {{ g.winners.join(', ') }}</span
+                                        >
+                                        <span
+                                            class="rounded-full px-2 py-0.5 text-xs font-medium"
+                                            :class="
+                                                g.is_complete
+                                                    ? 'bg-gray-100 text-gray-600'
+                                                    : 'bg-[#d9f3e5] text-[#0b7a48]'
+                                            "
+                                            >{{
+                                                g.is_complete
+                                                    ? 'Completed'
+                                                    : 'In progress'
+                                            }}</span
+                                        >
+                                    </span>
                                 </span>
                                 <span
                                     v-if="g.players.length"

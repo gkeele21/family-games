@@ -27,7 +27,7 @@ class ScoredGameController extends Controller
         return Inertia::render('Scorekeeper/ScoredGames/Index', [
             'household' => $household->only(['id', 'name']),
             'games'     => $household->scoredGames()
-                ->with('competitors.players:players.id,players.name')
+                ->with(['competitors.players:players.id,players.name', 'rounds.scores'])
                 ->orderByDesc('started_at')
                 ->get()
                 ->map(function (ScoredGame $g) {
@@ -36,14 +36,32 @@ class ScoredGameController extends Controller
                     // extended just enough to tell same-named people apart.
                     $display = $this->displayNames($players);
 
+                    // Rank-1 finishers of completed games (ties → several).
+                    // Individuals get their short name; teams keep the team name.
+                    $winners = [];
+                    if ($g->is_complete) {
+                        $byId = $g->competitors->keyBy('id');
+                        foreach ($this->service->standings($g) as $row) {
+                            if ($row['rank'] !== 1) {
+                                break;
+                            }
+                            $playerId = $g->team_based
+                                ? null
+                                : $byId[$row['competitor_id']]?->players->first()?->id;
+                            $winners[] = $display[$playerId] ?? $row['name'];
+                        }
+                    }
+
                     return [
                         'id'          => $g->id,
                         'name'        => $g->template_name_snapshot,
+                        'game_type'   => $g->base_game_type,
                         'is_complete' => $g->is_complete,
                         'started_at'  => $g->started_at,
                         'players'     => $players
                             ->map(fn ($p) => $display[$p->id] ?? $p->name)
                             ->values(),
+                        'winners'     => $winners,
                     ];
                 }),
         ]);
