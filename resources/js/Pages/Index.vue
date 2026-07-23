@@ -88,7 +88,7 @@ const games = [
 </script>
 
 <template>
-    <Head title="Keeler Games — Play. Score. Laugh." />
+    <Head title="Keeler Games — Family Game Night" />
 
     <div class="keeler-app" :class="`theme-${theme}`">
         <div
@@ -102,23 +102,9 @@ const games = [
             "
         >
             <div class="mx-auto max-w-[1600px] px-6 sm:px-10">
-                <!-- Top row: logo, tagline, buttons all start on the same line -->
-                <header class="flex flex-col items-start gap-6 pt-6 lg:flex-row lg:items-start lg:gap-9">
-                    <KeelerLogo
-                        variant="full"
-                        class="-my-6 h-[150px] w-auto shrink-0 drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)] lg:h-[230px]"
-                    />
-
-                    <div class="min-w-[280px] flex-1 pt-4 text-center">
-                        <h1 class="text-[clamp(34px,4.6vw,58px)] font-extrabold leading-[1.03] tracking-tight lg:whitespace-nowrap">
-                            Play. Score. <span class="text-primary">Laugh.</span>
-                        </h1>
-                        <p class="mx-auto mt-4 max-w-xl text-[clamp(15px,1.8vw,18px)] text-muted">
-                            Gather the family, grab a screen, and let the games begin.
-                        </p>
-                    </div>
-
-                    <div class="flex shrink-0 gap-3 pt-3">
+                <!-- Row 1: auth actions, top-right -->
+                <div class="flex justify-end pt-6">
+                    <div class="flex gap-3">
                         <template v-if="user">
                             <Button variant="primary" size="md" @click="router.visit(route('dashboard'))">
                                 Go to Dashboard
@@ -132,6 +118,24 @@ const games = [
                                 Sign In
                             </Button>
                         </template>
+                    </div>
+                </div>
+
+                <!-- Row 2: logo + tagline, vertically centered, spaced across -->
+                <header class="flex flex-col items-center gap-8 py-4 lg:flex-row lg:justify-center lg:gap-16">
+                    <KeelerLogo
+                        variant="full"
+                        class="h-[200px] w-auto shrink-0 drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)] lg:h-[300px]"
+                    />
+                    <div class="text-center">
+                        <h1 class="text-[clamp(34px,4.6vw,58px)] font-extrabold leading-[1.03] tracking-tight lg:whitespace-nowrap">
+                            Play <span class="text-subtle">&bull;</span> Score <span class="text-subtle">&bull;</span> <span class="text-primary">Win</span>
+                        </h1>
+                        <p class="mx-auto mt-4 max-w-2xl text-[clamp(15px,1.8vw,18px)] text-muted">
+                            Host live party games, keep a running score for any card or board game, and go
+                            head-to-head on prop-bet predictions — one home for family game night, on every
+                            screen in the room.
+                        </p>
                     </div>
                 </header>
 
