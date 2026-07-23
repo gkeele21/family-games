@@ -289,14 +289,10 @@ const games = [
 
 <style scoped>
 .game-card {
-    transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-}
-.game-card:hover {
-    transform: translateY(-3px);
+    /* Accent outline + glow always on (cards aren't selectable, so no hover state) */
     border-color: var(--ac);
     box-shadow:
         0 0 0 1px var(--ac),
-        0 18px 44px rgba(0, 0, 0, 0.5),
-        0 0 34px var(--acglow);
+        0 0 26px var(--acglow);
 }
 </style>
