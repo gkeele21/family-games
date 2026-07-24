@@ -216,4 +216,50 @@ class ScoreGameService
             ),
         ));
     }
+
+    /**
+     * Scorecard display names: first name only — extended with just enough of
+     * the last name (letter by letter) to tell same-named people apart.
+     *
+     * @param  \Illuminate\Support\Collection  $players
+     * @return array<int, string>  [player_id => display name]
+     */
+    public function displayNames($players): array
+    {
+        $parsed = $players->unique('id')->map(function ($p) {
+            $parts = preg_split('/\s+/', trim($p->name)) ?: [];
+            $first = array_shift($parts) ?: $p->name;
+
+            return ['id' => $p->id, 'first' => $first, 'last' => implode('', $parts)];
+        })->values();
+
+        $out = [];
+        foreach ($parsed->groupBy(fn ($n) => mb_strtolower($n['first'])) as $group) {
+            if ($group->count() === 1) {
+                $out[$group->first()['id']] = $group->first()['first'];
+                continue;
+            }
+
+            // Same first name: extend last-name prefixes together until the
+            // group is unambiguous (or we run out of letters).
+            $maxLen = $group->max(fn ($n) => mb_strlen($n['last']));
+            $len = 1;
+            while ($len < $maxLen) {
+                $candidates = $group->map(
+                    fn ($n) => mb_strtolower(mb_substr($n['last'], 0, $len)),
+                );
+                if ($candidates->unique()->count() === $group->count()) {
+                    break;
+                }
+                $len++;
+            }
+
+            foreach ($group as $n) {
+                $suffix = mb_substr($n['last'], 0, $len);
+                $out[$n['id']] = $n['first'].($suffix !== '' ? ' '.$suffix : '');
+            }
+        }
+
+        return $out;
+    }
 }

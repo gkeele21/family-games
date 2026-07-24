@@ -34,7 +34,7 @@ class ScoredGameController extends Controller
                     $players = $g->competitors->flatMap->players->unique('id')->values();
                     // Same short names as the scorecard: first name only,
                     // extended just enough to tell same-named people apart.
-                    $display = $this->displayNames($players);
+                    $display = $this->service->displayNames($players);
 
                     // Rank-1 finishers of completed games (ties → several).
                     // Individuals get their short name; teams keep the team name.
@@ -179,7 +179,7 @@ class ScoredGameController extends Controller
         $scoredGame->load(['competitors.players', 'rounds.scores']);
 
         // First-name-only display, disambiguated across everyone in the game.
-        $display = $this->displayNames($scoredGame->competitors->flatMap->players);
+        $display = $this->service->displayNames($scoredGame->competitors->flatMap->players);
 
         $competitors = $scoredGame->competitors->map(fn ($c) => [
             'id'            => $c->id,
@@ -346,52 +346,6 @@ class ScoredGameController extends Controller
         return redirect()
             ->route('scorekeeper.households.games.index', $householdId)
             ->with('success', 'Game deleted.');
-    }
-
-    /**
-     * Scorecard display names: first name only — extended with just enough of
-     * the last name (letter by letter) to tell same-named people apart.
-     *
-     * @param  \Illuminate\Support\Collection  $players
-     * @return array<int, string>  [player_id => display name]
-     */
-    private function displayNames($players): array
-    {
-        $parsed = $players->unique('id')->map(function ($p) {
-            $parts = preg_split('/\s+/', trim($p->name)) ?: [];
-            $first = array_shift($parts) ?: $p->name;
-
-            return ['id' => $p->id, 'first' => $first, 'last' => implode('', $parts)];
-        })->values();
-
-        $out = [];
-        foreach ($parsed->groupBy(fn ($n) => mb_strtolower($n['first'])) as $group) {
-            if ($group->count() === 1) {
-                $out[$group->first()['id']] = $group->first()['first'];
-                continue;
-            }
-
-            // Same first name: extend last-name prefixes together until the
-            // group is unambiguous (or we run out of letters).
-            $maxLen = $group->max(fn ($n) => mb_strlen($n['last']));
-            $len = 1;
-            while ($len < $maxLen) {
-                $candidates = $group->map(
-                    fn ($n) => mb_strtolower(mb_substr($n['last'], 0, $len)),
-                );
-                if ($candidates->unique()->count() === $group->count()) {
-                    break;
-                }
-                $len++;
-            }
-
-            foreach ($group as $n) {
-                $suffix = mb_substr($n['last'], 0, $len);
-                $out[$n['id']] = $n['first'].($suffix !== '' ? ' '.$suffix : '');
-            }
-        }
-
-        return $out;
     }
 
     private function ensureMember(Request $request, Household $household): void
