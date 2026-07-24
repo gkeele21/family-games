@@ -47,7 +47,7 @@
                     <div
                         v-if="isOpen"
                         ref="dropdownRef"
-                        class="fixed z-[9999] bg-surface border border-primary rounded-lg shadow-lg max-h-60 overflow-auto"
+                        class="fixed z-[9999] bg-surface border border-primary rounded-lg shadow-lg overflow-auto"
                         :style="dropdownStyle"
                         @keydown.down.prevent="highlightNext"
                         @keydown.up.prevent="highlightPrev"
@@ -138,7 +138,7 @@ const highlightedIndex = ref(-1);
 const containerRef = ref(null);
 const triggerRef = ref(null);
 const dropdownRef = ref(null);
-const dropdownPosition = ref({ top: 0, left: 0, width: 0 });
+const dropdownPosition = ref({ top: 0, left: 0, width: 0, maxHeight: 240 });
 
 const sizes = {
     sm: 'py-1.5 px-3 text-sm',
@@ -203,17 +203,41 @@ const dropdownStyle = computed(() => ({
     top: `${dropdownPosition.value.top}px`,
     left: `${dropdownPosition.value.left}px`,
     width: `${dropdownPosition.value.width}px`,
+    maxHeight: `${dropdownPosition.value.maxHeight}px`,
 }));
 
 function updateDropdownPosition() {
     if (!triggerRef.value) return;
     const rect = triggerRef.value.getBoundingClientRect();
     // Use viewport coordinates directly since we're using fixed positioning
-    dropdownPosition.value = {
-        top: rect.bottom + 4,
-        left: rect.left,
-        width: rect.width,
-    };
+    const gap = 4;
+    const viewportPadding = 8;
+    const maxPanelHeight = 240; // matches the previous max-h-60 cap
+    const panelHeight = Math.min(
+        dropdownRef.value?.scrollHeight ?? maxPanelHeight,
+        maxPanelHeight,
+    );
+    const spaceBelow = window.innerHeight - rect.bottom - gap - viewportPadding;
+    const spaceAbove = rect.top - gap - viewportPadding;
+
+    // Open downward by default; flip above the trigger when the panel
+    // doesn't fit below and there's more room above.
+    if (panelHeight > spaceBelow && spaceAbove > spaceBelow) {
+        const height = Math.min(panelHeight, spaceAbove);
+        dropdownPosition.value = {
+            top: rect.top - gap - height,
+            left: rect.left,
+            width: rect.width,
+            maxHeight: height,
+        };
+    } else {
+        dropdownPosition.value = {
+            top: rect.bottom + gap,
+            left: rect.left,
+            width: rect.width,
+            maxHeight: Math.min(panelHeight, Math.max(spaceBelow, 100)),
+        };
+    }
 }
 
 function toggleDropdown() {
@@ -297,9 +321,9 @@ function handleClickOutside(event) {
     }
 }
 
-// Close on scroll
-function handleScroll() {
-    if (isOpen.value) {
+// Close on page scroll, but not when scrolling within the dropdown itself
+function handleScroll(event) {
+    if (isOpen.value && !dropdownRef.value?.contains(event.target)) {
         isOpen.value = false;
     }
 }
