@@ -17,6 +17,11 @@ const navItems = [
     { label: 'PropOff', route: 'propoff.home', active: 'propoff.*' },
 ];
 
+// Delay so a click on a menu item lands before the menu closes.
+const closeUserMenuSoon = () => {
+    window.setTimeout(() => (showingUserMenu.value = false), 150);
+};
+
 const initials = user.name
     .split(' ')
     .map((p) => p[0])
@@ -60,7 +65,7 @@ const initials = user.name
                                     type="button"
                                     class="flex items-center gap-3 rounded-full border border-border py-1 pl-4 pr-1 text-sm font-semibold text-body transition hover:border-border-strong"
                                     @click="showingUserMenu = !showingUserMenu"
-                                    @blur="setTimeout(() => (showingUserMenu = false), 150)"
+                                    @blur="closeUserMenuSoon"
                                 >
                                     {{ user.name }}
                                     <span
