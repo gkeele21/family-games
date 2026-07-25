@@ -44,8 +44,19 @@ class HouseholdInviteController extends Controller
             'expires_at'         => now()->addDays(14),
         ]);
 
-        Mail::to($invite->email)
-            ->send(new HouseholdInvitation($invite->load(['household', 'invitedBy', 'player'])));
+        try {
+            Mail::to($invite->email)
+                ->send(new HouseholdInvitation($invite->load(['household', 'invitedBy', 'player'])));
+        } catch (\Throwable $e) {
+            // Mail failure shouldn't 500 — surface it on the form instead.
+            // The unsent invite is removed so a retry starts clean.
+            report($e);
+            $invite->delete();
+
+            return back()->withErrors([
+                'email' => 'The invite email could not be sent. Please try again in a moment.',
+            ]);
+        }
 
         return back()->with('success', "Invitation sent to {$invite->email}.");
     }

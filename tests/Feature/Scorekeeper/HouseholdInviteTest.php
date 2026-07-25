@@ -2,16 +2,58 @@
 
 namespace Tests\Feature\Scorekeeper;
 
+use App\Mail\HouseholdInvitation;
 use App\Models\Scorekeeper\Household;
 use App\Models\Scorekeeper\HouseholdInvite;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use Symfony\Component\Mailer\Exception\TransportException;
 use Tests\TestCase;
 
 class HouseholdInviteTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_invite_sends_email_and_flashes_success(): void
+    {
+        Mail::fake();
+        $owner = User::factory()->create();
+        $household = $this->householdOwnedBy($owner);
+
+        $this->actingAs($owner)
+            ->post(route('scorekeeper.households.invites.store', $household), [
+                'email' => 'Bert@Example.com',
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        Mail::assertSent(
+            HouseholdInvitation::class,
+            fn (HouseholdInvitation $mail) => $mail->hasTo('bert@example.com'),
+        );
+        $this->assertDatabaseHas('household_invites', ['email' => 'bert@example.com']);
+    }
+
+    public function test_failed_invite_email_returns_error_and_removes_invite(): void
+    {
+        $owner = User::factory()->create();
+        $household = $this->householdOwnedBy($owner);
+
+        Mail::shouldReceive('to')
+            ->once()
+            ->andThrow(new TransportException('connection refused'));
+
+        $this->actingAs($owner)
+            ->post(route('scorekeeper.households.invites.store', $household), [
+                'email' => 'bert@example.com',
+            ])
+            ->assertRedirect()
+            ->assertSessionHasErrors('email');
+
+        $this->assertDatabaseMissing('household_invites', ['email' => 'bert@example.com']);
+    }
 
     public function test_matching_email_can_accept_invite(): void
     {

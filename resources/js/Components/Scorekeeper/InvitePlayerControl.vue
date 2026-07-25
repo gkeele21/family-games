@@ -10,6 +10,10 @@ const props = defineProps<{
 }>();
 
 const open = ref(false);
+// Inline confirmation: the page-top flash can be scrolled out of view, so a
+// successful send is confirmed right here next to the control.
+const sentTo = ref<string | null>(null);
+let sentTimer: ReturnType<typeof setTimeout> | null = null;
 const form = useForm({
     email: '',
     player_id: props.playerId,
@@ -21,6 +25,9 @@ const send = () => {
         {
             preserveScroll: true,
             onSuccess: () => {
+                sentTo.value = form.email;
+                if (sentTimer) clearTimeout(sentTimer);
+                sentTimer = setTimeout(() => (sentTo.value = null), 5000);
                 open.value = false;
                 form.reset('email');
             },
@@ -30,14 +37,20 @@ const send = () => {
 </script>
 
 <template>
-    <button
-        v-if="!open"
-        type="button"
-        class="text-sm font-medium text-[#0b5d3b] hover:text-[#084a2f]"
-        @click="open = true"
-    >
-        Invite
-    </button>
+    <span v-if="!open" class="flex items-center gap-2">
+        <button
+            type="button"
+            class="text-sm font-medium text-[#0b5d3b] hover:text-[#084a2f]"
+            @click="open = true"
+        >
+            Invite
+        </button>
+        <span
+            v-if="sentTo"
+            class="text-xs font-medium text-green-700"
+            >✓ Invite sent to {{ sentTo }}</span
+        >
+    </span>
     <form v-else class="flex items-center gap-2" @submit.prevent="send">
         <TextInput
             v-model="form.email"
