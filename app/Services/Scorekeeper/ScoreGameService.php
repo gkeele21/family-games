@@ -53,6 +53,9 @@ class ScoreGameService
                     ->attach($competitor['player_ids']);
             }
 
+            // Every game starts with round 1 ready for scoring.
+            $this->addRound($game);
+
             return $game;
         });
     }

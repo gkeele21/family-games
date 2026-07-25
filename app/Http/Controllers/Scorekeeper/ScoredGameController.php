@@ -11,6 +11,7 @@ use App\Models\Scorekeeper\ScoredGame;
 use App\Models\User;
 use App\Services\Scorekeeper\ScoreGameService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -300,6 +301,59 @@ class ScoredGameController extends Controller
         }
 
         $this->service->recordScores($round, $validated['scores']);
+
+        return back();
+    }
+
+    /**
+     * Save every round's scores in one request (the scorecard's single Save
+     * button). Same permission rules as the per-round endpoint.
+     */
+    public function updateAllScores(Request $request, ScoredGame $scoredGame)
+    {
+        $this->ensureMember($request, $scoredGame->household);
+        abort_if($scoredGame->is_complete, 403, 'Game is already complete.');
+
+        $validated = $request->validate([
+            'rounds'       => 'required|array',
+            'rounds.*'     => 'array',
+            'rounds.*.*'   => 'array',
+            'rounds.*.*.*' => 'nullable|integer',
+        ]);
+
+        // Every submitted round must belong to this game.
+        $rounds = $scoredGame->rounds()
+            ->whereIn('id', array_keys($validated['rounds']))
+            ->get()
+            ->keyBy('id');
+        abort_unless($rounds->count() === count($validated['rounds']), 404);
+
+        // Guests may only enter their own competitor's scores, and only when
+        // the game's template allowed self-scoring.
+        if (! $scoredGame->household->isScorer($request->user())) {
+            abort_unless(
+                $scoredGame->allow_self_scoring,
+                403,
+                'Only the scorekeeper can enter scores for this game.',
+            );
+            $selfId = $this->selfCompetitorId($scoredGame, $request->user());
+            abort_unless($selfId, 403, 'You are not playing in this game.');
+            foreach ($validated['rounds'] as $scores) {
+                foreach (array_keys($scores) as $competitorId) {
+                    abort_unless(
+                        (int) $competitorId === $selfId,
+                        403,
+                        'You can only enter your own scores.',
+                    );
+                }
+            }
+        }
+
+        DB::transaction(function () use ($rounds, $validated) {
+            foreach ($validated['rounds'] as $roundId => $scores) {
+                $this->service->recordScores($rounds[$roundId], $scores);
+            }
+        });
 
         return back();
     }

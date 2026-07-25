@@ -97,6 +97,30 @@ class SelfScoringTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_guest_bulk_save_limited_to_own_scores(): void
+    {
+        $this->startGame(true);
+
+        $this->actingAs($this->guest)
+            ->patch(route('scorekeeper.games.scores.update', $this->game), [
+                'rounds' => [
+                    $this->round->id => [$this->selfCompetitorId => ['score' => 42]],
+                ],
+            ])
+            ->assertRedirect();
+        $this->assertDatabaseHas('round_scores', [
+            'round_id' => $this->round->id, 'competitor_id' => $this->selfCompetitorId,
+        ]);
+
+        $this->actingAs($this->guest)
+            ->patch(route('scorekeeper.games.scores.update', $this->game), [
+                'rounds' => [
+                    $this->round->id => [$this->otherCompetitorId => ['score' => 99]],
+                ],
+            ])
+            ->assertForbidden();
+    }
+
     public function test_guest_cannot_run_the_game(): void
     {
         $this->startGame(true);

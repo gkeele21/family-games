@@ -128,7 +128,8 @@ const inputs = reactive<
     Record<number, Record<number, Record<string, number | string>>>
 >({});
 // Cells the user has typed into but not saved — protected from live refresh.
-const dirty = new Set<string>();
+// Reactive so the Save button can enable itself when edits appear.
+const dirty = reactive(new Set<string>());
 const cellKey = (roundId: number, competitorId: number, fieldKey: string) =>
     `${roundId}:${competitorId}:${fieldKey}`;
 const markDirty = (roundId: number, competitorId: number, fieldKey: string) =>
@@ -162,7 +163,7 @@ const refresh = () => {
         deleting.value ||
         document.hidden ||
         props.game.is_complete ||
-        savingRound.value !== null
+        saving.value
     )
         return;
     router.reload({
@@ -185,7 +186,8 @@ onUnmounted(() => {
     if (refreshTimer) clearInterval(refreshTimer);
 });
 
-const savingRound = ref<number | null>(null);
+const saving = ref(false);
+const hasUnsaved = computed(() => dirty.size > 0);
 
 const rules = computed(() => {
     const parts: string[] = [];
@@ -436,7 +438,8 @@ const addRound = () => {
 
 // Tab moves through all of a player's fields before advancing to the next
 // player (the DOM's natural order is the opposite — across players per
-// field). After the round's last cell, Tab lands on its Save button.
+// field). After a round's last cell, Tab continues into the next round; after
+// the final round it lands on the Save button.
 const onScoreTab = (
     e: KeyboardEvent,
     roundId: number,
@@ -452,47 +455,53 @@ const onScoreTab = (
     if (idx === -1) return;
 
     const next = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
-    const target = next
-        ? document.querySelector<HTMLElement>(
-              `[data-cell="${roundId}:${next.c}:${next.f}"]`,
-          )
-        : e.shiftKey
-          ? null
-          : document.querySelector<HTMLElement>(
-                `[data-save-round="${roundId}"]`,
-            );
+    let target: HTMLElement | null = null;
+    if (next) {
+        target = document.querySelector<HTMLElement>(
+            `[data-cell="${roundId}:${next.c}:${next.f}"]`,
+        );
+    } else if (!e.shiftKey) {
+        const ri = props.rounds.findIndex((r) => r.id === roundId);
+        const nextRound = props.rounds[ri + 1];
+        target =
+            nextRound && cells[0]
+                ? document.querySelector<HTMLElement>(
+                      `[data-cell="${nextRound.id}:${cells[0].c}:${cells[0].f}"]`,
+                  )
+                : document.querySelector<HTMLElement>('[data-save-all]');
+    }
     if (target) {
         e.preventDefault();
         target.focus();
     }
 };
 
-const saveRound = (round: Round) => {
-    const scores: Record<number, Record<string, number | null>> = {};
-    props.competitors.forEach((c) => {
-        if (!canEditCompetitor(c.id)) return; // guests submit only their own
-        scores[c.id] = {};
-        fields.value.forEach((f) => {
-            const v = inputs[round.id]?.[c.id]?.[f.key];
-            scores[c.id][f.key] =
-                v === '' || v === null || v === undefined ? null : Number(v);
+const saveAll = () => {
+    const rounds: Record<
+        number,
+        Record<number, Record<string, number | null>>
+    > = {};
+    props.rounds.forEach((r) => {
+        rounds[r.id] = {};
+        props.competitors.forEach((c) => {
+            if (!canEditCompetitor(c.id)) return; // guests submit only their own
+            rounds[r.id][c.id] = {};
+            fields.value.forEach((f) => {
+                const v = inputs[r.id]?.[c.id]?.[f.key];
+                rounds[r.id][c.id][f.key] =
+                    v === '' || v === null || v === undefined ? null : Number(v);
+            });
         });
     });
-    savingRound.value = round.id;
+    saving.value = true;
     router.patch(
-        route('scorekeeper.games.rounds.update', [props.game.id, round.id]),
-        { scores },
+        route('scorekeeper.games.scores.update', props.game.id),
+        { rounds },
         {
             preserveScroll: true,
-            onFinish: () => (savingRound.value = null),
-            onSuccess: () => {
-                // Saved — server is the source of truth for this round again.
-                props.competitors.forEach((c) =>
-                    fields.value.forEach((f) =>
-                        dirty.delete(cellKey(round.id, c.id, f.key)),
-                    ),
-                );
-            },
+            onFinish: () => (saving.value = false),
+            // Saved — server is the source of truth again.
+            onSuccess: () => dirty.clear(),
         },
     );
 };
@@ -625,43 +634,41 @@ const deleteGame = () => {
                         <li
                             v-for="s in standings"
                             :key="s.competitor_id"
-                            class="flex items-center justify-between px-6 py-3"
+                            class="flex items-center gap-3 px-6 py-3"
                         >
-                            <div class="flex items-center gap-3">
+                            <span
+                                class="inline-flex min-w-[2.75rem] justify-center rounded-full px-2 py-0.5 text-sm font-semibold"
+                                :class="
+                                    s.rank === 1
+                                        ? 'bg-[#f2d27c] text-[#5b4708]'
+                                        : 'bg-gray-100 text-gray-600'
+                                "
+                                >{{ ordinal(s.rank) }}</span
+                            >
+                            <span
+                                class="h-3 w-3 shrink-0 rounded-full"
+                                :style="{
+                                    backgroundColor: colorAt(
+                                        colorIndexFor(s.competitor_id),
+                                    ).head,
+                                }"
+                            ></span>
+                            <span class="flex items-baseline gap-2">
+                                <span class="font-medium text-gray-900">{{
+                                    s.name
+                                }}</span>
+                                <span class="font-semibold text-indigo-900">{{
+                                    s.total
+                                }}</span>
                                 <span
-                                    class="inline-flex min-w-[2.75rem] justify-center rounded-full px-2 py-0.5 text-sm font-semibold"
-                                    :class="
-                                        s.rank === 1
-                                            ? 'bg-[#f2d27c] text-[#5b4708]'
-                                            : 'bg-gray-100 text-gray-600'
+                                    v-if="
+                                        game.team_based &&
+                                        membersFor(s.competitor_id)
                                     "
-                                    >{{ ordinal(s.rank) }}</span
+                                    class="text-sm text-gray-500"
+                                    >{{ membersFor(s.competitor_id) }}</span
                                 >
-                                <span
-                                    class="h-3 w-3 shrink-0 rounded-full"
-                                    :style="{
-                                        backgroundColor: colorAt(
-                                            colorIndexFor(s.competitor_id),
-                                        ).head,
-                                    }"
-                                ></span>
-                                <span class="flex items-baseline gap-2">
-                                    <span class="font-medium text-gray-900">{{
-                                        s.name
-                                    }}</span>
-                                    <span
-                                        v-if="
-                                            game.team_based &&
-                                            membersFor(s.competitor_id)
-                                        "
-                                        class="text-sm text-gray-500"
-                                        >{{ membersFor(s.competitor_id) }}</span
-                                    >
-                                </span>
-                            </div>
-                            <span class="font-semibold text-indigo-900">{{
-                                s.total
-                            }}</span>
+                            </span>
                         </li>
                     </ol>
                 </div>
@@ -700,6 +707,14 @@ const deleteGame = () => {
                                 </option>
                             </template>
                         </select>
+                        <PrimaryButton
+                            v-if="isEditor"
+                            class="ml-auto"
+                            data-save-all
+                            :disabled="saving || !hasUnsaved"
+                            @click="saveAll"
+                            >{{ saving ? 'Saving…' : 'Save scores' }}</PrimaryButton
+                        >
                     </div>
                     <div class="max-h-[70vh] overflow-auto overscroll-x-contain">
                         <table class="min-w-full divide-y divide-gray-200 text-sm">
@@ -731,10 +746,6 @@ const deleteGame = () => {
                                             {{ c.members.map((m) => m.name).join(', ') }}
                                         </div>
                                     </th>
-                                    <th
-                                        v-if="isEditor"
-                                        class="sticky top-0 z-10 bg-white"
-                                    ></th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-100">
@@ -777,16 +788,6 @@ const deleteGame = () => {
                                                 fields[0].key
                                             ] ?? '—'
                                         }}</span>
-                                    </td>
-                                    <td
-                                        v-if="isEditor"
-                                        class="px-2 py-2 align-top"
-                                    >
-                                        <SecondaryButton
-                                            :disabled="savingRound === r.id"
-                                            @click="saveRound(r)"
-                                            >Save</SecondaryButton
-                                        >
                                     </td>
                                 </tr>
 
@@ -852,18 +853,6 @@ const deleteGame = () => {
                                                 r.scores?.[c.id]?.[f.key] ?? '—'
                                             }}</span>
                                         </td>
-                                        <td
-                                            v-if="fi === 0 && isEditor"
-                                            :rowspan="fields.length"
-                                            class="px-2 py-2 align-top"
-                                        >
-                                            <SecondaryButton
-                                                :data-save-round="r.id"
-                                                :disabled="savingRound === r.id"
-                                                @click="saveRound(r)"
-                                                >Save</SecondaryButton
-                                            >
-                                        </td>
                                     </tr>
                                     <tr class="text-sm">
                                         <td
@@ -884,7 +873,6 @@ const deleteGame = () => {
                                         >
                                             {{ roundTotal(r, c.id) }}
                                         </td>
-                                        <td v-if="isEditor"></td>
                                     </tr>
                                 </template>
                                 </template>
@@ -895,7 +883,7 @@ const deleteGame = () => {
                                     <td
                                         :colspan="
                                             competitors.length +
-                                            (singleField ? 2 : 3)
+                                            (singleField ? 1 : 2)
                                         "
                                         class="px-4 py-6 text-center"
                                     >
@@ -943,10 +931,17 @@ const deleteGame = () => {
                                             >
                                         </div>
                                     </td>
-                                    <td v-if="isEditor"></td>
                                 </tr>
                             </tfoot>
                         </table>
+                    </div>
+                    <div
+                        v-if="!game.is_complete && can.score_all"
+                        class="border-t px-4 py-3"
+                    >
+                        <PrimaryButton @click="addRound"
+                            >Add round</PrimaryButton
+                        >
                     </div>
                 </div>
 
@@ -1202,14 +1197,11 @@ const deleteGame = () => {
 
                 <!-- Actions (scorekeepers only) -->
                 <div v-if="can.score_all" class="flex items-center gap-3">
-                    <template v-if="!game.is_complete">
-                        <PrimaryButton @click="addRound"
-                            >Add round</PrimaryButton
-                        >
-                        <SecondaryButton @click="completeGame"
-                            >Complete game</SecondaryButton
-                        >
-                    </template>
+                    <SecondaryButton
+                        v-if="!game.is_complete"
+                        @click="completeGame"
+                        >Complete game</SecondaryButton
+                    >
                     <DangerButton class="ml-auto" @click="deleteGame"
                         >Delete game</DangerButton
                     >

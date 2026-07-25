@@ -46,7 +46,8 @@ class ScoredGameTest extends TestCase
             'competitor_id' => $competitors[0]->id, 'player_id' => $alice->id,
         ]);
 
-        $this->actingAs($user)->post(route('scorekeeper.games.rounds.add', $game));
+        // A new game starts with round 1 already created.
+        $this->assertSame(1, $game->rounds()->count());
         $round = $game->rounds()->firstOrFail();
 
         $this->actingAs($user)->patch(
@@ -94,7 +95,7 @@ class ScoredGameTest extends TestCase
         $game = ScoredGame::firstOrFail();
         $competitors = $game->competitors()->orderBy('display_order')->get();
 
-        $this->actingAs($user)->post(route('scorekeeper.games.rounds.add', $game));
+        // A new game starts with round 1 already created.
         $round = $game->rounds()->firstOrFail();
         $this->actingAs($user)->patch(
             route('scorekeeper.games.rounds.update', [$game, $round]),
@@ -144,7 +145,7 @@ class ScoredGameTest extends TestCase
             'competitor_id' => $competitors[0]->id, 'player_id' => $p[0]->id,
         ]);
 
-        $this->actingAs($user)->post(route('scorekeeper.games.rounds.add', $game));
+        // A new game starts with round 1 already created.
         $round = $game->rounds()->firstOrFail();
         $this->actingAs($user)->patch(
             route('scorekeeper.games.rounds.update', [$game, $round]),
@@ -198,7 +199,7 @@ class ScoredGameTest extends TestCase
             ['game_template_id' => $template->id, 'player_ids' => [$alice->id, $bob->id]],
         );
         $game = ScoredGame::firstOrFail();
-        $this->actingAs($user)->post(route('scorekeeper.games.rounds.add', $game));
+        // A new game starts with round 1 already created.
         $round = $game->rounds()->firstOrFail();
 
         $this->actingAs($user)
@@ -296,6 +297,87 @@ class ScoredGameTest extends TestCase
                 'played_at' => '2026-02-03',
             ])
             ->assertForbidden();
+    }
+
+    public function test_save_all_saves_every_round_at_once(): void
+    {
+        $user = User::factory()->create();
+        $household = $this->householdOwnedBy($user);
+        $alice = $household->players()->create(['name' => 'Alice']);
+        $bob = $household->players()->create(['name' => 'Bob']);
+        $template = GameTemplate::create([
+            'name' => 'T', 'household_id' => $household->id, 'is_system' => false,
+            'low_score_wins' => false, 'team_based' => false,
+            'score_fields' => [['key' => 'score', 'label' => 'Score', 'counts_toward_total' => true]],
+        ]);
+
+        $this->actingAs($user)->post(
+            route('scorekeeper.households.games.store', $household),
+            ['game_template_id' => $template->id, 'player_ids' => [$alice->id, $bob->id]],
+        );
+        $game = ScoredGame::firstOrFail();
+        $competitors = $game->competitors()->orderBy('display_order')->get();
+
+        $this->actingAs($user)->post(route('scorekeeper.games.rounds.add', $game));
+        [$round1, $round2] = $game->rounds()->orderBy('round_number')->get();
+
+        $this->actingAs($user)
+            ->patch(route('scorekeeper.games.scores.update', $game), [
+                'rounds' => [
+                    $round1->id => [
+                        $competitors[0]->id => ['score' => 10],
+                        $competitors[1]->id => ['score' => 20],
+                    ],
+                    $round2->id => [
+                        $competitors[0]->id => ['score' => 30],
+                        $competitors[1]->id => ['score' => 40],
+                    ],
+                ],
+            ])
+            ->assertRedirect();
+
+        $this->assertDatabaseHas('round_scores', [
+            'round_id' => $round1->id, 'competitor_id' => $competitors[0]->id,
+        ]);
+        $this->assertDatabaseHas('round_scores', [
+            'round_id' => $round2->id, 'competitor_id' => $competitors[1]->id,
+        ]);
+        $this->assertSame(
+            40,
+            app(\App\Services\Scorekeeper\ScoreGameService::class)
+                ->totals($game->fresh())[$competitors[0]->id],
+        );
+    }
+
+    public function test_save_all_rejects_rounds_from_another_game(): void
+    {
+        $user = User::factory()->create();
+        $household = $this->householdOwnedBy($user);
+        $alice = $household->players()->create(['name' => 'Alice']);
+        $bob = $household->players()->create(['name' => 'Bob']);
+        $template = GameTemplate::create([
+            'name' => 'T', 'household_id' => $household->id, 'is_system' => false,
+            'low_score_wins' => false, 'team_based' => false,
+            'score_fields' => [['key' => 'score', 'label' => 'Score', 'counts_toward_total' => true]],
+        ]);
+
+        foreach ([1, 2] as $i) {
+            $this->actingAs($user)->post(
+                route('scorekeeper.households.games.store', $household),
+                ['game_template_id' => $template->id, 'player_ids' => [$alice->id, $bob->id]],
+            );
+        }
+        [$game, $otherGame] = ScoredGame::orderBy('id')->get();
+        $foreignRound = $otherGame->rounds()->firstOrFail();
+        $competitorId = $game->competitors()->first()->id;
+
+        $this->actingAs($user)
+            ->patch(route('scorekeeper.games.scores.update', $game), [
+                'rounds' => [
+                    $foreignRound->id => [$competitorId => ['score' => 99]],
+                ],
+            ])
+            ->assertNotFound();
     }
 
     public function test_non_member_cannot_start_game(): void

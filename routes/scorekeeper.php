@@ -63,6 +63,8 @@ Route::prefix('scorekeeper')->name('scorekeeper.')->group(function () {
             ->name('games.rounds.add');
         Route::patch('games/{scoredGame}/rounds/{round}', [ScoredGameController::class, 'updateScores'])
             ->name('games.rounds.update');
+        Route::patch('games/{scoredGame}/scores', [ScoredGameController::class, 'updateAllScores'])
+            ->name('games.scores.update');
         Route::post('games/{scoredGame}/complete', [ScoredGameController::class, 'complete'])
             ->name('games.complete');
         Route::patch('games/{scoredGame}/play-date', [ScoredGameController::class, 'updatePlayDate'])
