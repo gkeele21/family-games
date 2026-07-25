@@ -653,22 +653,22 @@ const deleteGame = () => {
                                     ).head,
                                 }"
                             ></span>
-                            <span class="flex items-baseline gap-2">
-                                <span class="font-medium text-gray-900">{{
-                                    s.name
-                                }}</span>
-                                <span class="font-semibold text-indigo-900">{{
-                                    s.total
-                                }}</span>
-                                <span
-                                    v-if="
-                                        game.team_based &&
-                                        membersFor(s.competitor_id)
-                                    "
-                                    class="text-sm text-gray-500"
-                                    >{{ membersFor(s.competitor_id) }}</span
-                                >
-                            </span>
+                            <span
+                                class="w-36 truncate font-medium text-gray-900"
+                                >{{ s.name }}</span
+                            >
+                            <span
+                                class="w-14 text-right font-semibold tabular-nums text-indigo-900"
+                                >{{ s.total }}</span
+                            >
+                            <span
+                                v-if="
+                                    game.team_based &&
+                                    membersFor(s.competitor_id)
+                                "
+                                class="text-sm text-gray-500"
+                                >{{ membersFor(s.competitor_id) }}</span
+                            >
                         </li>
                     </ol>
                 </div>
@@ -936,11 +936,21 @@ const deleteGame = () => {
                         </table>
                     </div>
                     <div
-                        v-if="!game.is_complete && can.score_all"
-                        class="border-t px-4 py-3"
+                        v-if="isEditor"
+                        class="flex items-center border-t px-4 py-3"
                     >
-                        <PrimaryButton @click="addRound"
+                        <PrimaryButton
+                            v-if="can.score_all"
+                            @click="addRound"
                             >Add round</PrimaryButton
+                        >
+                        <PrimaryButton
+                            class="ml-auto"
+                            :disabled="saving || !hasUnsaved"
+                            @click="saveAll"
+                            >{{
+                                saving ? 'Saving…' : 'Save scores'
+                            }}</PrimaryButton
                         >
                     </div>
                 </div>
