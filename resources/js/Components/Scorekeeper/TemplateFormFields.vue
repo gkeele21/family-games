@@ -107,7 +107,7 @@ const removeField = (index: number) => {
                     v-model.number="form.target_score"
                     type="number"
                     min="0"
-                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    class="mt-1 block w-full rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                 />
                 <InputError class="mt-1" :message="form.errors.target_score" />
             </div>
@@ -121,7 +121,7 @@ const removeField = (index: number) => {
                     v-model.number="form.max_rounds"
                     type="number"
                     min="1"
-                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    class="mt-1 block w-full rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                 />
                 <InputError class="mt-1" :message="form.errors.max_rounds" />
             </div>

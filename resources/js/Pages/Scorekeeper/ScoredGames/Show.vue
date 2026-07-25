@@ -564,7 +564,7 @@ const deleteGame = () => {
                             <input
                                 v-model="dateForm.played_at"
                                 type="date"
-                                class="rounded-md border-gray-300 py-0.5 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                class="rounded-md border-gray-300 bg-white text-gray-900 py-0.5 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                             />
                             <button
                                 type="button"
@@ -686,7 +686,7 @@ const deleteGame = () => {
                         <select
                             id="sort-by"
                             v-model="sortBy"
-                            class="rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            class="rounded-md border-gray-300 bg-white text-gray-900 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                         >
                             <option value="manage">Order set in Manage</option>
                             <option value="total">Total</option>
@@ -769,7 +769,7 @@ const deleteGame = () => {
                                                     fields[0].key,
                                                 )
                                             "
-                                            class="no-spinner rounded-md border-gray-300 px-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                            class="no-spinner rounded-md border-gray-300 bg-white text-gray-900 px-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                             :class="fieldWidths[fields[0].key]"
                                         />
                                         <span v-else class="text-gray-900">{{
@@ -845,7 +845,7 @@ const deleteGame = () => {
                                                         f.key,
                                                     )
                                                 "
-                                                class="no-spinner rounded-md border-gray-300 px-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                class="no-spinner rounded-md border-gray-300 bg-white text-gray-900 px-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                                 :class="fieldWidths[f.key]"
                                             />
                                             <span v-else class="text-gray-900">{{

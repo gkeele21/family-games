@@ -114,7 +114,7 @@ const invite = () => {
                             <select
                                 id="role"
                                 v-model="inviteForm.role"
-                                class="mt-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                class="mt-1 rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                             >
                                 <option value="member">Member</option>
                                 <option value="guest">Guest</option>

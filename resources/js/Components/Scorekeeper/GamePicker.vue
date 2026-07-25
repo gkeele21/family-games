@@ -78,7 +78,7 @@ watch(
             v-if="selectValue !== NEW"
             :id="id"
             v-model="selectValue"
-            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+            class="mt-1 block w-full rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
             @change="onSelectChange"
         >
             <option value="" disabled>Select a game…</option>
