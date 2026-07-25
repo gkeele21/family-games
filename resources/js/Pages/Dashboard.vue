@@ -24,6 +24,7 @@ interface Winner {
 interface RecentGame {
     kind: 'trivia' | 'scorekeeper' | 'propoff';
     id: number;
+    code: string | null;
     name: string;
     game_type: { name: string; slug: string };
     finished_at: string;
@@ -110,6 +111,16 @@ const formatDate = (dateString: string) => {
         hour: 'numeric',
         minute: '2-digit',
     });
+};
+
+const getRecentGameLink = (game: RecentGame) => {
+    if (game.kind === 'scorekeeper') {
+        return route('scorekeeper.games.show', game.id);
+    }
+    if (game.kind === 'propoff') {
+        return route('propoff.play.leaderboard', game.code ?? '');
+    }
+    return route('host.game', game.id);
 };
 
 const getActiveGameLink = (game: ActiveGame) => {
@@ -261,9 +272,10 @@ const getActiveGameLink = (game: ActiveGame) => {
                         <h3 class="text-lg font-semibold text-body">Recent Games</h3>
                     </div>
                     <div class="divide-y divide-border">
-                        <div
+                        <Link
                             v-for="game in recentGames"
                             :key="`${game.kind}-${game.id}`"
+                            :href="getRecentGameLink(game)"
                             class="flex items-center justify-between px-6 py-4 transition hover:bg-white/5"
                         >
                             <div class="flex items-center gap-4">
@@ -296,7 +308,7 @@ const getActiveGameLink = (game: ActiveGame) => {
                                 </div>
                                 <div v-else class="text-sm text-subtle">No winner</div>
                             </div>
-                        </div>
+                        </Link>
                     </div>
                 </div>
             </div>

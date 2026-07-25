@@ -100,6 +100,7 @@ class DashboardController extends Controller
                 return [
                     'kind'         => 'trivia',
                     'id'           => $g->id,
+                    'code'         => null,
                     'name'         => $g->name ?: $g->gameType->name,
                     'game_type'    => ['name' => $g->gameType->name, 'slug' => $g->gameType->slug],
                     'finished_at'  => $g->completed_at ?? $g->created_at,
@@ -145,6 +146,7 @@ class DashboardController extends Controller
                 return [
                     'kind'         => 'scorekeeper',
                     'id'           => $g->id,
+                    'code'         => null,
                     'name'         => $g->template_name_snapshot,
                     'game_type'    => ['name' => $g->base_game_type ?: 'Scorekeeper', 'slug' => 'scorekeeper'],
                     'finished_at'  => $g->ended_at ?? $g->started_at,
@@ -181,6 +183,7 @@ class DashboardController extends Controller
                 return [
                     'kind'         => 'propoff',
                     'id'           => $group->id,
+                    'code'         => $group->code,
                     'name'         => $group->event->name,
                     'game_type'    => ['name' => 'PropOff', 'slug' => 'propoff'],
                     'finished_at'  => $group->event->event_date ?? $group->event->updated_at,
