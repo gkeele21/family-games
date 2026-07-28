@@ -43,13 +43,21 @@ class GameTypeSeeder extends Seeder
             'description' => 'Survey-based game where teams try to guess all answers within a time limit. Features control timers, steal rounds, and flat scoring.',
             'default_config' => [
                 'team_size' => 0, // 0 = unlimited, 1 = individual play
+                'number_of_teams' => 2, // teams auto-created in the lobby (Team A, Team B…)
                 'allow_team_selection' => false, // If true, players can pick their team
-                'questions_per_game' => 10,
                 'answers_per_question' => 7,
                 'control_timer_seconds' => 30,
                 'steal_timer_seconds' => 10,
-                'steal_points_percentage' => 50,
-                'points_per_answer' => 100,
+                'steal_points_percentage' => 100, // steal earns the full round value
+                // Per-round scoring: a round plays one question per team. Each correct
+                // answer scores points_per_answer; sweeping the whole board adds bonus_points.
+                'rounds' => 3,
+                'round_scoring' => [
+                    ['points_per_answer' => 100, 'bonus_points' => 1000],
+                    ['points_per_answer' => 200, 'bonus_points' => 2000],
+                    ['points_per_answer' => 300, 'bonus_points' => 3000],
+                ],
+                'points_per_answer' => 100, // fallback for legacy/flat scoring
                 'gameplay_mode' => 'host_reveal', // 'host_reveal' or 'team_buzzer'
                 'winning_condition' => 'most_points_after_questions',
                 'winning_condition_options' => [

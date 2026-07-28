@@ -30,13 +30,26 @@ class GameSessionController extends Controller
         ]);
     }
 
-    public function create(): Response
+    /**
+     * "Host a Game" — drop straight onto the unified setup screen. Resume the
+     * host's existing lobby draft if there is one (so we don't litter abandoned
+     * drafts), otherwise bootstrap a fresh one defaulting to America Says. The
+     * game itself is chosen/changed on the setup screen.
+     */
+    public function create()
     {
-        $gameTypes = GameType::online()->get();
+        $session = GameSession::where('host_user_id', auth()->id())
+            ->where('status', 'lobby')
+            ->latest()
+            ->first();
 
-        return Inertia::render('GameSessions/Create', [
-            'gameTypes' => $gameTypes,
-        ]);
+        if (!$session) {
+            $default = GameType::where('slug', 'america-says')->first() ?? GameType::online()->first();
+            abort_if(!$default, 404, 'No games available.');
+            $session = $this->bootstrapSession($default);
+        }
+
+        return redirect()->route('host.lobby', $session);
     }
 
     public function store(Request $request)
@@ -47,23 +60,96 @@ class GameSessionController extends Controller
             'settings' => 'nullable|array',
         ]);
 
+        $gameType = GameType::findOrFail($validated['game_type_id']);
+        $session = $this->bootstrapSession(
+            $gameType,
+            $validated['name'] ?? null,
+            !empty($validated['settings']) ? $validated['settings'] : null,
+        );
+
+        return redirect()->route('host.lobby', $session);
+    }
+
+    /**
+     * Change the game for a draft session in place. Nothing is materialized
+     * until the game starts, so this just swaps the type and resets settings to
+     * the new game's defaults (teams are game-agnostic and kept).
+     */
+    public function changeGameType(Request $request, GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+        if ($gameSession->status !== 'lobby') {
+            return back()->withErrors(['game_type' => 'Cannot change the game after it has started.']);
+        }
+
+        $validated = $request->validate([
+            'game_type_id' => 'required|exists:game_types,id',
+        ]);
+
+        $gameType = GameType::findOrFail($validated['game_type_id']);
+        $gameSession->update([
+            'game_type_id' => $gameType->id,
+            'settings' => $gameType->default_config ?? [],
+        ]);
+        $gameSession->gameState?->update([
+            'timer_duration' => $gameSession->getConfig('control_timer_seconds', 30),
+        ]);
+
+        return back()->with('success', 'Game changed.');
+    }
+
+    /**
+     * Create a lobby session (settings defaulted from the game type), its game
+     * state, and the auto-created teams. Shared by create() and store().
+     */
+    protected function bootstrapSession(GameType $gameType, ?string $name = null, ?array $settings = null): GameSession
+    {
         $session = GameSession::create([
-            'game_type_id' => $validated['game_type_id'],
+            'game_type_id' => $gameType->id,
             'host_user_id' => auth()->id(),
-            'name' => $validated['name'] ?? null,
-            'settings' => $validated['settings'] ?? null,
+            'name' => $name,
+            'settings' => $settings ?? ($gameType->default_config ?? []),
             'status' => 'lobby',
         ]);
 
-        // Create initial game state
         GameState::create([
             'game_session_id' => $session->id,
             'round_number' => 1,
             'timer_duration' => $session->getConfig('control_timer_seconds', 30),
         ]);
 
-        return redirect()->route('host.lobby', $session);
+        // Auto-create teams (Team A, Team B, …) unless individual play.
+        if ((int) $session->getConfig('team_size', 0) !== 1) {
+            $numTeams = max(1, min(8, (int) $session->getConfig('number_of_teams', 2)));
+            foreach (range(0, $numTeams - 1) as $i) {
+                Team::create([
+                    'game_session_id' => $session->id,
+                    'name' => 'Team ' . chr(65 + $i),
+                    'color' => self::TEAM_COLORS[$i % count(self::TEAM_COLORS)],
+                    'display_order' => $i + 1,
+                ]);
+            }
+        }
+
+        return $session;
     }
+
+    /**
+     * Default team colors — palette values only (danger, info, primary,
+     * warning, gold, propoff-blue, propoff-red). Keep in sync with the
+     * teamColors array in Host/Lobby.vue.
+     */
+    private const TEAM_COLORS = [
+        '#EF4444', // danger red
+        '#3B82F6', // info blue
+        '#57D025', // primary / success green
+        '#F47612', // warning orange
+        '#EAB308', // gold
+        '#1A3490', // propoff blue
+        '#AF1919', // propoff red
+    ];
 
     public function addTeam(Request $request, GameSession $gameSession)
     {
@@ -82,6 +168,67 @@ class GameSessionController extends Controller
         ]);
 
         return back()->with('success', 'Team added successfully');
+    }
+
+    /**
+     * Reconcile the number of teams to a target count. Adds Team letters (with
+     * palette colors) to reach the count, or trims teams from the end.
+     */
+    public function setTeamCount(Request $request, GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+        if ($gameSession->status !== 'lobby') {
+            return back()->withErrors(['teams' => 'Cannot change teams after the game has started.']);
+        }
+
+        $validated = $request->validate([
+            'count' => 'required|integer|min:1|max:8',
+        ]);
+        $target = $validated['count'];
+
+        $teams = $gameSession->teams()->orderBy('display_order')->get();
+        $current = $teams->count();
+
+        if ($target > $current) {
+            $order = (int) ($gameSession->teams()->max('display_order') ?? 0);
+            for ($i = $current; $i < $target; $i++) {
+                Team::create([
+                    'game_session_id' => $gameSession->id,
+                    'name' => 'Team ' . chr(65 + $i),
+                    'color' => self::TEAM_COLORS[$i % count(self::TEAM_COLORS)],
+                    'display_order' => ++$order,
+                ]);
+            }
+        } elseif ($target < $current) {
+            $teams->slice($target)->each(fn (Team $t) => $t->delete());
+        }
+
+        return back()->with('success', 'Teams updated');
+    }
+
+    public function updateTeam(Request $request, GameSession $gameSession, Team $team)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        if ($team->game_session_id !== $gameSession->id) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'color' => 'nullable|string|max:7',
+        ]);
+
+        $team->update([
+            'name' => $validated['name'],
+            'color' => $validated['color'] ?? $team->color,
+        ]);
+
+        return back()->with('success', 'Team updated successfully');
     }
 
     public function removeTeam(GameSession $gameSession, Team $team)
@@ -206,6 +353,7 @@ class GameSessionController extends Controller
         }
 
         $validated = $request->validate([
+            'name' => 'sometimes|nullable|string|max:255',
             'settings' => 'required|array',
         ]);
 
@@ -213,9 +361,12 @@ class GameSessionController extends Controller
         $currentSettings = $gameSession->settings ?? [];
         $newSettings = array_merge($currentSettings, $validated['settings']);
 
-        $gameSession->update([
-            'settings' => $newSettings,
-        ]);
+        $update = ['settings' => $newSettings];
+        if ($request->has('name')) {
+            $update['name'] = $validated['name'] ?? null;
+        }
+
+        $gameSession->update($update);
 
         return back()->with('success', 'Settings updated successfully');
     }

@@ -33,8 +33,11 @@ Route::middleware('auth')->group(function () {
     Route::get('/games', [GameSessionController::class, 'index'])->name('games.index');
     Route::get('/games/create', [GameSessionController::class, 'create'])->name('games.create');
     Route::post('/games', [GameSessionController::class, 'store'])->name('games.store');
+    Route::post('/games/{gameSession}/game-type', [GameSessionController::class, 'changeGameType'])->name('games.game-type.update');
     Route::post('/games/{gameSession}/teams', [GameSessionController::class, 'addTeam'])->name('games.teams.add');
+    Route::post('/games/{gameSession}/teams/count', [GameSessionController::class, 'setTeamCount'])->name('games.teams.count');
     Route::post('/games/{gameSession}/teams/reorder', [GameSessionController::class, 'reorderTeams'])->name('games.teams.reorder');
+    Route::patch('/games/{gameSession}/teams/{team}', [GameSessionController::class, 'updateTeam'])->name('games.teams.update');
     Route::delete('/games/{gameSession}/teams/{team}', [GameSessionController::class, 'removeTeam'])->name('games.teams.remove');
     Route::post('/games/{gameSession}/teams/{team}/members', [GameSessionController::class, 'addTeamMember'])->name('games.teams.members.add');
     Route::delete('/games/{gameSession}/teams/{team}/members/{teamMember}', [GameSessionController::class, 'removeTeamMember'])->name('games.teams.members.remove');
@@ -50,6 +53,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/timer/pause', [HostController::class, 'pauseTimer'])->name('host.timer.pause');
     Route::post('/host/{gameSession}/timer/reset', [HostController::class, 'resetTimer'])->name('host.timer.reset');
     Route::post('/host/{gameSession}/reveal', [HostController::class, 'revealAnswer'])->name('host.reveal');
+    Route::post('/host/{gameSession}/unreveal', [HostController::class, 'unrevealAnswer'])->name('host.unreveal');
     Route::post('/host/{gameSession}/control', [HostController::class, 'setControllingTeams'])->name('host.control');
     Route::post('/host/{gameSession}/question/select', [HostController::class, 'selectQuestion'])->name('host.question.select');
     Route::post('/host/{gameSession}/question/next', [HostController::class, 'nextQuestion'])->name('host.question.next');

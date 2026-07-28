@@ -69,10 +69,10 @@ watch(() => props.timerStartedAt, () => {
         <div
             class="text-6xl font-mono font-bold py-4 px-8 rounded-lg transition-all duration-300"
             :class="{
-                'bg-green-600 text-white': !isWarning && !isExpired && isRunning,
-                'bg-gray-700 text-white': !isRunning && !isExpired,
-                'bg-red-600 text-white animate-pulse': isWarning,
-                'bg-red-900 text-white': isExpired,
+                'bg-success text-white': !isWarning && !isExpired && isRunning,
+                'bg-surface-inset text-body border border-border': !isRunning && !isExpired,
+                'bg-danger text-white animate-pulse': isWarning,
+                'bg-danger/70 text-white': isExpired,
             }"
         >
             {{ formattedTime }}
@@ -82,20 +82,20 @@ watch(() => props.timerStartedAt, () => {
             <button
                 v-if="!isRunning"
                 @click="emit('start')"
-                class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                class="px-5 py-2 bg-success text-white font-semibold rounded-lg hover:opacity-90 transition"
             >
                 Start
             </button>
             <button
                 v-if="isRunning"
                 @click="emit('pause')"
-                class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition"
+                class="px-5 py-2 bg-warning text-white font-semibold rounded-lg hover:opacity-90 transition"
             >
                 Pause
             </button>
             <button
                 @click="emit('reset')"
-                class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
+                class="px-5 py-2 bg-surface-overlay text-body font-semibold rounded-lg border border-border hover:bg-surface-elevated transition"
             >
                 Reset
             </button>

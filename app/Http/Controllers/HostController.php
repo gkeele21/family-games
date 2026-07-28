@@ -40,6 +40,7 @@ class HostController extends Controller
             'config' => $config,
             'friends' => $friends,
             'waitingPlayers' => $waitingPlayers,
+            'gameTypes' => \App\Models\GameType::online()->get(['id', 'name', 'slug']),
         ]);
     }
 
@@ -217,9 +218,12 @@ class HostController extends Controller
             return response()->json(['error' => 'Answer already revealed'], 400);
         }
 
-        // Get the answer to find points
+        // Per-answer value comes from the round (points_available). Fall back to
+        // the stored answer points for older sessions initialized before rounds.
         $answer = $currentQuestion->question->answers()->find($validated['answer_id']);
-        $basePoints = $answer->points ?? 0;
+        $basePoints = $currentQuestion->points_available > 0
+            ? $currentQuestion->points_available
+            : ($answer->points ?? 0);
 
         // Check if we're in steal round - reduce points if so
         $isStealRound = $state->getStateValue('is_steal_round', false);
@@ -245,9 +249,28 @@ class HostController extends Controller
         $answer->recordReveal();
 
         // Award points to team
-        if ($teamId) {
-            $team = Team::find($teamId);
-            $team?->addScore($points);
+        $team = $teamId ? Team::find($teamId) : null;
+        if ($team) {
+            $team->addScore($points);
+        }
+
+        // Sweep bonus: if this team just completed the whole board on its own
+        // (not during a steal), award the round's bonus. A stolen board never
+        // earns the bonus.
+        $sweepBonus = 0;
+        $totalAnswers = $currentQuestion->question->answers()->count();
+        $teamReveals = $teamId
+            ? $currentQuestion->answerReveals()->where('team_id', $teamId)->count()
+            : 0;
+        if (
+            $team
+            && !$isStealRound
+            && $currentQuestion->bonus_points > 0
+            && $totalAnswers > 0
+            && $teamReveals >= $totalAnswers
+        ) {
+            $sweepBonus = (int) $currentQuestion->bonus_points;
+            $team->addScore($sweepBonus);
         }
 
         return response()->json([
@@ -255,7 +278,53 @@ class HostController extends Controller
             'points' => $points,
             'base_points' => $basePoints,
             'is_steal_round' => $isStealRound,
+            'sweep_bonus' => $sweepBonus,
         ]);
+    }
+
+    /**
+     * Undo a revealed answer: remove the reveal and reverse the points it
+     * awarded. If the board was a full single-team sweep (which earned the
+     * bonus), taking an answer back also claws the bonus back.
+     */
+    public function unrevealAnswer(Request $request, GameSession $gameSession)
+    {
+        $validated = $request->validate([
+            'answer_id' => 'required|exists:answers,id',
+        ]);
+
+        $state = $gameSession->gameState;
+        $currentQuestion = $state->currentQuestion;
+
+        if (!$currentQuestion) {
+            return response()->json(['error' => 'No active question'], 400);
+        }
+
+        $reveal = $currentQuestion->answerReveals()->where('answer_id', $validated['answer_id'])->first();
+        if (!$reveal) {
+            return response()->json(['error' => 'Answer is not revealed'], 400);
+        }
+
+        $team = $reveal->team_id ? Team::find($reveal->team_id) : null;
+
+        // If the whole board was swept by this one team, a bonus was awarded.
+        // Removing any answer breaks the sweep, so claw the bonus back too.
+        $totalAnswers = $currentQuestion->question->answers()->count();
+        $reveals = $currentQuestion->answerReveals()->get();
+        $wasSweep = $totalAnswers > 0
+            && $reveals->count() >= $totalAnswers
+            && $reveals->pluck('team_id')->unique()->count() === 1
+            && (int) $reveals->first()->team_id === (int) $reveal->team_id
+            && (int) $currentQuestion->bonus_points > 0;
+
+        if ($team) {
+            $delta = (int) $reveal->points_awarded + ($wasSweep ? (int) $currentQuestion->bonus_points : 0);
+            $team->update(['total_score' => max(0, $team->total_score - $delta)]);
+        }
+
+        $reveal->delete();
+
+        return response()->json(['success' => true]);
     }
 
     public function startStealRound(GameSession $gameSession)
@@ -717,7 +786,10 @@ class HostController extends Controller
             ->first();
 
         if ($nextQuestion) {
-            $state->update(['current_question_id' => $nextQuestion->id]);
+            $state->update([
+                'current_question_id' => $nextQuestion->id,
+                'round_number' => $nextQuestion->round_number ?? $state->round_number,
+            ]);
             $nextQuestion->update(['status' => 'active']);
             return response()->json(['success' => true, 'game_complete' => false]);
         }

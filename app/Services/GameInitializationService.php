@@ -176,35 +176,86 @@ class GameInitializationService
     protected function initializeAmericaSays(GameSession $gameSession): void
     {
         $config = $gameSession->settings ?? $gameSession->gameType->default_config;
-        $questionsPerGame = $config['questions_per_game'] ?? 10;
 
-        // Get random questions
+        // A round plays one question per team, so questions per round = team count.
+        $teamCount = max(1, $gameSession->teams()->count());
+
+        // Build the per-round scoring plan. When the host has configured
+        // round_scoring (from the setup screen), use it. Otherwise fall back to
+        // a flat plan derived from the older questions_per_game / points_per_answer
+        // settings, so existing games keep working before the setup UI lands.
+        $roundScoring = $this->resolveRoundScoring($config, $teamCount);
+
+        // Pull enough questions for every slot (rounds x teams).
+        $needed = count($roundScoring) * $teamCount;
         $questions = Question::where('game_type_id', $gameSession->game_type_id)
             ->where('is_active', true)
             ->inRandomOrder()
-            ->limit($questionsPerGame)
+            ->limit($needed)
             ->get();
 
-        // Create session questions
-        foreach ($questions as $index => $question) {
-            SessionQuestion::create([
-                'game_session_id' => $gameSession->id,
-                'question_id' => $question->id,
-                'display_order' => $index + 1,
-                'status' => 'pending',
-            ]);
+        $order = 0;
+        foreach ($roundScoring as $roundIndex => $round) {
+            $roundNumber = $roundIndex + 1;
 
-            // Track question usage statistics
-            $question->incrementUsed();
+            // One question per team in this round.
+            for ($slot = 0; $slot < $teamCount; $slot++) {
+                $question = $questions->get($order);
+                if (!$question) {
+                    break 2; // Not enough questions in the bank; stop gracefully.
+                }
+                $order++;
+
+                SessionQuestion::create([
+                    'game_session_id' => $gameSession->id,
+                    'question_id' => $question->id,
+                    'display_order' => $order,
+                    'round_number' => $roundNumber,
+                    'status' => 'pending',
+                    'points_available' => $round['points_per_answer'],
+                    'bonus_points' => $round['bonus_points'],
+                ]);
+
+                $question->incrementUsed();
+            }
         }
 
-        // Set the first question as current
-        $firstQuestion = $gameSession->sessionQuestions()->first();
+        // Set the first question as current and sync the round number.
+        $firstQuestion = $gameSession->sessionQuestions()->orderBy('display_order')->first();
         if ($firstQuestion) {
             $gameSession->gameState->update([
                 'current_question_id' => $firstQuestion->id,
+                'round_number' => $firstQuestion->round_number ?? 1,
             ]);
         }
+    }
+
+    /**
+     * Resolve the per-round scoring plan as a list of
+     * ['points_per_answer' => int, 'bonus_points' => int], one entry per round.
+     */
+    protected function resolveRoundScoring(array $config, int $teamCount): array
+    {
+        $configured = $config['round_scoring'] ?? null;
+
+        if (is_array($configured) && count($configured) > 0) {
+            return array_map(function ($round) {
+                return [
+                    'points_per_answer' => (int) ($round['points_per_answer'] ?? 100),
+                    'bonus_points' => (int) ($round['bonus_points'] ?? 0),
+                ];
+            }, array_values($configured));
+        }
+
+        // Fallback: flat scoring spread across rounds derived from legacy settings.
+        $flatPoints = (int) ($config['points_per_answer'] ?? 100);
+        $questionsPerGame = (int) ($config['questions_per_game'] ?? 10);
+        $rounds = max(1, (int) ceil($questionsPerGame / $teamCount));
+
+        return array_fill(0, $rounds, [
+            'points_per_answer' => $flatPoints,
+            'bonus_points' => 0,
+        ]);
     }
 
     protected function calculateRoundMultiplier(int $round, array $config): int

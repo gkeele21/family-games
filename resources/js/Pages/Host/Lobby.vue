@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
+import StandardLayout from '@/Layouts/StandardLayout.vue';
+import GamePicker from '@/Components/GamePicker.vue';
+import Card from '@/Components/Base/Card.vue';
+import Button from '@/Components/Base/Button.vue';
+import Modal from '@/Components/Base/Modal.vue';
+import TextField from '@/Components/Form/TextField.vue';
+import Select from '@/Components/Form/Select.vue';
+import NumberInput from '@/Components/Form/NumberInput.vue';
+import Toggle from '@/Components/Form/Toggle.vue';
+import Confirm from '@/Components/Feedback/Confirm.vue';
 import { Head, useForm, router } from '@inertiajs/vue3';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 
 interface TeamMember {
     id: number;
@@ -31,11 +40,6 @@ interface WaitingPlayer {
     user_id: number | null;
     guest_name: string | null;
     display_name: string;
-    user?: {
-        id: number;
-        name: string;
-        first_name: string;
-    };
 }
 
 interface GameSession {
@@ -43,11 +47,14 @@ interface GameSession {
     name: string | null;
     status: string;
     invite_code: string;
-    game_type: {
-        name: string;
-        slug: string;
-    };
+    game_type: { name: string; slug: string };
     teams: Team[];
+}
+
+interface GameTypeOption {
+    id: number;
+    name: string;
+    slug: string;
 }
 
 interface Props {
@@ -55,59 +62,76 @@ interface Props {
     config: Record<string, any>;
     friends: Friend[];
     waitingPlayers: WaitingPlayer[];
+    gameTypes: GameTypeOption[];
 }
 
 const props = defineProps<Props>();
 
-const teamColors = [
-    '#EF4444', // Red
-    '#3B82F6', // Blue
-    '#10B981', // Green
-    '#F59E0B', // Amber
-    '#8B5CF6', // Purple
-    '#EC4899', // Pink
-    '#06B6D4', // Cyan
-    '#F97316', // Orange
-];
+const gameSlug = computed(() => props.gameSession.game_type.slug);
 
-const form = useForm({
-    name: '',
-    color: teamColors[props.gameSession.teams.length % teamColors.length],
-});
-
-const addTeam = () => {
-    form.post(route('games.teams.add', props.gameSession.id), {
+// Switch the game in place (resets settings to the new game's defaults; teams kept).
+const changeGame = (gt: GameTypeOption) => {
+    if (gt.slug === props.gameSession.game_type.slug) return;
+    router.post(route('games.game-type.update', props.gameSession.id), { game_type_id: gt.id }, {
         preserveScroll: true,
-        onSuccess: () => {
-            form.reset();
-            form.color = teamColors[(props.gameSession.teams.length + 1) % teamColors.length];
-        },
+        preserveState: false,
     });
 };
 
-const removeTeam = (team: Team) => {
-    if (confirm(`Remove team "${team.name}"?`)) {
-        router.delete(route('games.teams.remove', [props.gameSession.id, team.id]), {
-            preserveScroll: true,
-        });
-    }
+// ---- Confirm dialog (shared) ----
+const confirmState = ref<{ show: boolean; title: string; message: string; confirmText: string; action: (() => void) | null }>({
+    show: false, title: '', message: '', confirmText: 'Confirm', action: null,
+});
+const askConfirm = (opts: { title: string; message: string; confirmText?: string }, action: () => void) => {
+    confirmState.value = { show: true, title: opts.title, message: opts.message, confirmText: opts.confirmText ?? 'Confirm', action };
+};
+const runConfirm = () => {
+    const action = confirmState.value.action;
+    confirmState.value.show = false;
+    action?.();
 };
 
-// Team member management
+// ---- Number of teams (reconciles to the target count) ----
+const teamCountInput = ref(props.gameSession.teams.length);
+watch(() => props.gameSession.teams.length, (n) => (teamCountInput.value = n));
+const applyTeamCount = (n: number) => {
+    const count = Math.max(1, Math.min(8, Number(n) || 1));
+    teamCountInput.value = count;
+    if (count === props.gameSession.teams.length) return;
+    router.post(route('games.teams.count', props.gameSession.id), { count }, { preserveScroll: true });
+};
+
+// ---- Team rename (inline, save on blur/Enter) ----
+const renameTeam = (team: Team, event: Event) => {
+    const el = event.target as HTMLInputElement;
+    const name = el.value.trim();
+    if (!name) {
+        el.value = team.name; // don't allow a blank name — revert
+        return;
+    }
+    if (name === team.name) return; // unchanged
+    router.patch(route('games.teams.update', [props.gameSession.id, team.id]), { name }, { preserveScroll: true });
+};
+const removeTeam = (team: Team) => {
+    askConfirm(
+        { title: 'Remove team?', message: `Remove "${team.name}"? Any members on it will be removed too.`, confirmText: 'Remove' },
+        () => router.delete(route('games.teams.remove', [props.gameSession.id, team.id]), { preserveScroll: true }),
+    );
+};
+
+// ---- Team members ----
 const activeTeamId = ref<number | null>(null);
 const showAddMemberModal = ref(false);
 const addMemberType = ref<'guest' | 'friend' | 'waiting'>('guest');
 const guestNameInput = ref('');
 const selectedFriendId = ref<number | null>(null);
 const selectedWaitingPlayerId = ref<number | null>(null);
-
 const memberForm = useForm({
     type: 'guest' as 'guest' | 'friend' | 'session_player',
     guest_name: '',
     user_id: null as number | null,
     session_player_id: null as number | null,
 });
-
 const openAddMember = (teamId: number) => {
     activeTeamId.value = teamId;
     showAddMemberModal.value = true;
@@ -116,15 +140,12 @@ const openAddMember = (teamId: number) => {
     selectedFriendId.value = null;
     selectedWaitingPlayerId.value = null;
 };
-
 const closeAddMemberModal = () => {
     showAddMemberModal.value = false;
     activeTeamId.value = null;
 };
-
 const addTeamMember = () => {
     if (!activeTeamId.value) return;
-
     if (addMemberType.value === 'guest') {
         memberForm.type = 'guest';
         memberForm.guest_name = guestNameInput.value;
@@ -135,13 +156,12 @@ const addTeamMember = () => {
         memberForm.guest_name = '';
         memberForm.user_id = selectedFriendId.value;
         memberForm.session_player_id = null;
-    } else if (addMemberType.value === 'waiting') {
+    } else {
         memberForm.type = 'session_player';
         memberForm.guest_name = '';
         memberForm.user_id = null;
         memberForm.session_player_id = selectedWaitingPlayerId.value;
     }
-
     memberForm.post(route('games.teams.members.add', [props.gameSession.id, activeTeamId.value]), {
         preserveScroll: true,
         onSuccess: () => {
@@ -150,1210 +170,322 @@ const addTeamMember = () => {
         },
     });
 };
-
 const removeTeamMember = (team: Team, member: TeamMember) => {
-    if (confirm(`Remove "${member.display_name}" from ${team.name}?`)) {
-        router.delete(route('games.teams.members.remove', [props.gameSession.id, team.id, member.id]), {
-            preserveScroll: true,
-        });
-    }
-};
-
-// Check if a friend is already on a team
-const isFriendOnTeam = (friendId: number): boolean => {
-    return props.gameSession.teams.some(team =>
-        team.members?.some(member => member.user_id === friendId)
+    askConfirm(
+        { title: 'Remove member?', message: `Remove "${member.display_name}" from ${team.name}?`, confirmText: 'Remove' },
+        () => router.delete(route('games.teams.members.remove', [props.gameSession.id, team.id, member.id]), { preserveScroll: true }),
     );
 };
+const isFriendOnTeam = (friendId: number): boolean =>
+    props.gameSession.teams.some((team) => team.members?.some((m) => m.user_id === friendId));
+const availableFriends = computed(() => props.friends.filter((f) => !isFriendOnTeam(f.id)));
+const addMemberDisabled = computed(() =>
+    memberForm.processing
+    || (addMemberType.value === 'guest' && !guestNameInput.value)
+    || (addMemberType.value === 'friend' && !selectedFriendId.value)
+    || (addMemberType.value === 'waiting' && !selectedWaitingPlayerId.value),
+);
 
-// Available friends (not already on a team)
-const availableFriends = computed(() => {
-    return props.friends.filter(friend => !isFriendOnTeam(friend.id));
-});
-
-const startGame = () => {
-    router.post(route('games.start', props.gameSession.id));
-};
-
-const cancelGame = () => {
-    if (confirm('Are you sure you want to cancel this game? This cannot be undone.')) {
-        router.delete(route('games.destroy', props.gameSession.id));
-    }
-};
-
-// Drag and drop for team reordering
-const draggedTeamId = ref<number | null>(null);
-const dragOverTeamId = ref<number | null>(null);
-
-const onDragStart = (event: DragEvent, teamId: number) => {
-    draggedTeamId.value = teamId;
-    if (event.dataTransfer) {
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', teamId.toString());
-    }
-};
-
-const onDragOver = (event: DragEvent, teamId: number) => {
-    event.preventDefault();
-    if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = 'move';
-    }
-    dragOverTeamId.value = teamId;
-};
-
-const onDragLeave = () => {
-    dragOverTeamId.value = null;
-};
-
-const onDrop = (event: DragEvent, targetTeamId: number) => {
-    event.preventDefault();
-    dragOverTeamId.value = null;
-
-    if (draggedTeamId.value === null || draggedTeamId.value === targetTeamId) {
-        draggedTeamId.value = null;
-        return;
-    }
-
-    // Reorder teams locally
-    const teams = [...props.gameSession.teams];
-    const draggedIndex = teams.findIndex(t => t.id === draggedTeamId.value);
-    const targetIndex = teams.findIndex(t => t.id === targetTeamId);
-
-    if (draggedIndex === -1 || targetIndex === -1) {
-        draggedTeamId.value = null;
-        return;
-    }
-
-    // Move the dragged team to the target position
-    const [draggedTeam] = teams.splice(draggedIndex, 1);
-    teams.splice(targetIndex, 0, draggedTeam);
-
-    // Get the new order of team IDs
-    const teamIds = teams.map(t => t.id);
-
-    // Send the new order to the backend
-    router.post(route('games.teams.reorder', props.gameSession.id), {
-        team_ids: teamIds,
-    }, {
-        preserveScroll: true,
-    });
-
-    draggedTeamId.value = null;
-};
-
-const onDragEnd = () => {
-    draggedTeamId.value = null;
-    dragOverTeamId.value = null;
-};
-
-const copyInviteCode = () => {
-    navigator.clipboard.writeText(props.gameSession.invite_code);
-    codeCopied.value = true;
-    setTimeout(() => codeCopied.value = false, 2000);
-};
-
-const joinUrl = computed(() => {
-    const baseUrl = window.location.origin;
-    return `${baseUrl}/play?code=${props.gameSession.invite_code}`;
-});
-
-const copyJoinUrl = () => {
-    navigator.clipboard.writeText(joinUrl.value);
-    urlCopied.value = true;
-    setTimeout(() => urlCopied.value = false, 2000);
-};
-
-const codeCopied = ref(false);
-const urlCopied = ref(false);
-const displayUrlCopied = ref(false);
-
-const displayUrl = computed(() => {
-    const baseUrl = window.location.origin;
-    return `${baseUrl}/display/${props.gameSession.invite_code}`;
-});
-
-const copyDisplayUrl = () => {
-    navigator.clipboard.writeText(displayUrl.value);
-    displayUrlCopied.value = true;
-    setTimeout(() => displayUrlCopied.value = false, 2000);
-};
-
-// Settings management
-const showSettingsModal = ref(false);
-
-// Create a copy of all settings for the form
+// ---- Settings (inline; saved via games.settings.update) ----
 const settingsForm = useForm({
-    settings: { ...props.config },
+    name: props.gameSession.name ?? '',
+    settings: { ...props.config } as Record<string, any>,
 });
-
-// Track team size mode: 'unlimited', 'individual', or 'fixed'
-const getInitialTeamSizeMode = () => {
-    const size = props.config.team_size ?? 0;
-    if (size === 0) return 'unlimited';
-    if (size === 1) return 'individual';
-    return 'fixed';
-};
-const teamSizeMode = ref<'unlimited' | 'individual' | 'fixed'>(getInitialTeamSizeMode());
-const customTeamSize = ref(props.config.team_size > 1 ? props.config.team_size : 2);
-
-const setTeamSizeMode = (mode: 'unlimited' | 'individual' | 'fixed') => {
-    teamSizeMode.value = mode;
-    if (mode === 'unlimited') {
-        settingsForm.settings.team_size = 0;
-    } else if (mode === 'individual') {
-        settingsForm.settings.team_size = 1;
-    } else {
-        settingsForm.settings.team_size = customTeamSize.value;
-    }
-};
-
-const updateCustomTeamSize = () => {
-    if (customTeamSize.value >= 2 && teamSizeMode.value === 'fixed') {
-        settingsForm.settings.team_size = customTeamSize.value;
-    }
-};
-
-const isIndividualPlay = computed(() => settingsForm.settings.team_size === 1);
-
-// Human-readable team size label
-const teamSizeLabel = computed(() => {
-    const size = settingsForm.settings.team_size;
-    if (size === undefined || size === null || size === 0) return 'Unlimited';
-    if (size === 1) return 'Individual Play';
-    return `${size} per team`;
-});
-
-// Game type slug for conditional settings
-const gameSlug = computed(() => props.gameSession.game_type.slug);
-
-// Save settings and close modal
-const saveSettings = () => {
+const justSaved = ref(false);
+const saveSettings = (after?: () => void) => {
     settingsForm.patch(route('games.settings.update', props.gameSession.id), {
         preserveScroll: true,
         onSuccess: () => {
-            showSettingsModal.value = false;
+            justSaved.value = true;
+            setTimeout(() => (justSaved.value = false), 2000);
+            after?.();
         },
     });
 };
 
-const openSettingsModal = () => {
-    // Reset form to current config values
-    settingsForm.settings = { ...props.config };
-    const size = props.config.team_size ?? 0;
-    if (size === 0) teamSizeMode.value = 'unlimited';
-    else if (size === 1) teamSizeMode.value = 'individual';
-    else {
-        teamSizeMode.value = 'fixed';
-        customTeamSize.value = size;
+// ---- Rounds & scoring (America Says) ----
+interface RoundScore { points_per_answer: number; bonus_points: number }
+const teamsCount = computed(() => props.gameSession.teams.length || 1);
+const answersPerQuestion = computed(() => Number(settingsForm.settings.answers_per_question) || 7);
+const answerOptions = [
+    { value: 5, label: '5' },
+    { value: 6, label: '6' },
+    { value: 7, label: '7' },
+    { value: 8, label: '8' },
+];
+const strikeOptions = [
+    { value: 2, label: '2' },
+    { value: 3, label: '3' },
+    { value: 4, label: '4' },
+];
+const rounds = computed<RoundScore[]>({
+    get: () => (settingsForm.settings.round_scoring ?? []) as RoundScore[],
+    set: (v) => (settingsForm.settings.round_scoring = v),
+});
+const totalQuestions = computed(() => rounds.value.length * teamsCount.value);
+const sweptTotal = (r: RoundScore) => r.points_per_answer * answersPerQuestion.value + r.bonus_points;
+
+// Number-of-rounds stepper (reconciles the round_scoring list to the target).
+const roundCountInput = ref(rounds.value.length);
+watch(() => rounds.value.length, (n) => (roundCountInput.value = n));
+const applyRoundCount = (n: number) => {
+    const target = Math.max(1, Math.min(8, Number(n) || 1));
+    roundCountInput.value = target;
+    if (target === rounds.value.length) return;
+    const next = rounds.value.slice(0, target);
+    while (next.length < target) {
+        const last = next[next.length - 1];
+        const pts = last ? last.points_per_answer + 100 : 100;
+        next.push({ points_per_answer: pts, bonus_points: pts * 10 });
     }
-    showSettingsModal.value = true;
+    rounds.value = next;
+};
+const removeRound = (index: number) => {
+    rounds.value = rounds.value.filter((_, i) => i !== index);
+};
+
+// ---- Start / cancel ----
+const startGame = () => {
+    if (settingsForm.isDirty) saveSettings(() => router.post(route('games.start', props.gameSession.id)));
+    else router.post(route('games.start', props.gameSession.id));
+};
+const cancelGame = () => {
+    askConfirm(
+        { title: 'Cancel game?', message: 'This deletes the setup and cannot be undone.', confirmText: 'Cancel game' },
+        () => router.delete(route('games.destroy', props.gameSession.id)),
+    );
+};
+
+// ---- Copy helpers ----
+const codeCopied = ref(false);
+const urlCopied = ref(false);
+const displayUrlCopied = ref(false);
+const joinUrl = computed(() => `${window.location.origin}/play?code=${props.gameSession.invite_code}`);
+const displayUrl = computed(() => `${window.location.origin}/display/${props.gameSession.invite_code}`);
+const copyInviteCode = () => {
+    navigator.clipboard.writeText(props.gameSession.invite_code);
+    codeCopied.value = true;
+    setTimeout(() => (codeCopied.value = false), 2000);
+};
+const copyJoinUrl = () => {
+    navigator.clipboard.writeText(joinUrl.value);
+    urlCopied.value = true;
+    setTimeout(() => (urlCopied.value = false), 2000);
+};
+const copyDisplayUrl = () => {
+    navigator.clipboard.writeText(displayUrl.value);
+    displayUrlCopied.value = true;
+    setTimeout(() => (displayUrlCopied.value = false), 2000);
 };
 </script>
 
 <template>
-    <Head :title="`Lobby - ${gameSession.game_type.name}`" />
+    <Head :title="`Set up — ${gameSession.game_type.name}`" />
 
-    <AuthenticatedLayout>
+    <StandardLayout sticky-header>
         <template #header>
-            <h2 class="text-xl font-semibold leading-tight text-gray-800">
-                Game Lobby - {{ gameSession.game_type.name }}
-            </h2>
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h1 class="text-2xl font-extrabold text-body">Set up your game</h1>
+                    <p class="mt-1 text-sm text-muted">Pick a game, name it, set teams &amp; scoring, then start.</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span v-if="justSaved" class="text-sm text-primary">Saved ✓</span>
+                    <Button v-if="settingsForm.isDirty" variant="muted" size="md" :loading="settingsForm.processing" @click="saveSettings()">Save changes</Button>
+                    <Button variant="outline" size="md" @click="cancelGame">Cancel</Button>
+                    <Button variant="success" size="md" :disabled="!gameSession.teams.length" @click="startGame">Start Game →</Button>
+                </div>
+            </div>
         </template>
 
-        <div class="py-12">
-            <div class="mx-auto max-w-4xl sm:px-6 lg:px-8">
-                <!-- Invite Code & Link -->
-                <div class="bg-white shadow-sm sm:rounded-lg p-6 mb-6">
-                    <h3 class="text-lg font-semibold mb-4">Invite Players</h3>
-
-                    <!-- Invite Code -->
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-500 mb-2">Game Code</label>
-                        <div class="flex items-center gap-3">
-                            <div class="text-4xl font-mono font-bold tracking-widest bg-gray-100 px-6 py-3 rounded-lg">
-                                {{ gameSession.invite_code }}
-                            </div>
-                            <button
-                                @click="copyInviteCode"
-                                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                            >
-                                {{ codeCopied ? 'Copied!' : 'Copy Code' }}
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Join URL -->
-                    <div>
-                        <label class="block text-sm font-medium text-gray-500 mb-2">Or share this link</label>
-                        <div class="flex items-center gap-3">
-                            <div class="flex-1 bg-gray-100 px-4 py-3 rounded-lg font-mono text-sm text-gray-700 truncate">
-                                {{ joinUrl }}
-                            </div>
-                            <button
-                                @click="copyJoinUrl"
-                                class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex-shrink-0"
-                            >
-                                {{ urlCopied ? 'Copied!' : 'Copy Link' }}
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Display URL for TV/Projector -->
-                    <div class="border-t pt-4 mt-4">
-                        <label class="block text-sm font-medium text-gray-500 mb-2">
-                            Display on TV/Projector
-                            <span class="text-gray-400 font-normal ml-1">(no controls, just the game view)</span>
-                        </label>
-                        <div class="flex items-center gap-3">
-                            <div class="flex-1 bg-purple-50 px-4 py-3 rounded-lg font-mono text-sm text-purple-700 truncate">
-                                {{ displayUrl }}
-                            </div>
-                            <button
-                                @click="copyDisplayUrl"
-                                class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex-shrink-0"
-                            >
-                                {{ displayUrlCopied ? 'Copied!' : 'Copy Display Link' }}
-                            </button>
-                        </div>
-                    </div>
+        <div class="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+            <!-- Game & name -->
+            <Card title="Game">
+                <div class="mb-5">
+                    <GamePicker :game-types="gameTypes" :model-value="gameSlug" @select="changeGame" />
                 </div>
+                <TextField v-model="settingsForm.name" label="Session name" placeholder="e.g., Sunday Family Night" />
+            </Card>
 
-                <!-- Game Settings Summary Card -->
-                <div class="bg-white shadow-sm sm:rounded-lg p-4 mb-6">
-                    <div class="flex items-start justify-between gap-4">
-                        <div class="flex-1 min-w-0">
-                            <h3 class="text-lg font-semibold text-gray-800 mb-3">Game Settings</h3>
-
-                            <!-- Player Settings -->
-                            <div class="mb-3">
-                                <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Player Settings</h4>
-                                <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                                    <div>
-                                        <span class="text-gray-500">Team Size:</span>
-                                        <span class="font-medium text-gray-700 ml-1">{{ teamSizeLabel }}</span>
-                                    </div>
-                                    <div v-if="!isIndividualPlay">
-                                        <span class="text-gray-500">Team Selection:</span>
-                                        <span class="font-medium text-gray-700 ml-1">
-                                            {{ settingsForm.settings.allow_team_selection ? 'Players choose' : 'Host assigns' }}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Game-specific Settings -->
-                            <div>
-                                <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">{{ gameSession.game_type.name }} Settings</h4>
-                                <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                                    <!-- Family Feud Settings -->
-                                    <template v-if="gameSlug === 'family-feud'">
-                                        <div>
-                                            <span class="text-gray-500">Rounds:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.rounds_per_game }}</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Strikes:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.max_strikes }}</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Face-Off:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.face_off_mode }}</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Steal Mode:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.steal_mode === 'one_guess' ? 'One guess' : 'Timed' }}</span>
-                                        </div>
-                                        <div v-if="settingsForm.settings.steal_mode === 'timed'">
-                                            <span class="text-gray-500">Steal Timer:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.steal_timer_seconds }}s</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Fast Money:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.fast_money_enabled ? 'On' : 'Off' }}</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Play or Pass:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.play_or_pass_enabled ? 'On' : 'Off' }}</span>
-                                        </div>
-                                    </template>
-
-                                    <!-- America Says Settings -->
-                                    <template v-else-if="gameSlug === 'america-says'">
-                                        <div>
-                                            <span class="text-gray-500">Questions:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.questions_per_game }}</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Answers/Question:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.answers_per_question }}</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Control Timer:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.control_timer_seconds }}s</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Steal Timer:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.steal_timer_seconds }}s</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Steal Points:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.steal_points_percentage }}%</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Points/Answer:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.points_per_answer }}</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Gameplay:</span>
-                                            <span class="font-medium text-gray-700 ml-1">
-                                                {{ settingsForm.settings.gameplay_mode === 'host_reveal' ? 'Host reveals' : 'Team buzzer' }}
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Win Condition:</span>
-                                            <span class="font-medium text-gray-700 ml-1">
-                                                <template v-if="settingsForm.settings.winning_condition === 'most_points_after_questions'">
-                                                    Most points after {{ settingsForm.settings.winning_condition_options?.questions_to_play || settingsForm.settings.questions_per_game }} questions
-                                                </template>
-                                                <template v-else-if="settingsForm.settings.winning_condition === 'first_to_points'">
-                                                    First to {{ settingsForm.settings.winning_condition_options?.first_to_points }} points
-                                                </template>
-                                            </span>
-                                        </div>
-                                    </template>
-
-                                    <!-- Oodles Settings -->
-                                    <template v-else-if="gameSlug === 'oodles'">
-                                        <div>
-                                            <span class="text-gray-500">Cards:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.cards_per_game }}</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Questions/Card:</span>
-                                            <span class="font-medium text-gray-700 ml-1">
-                                                <template v-if="settingsForm.settings.questions_per_card_mode === 'fixed'">
-                                                    {{ settingsForm.settings.fixed_questions_per_card }}
-                                                </template>
-                                                <template v-else>
-                                                    {{ settingsForm.settings.min_questions_per_card }}-{{ settingsForm.settings.max_questions_per_card }}
-                                                </template>
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Timer:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.control_timer_seconds }}s</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">All Play Timer:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.all_play_timer_seconds }}s</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Letter Reuse:</span>
-                                            <span class="font-medium text-gray-700 ml-1">{{ settingsForm.settings.allow_letter_reuse ? 'Yes' : 'No' }}</span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Points:</span>
-                                            <span class="font-medium text-gray-700 ml-1">
-                                                <template v-if="settingsForm.settings.points_mode === 'database'">
-                                                    From database
-                                                </template>
-                                                <template v-else>
-                                                    {{ settingsForm.settings.points_per_answer }} per answer
-                                                </template>
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span class="text-gray-500">Multi-Team:</span>
-                                            <span class="font-medium text-gray-700 ml-1">
-                                                {{ settingsForm.settings.multi_team_scoring === 'split' ? 'Split points' : 'Full points each' }}
-                                            </span>
-                                        </div>
-                                        <div v-if="settingsForm.settings.last_question_bonus > 0">
-                                            <span class="text-gray-500">Last Q Bonus:</span>
-                                            <span class="font-medium text-gray-700 ml-1">+{{ settingsForm.settings.last_question_bonus }}</span>
-                                        </div>
-                                    </template>
-                                </div>
-                            </div>
-                        </div>
-                        <button
-                            @click="openSettingsModal"
-                            class="px-4 py-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg font-medium transition-colors flex-shrink-0"
-                        >
-                            Edit Settings
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Waiting Players -->
-                <div v-if="waitingPlayers.length > 0" class="bg-yellow-50 border border-yellow-200 shadow-sm sm:rounded-lg p-6 mb-6">
-                    <h3 class="text-lg font-semibold mb-3 text-yellow-800">
-                        Players Waiting to Join ({{ waitingPlayers.length }})
-                    </h3>
-                    <div class="flex flex-wrap gap-2">
-                        <div
-                            v-for="player in waitingPlayers"
-                            :key="player.id"
-                            class="bg-white px-3 py-2 rounded-full border border-yellow-300 text-sm"
-                        >
-                            {{ player.display_name }}
-                        </div>
-                    </div>
-                    <p class="text-yellow-700 text-sm mt-3">
-                        Add these players to a team using the "Add Member" button below.
-                    </p>
-                </div>
-
-                <!-- Teams -->
-                <div class="bg-white shadow-sm sm:rounded-lg p-6 mb-6">
-                    <h3 class="text-lg font-semibold mb-4">Teams</h3>
-
-                    <!-- Add Team Form -->
-                    <form @submit.prevent="addTeam" class="flex gap-4 mb-6">
-                        <input
-                            v-model="form.name"
-                            type="text"
-                            placeholder="Team name"
-                            class="flex-1 rounded-lg border-gray-300"
-                            required
-                        />
-                        <input
-                            v-model="form.color"
-                            type="color"
-                            class="w-14 h-10 rounded-lg cursor-pointer"
-                        />
-                        <button
-                            type="submit"
-                            :disabled="form.processing"
-                            class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-                        >
-                            Add Team
-                        </button>
-                    </form>
-
-                    <!-- Team List -->
-                    <div class="space-y-4">
-                        <div
-                            v-for="team in gameSession.teams"
-                            :key="team.id"
-                            class="rounded-lg border-2 transition-all duration-200"
-                            :class="{
-                                'opacity-50': draggedTeamId === team.id,
-                                'ring-2 ring-blue-400 ring-offset-2': dragOverTeamId === team.id && draggedTeamId !== team.id,
-                            }"
-                            :style="{ borderColor: team.color }"
-                            draggable="true"
-                            @dragstart="onDragStart($event, team.id)"
-                            @dragover="onDragOver($event, team.id)"
-                            @dragleave="onDragLeave"
-                            @drop="onDrop($event, team.id)"
-                            @dragend="onDragEnd"
-                        >
-                            <!-- Team Header -->
-                            <div
-                                class="flex items-center justify-between p-4 cursor-grab active:cursor-grabbing"
-                                :style="{ backgroundColor: team.color + '20' }"
-                            >
-                                <div class="flex items-center gap-3">
-                                    <!-- Drag Handle -->
-                                    <div class="text-gray-400 hover:text-gray-600">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16" />
-                                        </svg>
-                                    </div>
-                                    <div
-                                        class="w-6 h-6 rounded-full"
-                                        :style="{ backgroundColor: team.color }"
-                                    ></div>
-                                    <span class="font-semibold text-lg">{{ team.name }}</span>
-                                    <span class="text-gray-500 text-sm">
-                                        ({{ team.members?.length || 0 }} members)
-                                    </span>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                    <button
-                                        @click="openAddMember(team.id)"
-                                        class="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-                                    >
-                                        + Add Member
-                                    </button>
-                                    <button
-                                        @click="removeTeam(team)"
-                                        class="text-red-600 hover:text-red-800"
-                                    >
-                                        Remove Team
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Team Members -->
-                            <div v-if="team.members && team.members.length > 0" class="p-4 bg-white">
-                                <div class="flex flex-wrap gap-2">
-                                    <div
-                                        v-for="member in team.members"
-                                        :key="member.id"
-                                        class="flex items-center gap-2 bg-gray-100 px-3 py-2 rounded-full"
-                                    >
-                                        <span>{{ member.display_name }}</span>
-                                        <button
-                                            @click="removeTeamMember(team, member)"
-                                            class="text-gray-400 hover:text-red-600 text-lg leading-none"
-                                        >
-                                            &times;
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                            <div v-else class="p-4 bg-white text-gray-400 text-sm">
-                                No members yet. Click "Add Member" to add players.
-                            </div>
-                        </div>
-
-                        <div v-if="gameSession.teams.length === 0" class="text-gray-500 text-center py-8">
-                            No teams yet. Add at least one team to start the game.
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Start Game / Cancel -->
-                <div class="flex justify-center gap-4">
-                    <button
-                        @click="cancelGame"
-                        class="px-6 py-4 text-gray-600 hover:text-gray-800 font-medium"
-                    >
-                        Cancel Game
-                    </button>
-                    <button
-                        @click="startGame"
-                        :disabled="gameSession.teams.length < 1"
-                        class="px-8 py-4 bg-green-600 text-white text-xl font-bold rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Start Game
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Add Member Modal -->
-        <div
-            v-if="showAddMemberModal"
-            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-            @click.self="closeAddMemberModal"
-        >
-            <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-                <h3 class="text-lg font-semibold mb-4">Add Team Member</h3>
-
-                <!-- Member Type Tabs -->
-                <div class="flex border-b mb-4">
-                    <button
-                        @click="addMemberType = 'guest'"
-                        :class="[
-                            'px-4 py-2 text-sm font-medium border-b-2 -mb-px',
-                            addMemberType === 'guest'
-                                ? 'border-blue-600 text-blue-600'
-                                : 'border-transparent text-gray-500 hover:text-gray-700'
-                        ]"
-                    >
-                        Guest
-                    </button>
-                    <button
-                        @click="addMemberType = 'friend'"
-                        :class="[
-                            'px-4 py-2 text-sm font-medium border-b-2 -mb-px',
-                            addMemberType === 'friend'
-                                ? 'border-blue-600 text-blue-600'
-                                : 'border-transparent text-gray-500 hover:text-gray-700'
-                        ]"
-                    >
-                        Friends
-                    </button>
-                    <button
-                        v-if="waitingPlayers.length > 0"
-                        @click="addMemberType = 'waiting'"
-                        :class="[
-                            'px-4 py-2 text-sm font-medium border-b-2 -mb-px',
-                            addMemberType === 'waiting'
-                                ? 'border-blue-600 text-blue-600'
-                                : 'border-transparent text-gray-500 hover:text-gray-700'
-                        ]"
-                    >
-                        Joined Players ({{ waitingPlayers.length }})
-                    </button>
-                </div>
-
-                <!-- Guest Form -->
-                <div v-if="addMemberType === 'guest'" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">
-                            Guest Name
-                        </label>
-                        <input
-                            v-model="guestNameInput"
-                            type="text"
-                            placeholder="Enter guest name"
-                            class="w-full rounded-lg border-gray-300"
-                        />
-                    </div>
-                </div>
-
-                <!-- Friends List -->
-                <div v-else-if="addMemberType === 'friend'" class="space-y-2">
-                    <div v-if="availableFriends.length === 0" class="text-gray-500 text-center py-4">
-                        <p>No friends available.</p>
-                        <p class="text-sm">Add friends from your profile to see them here.</p>
-                    </div>
-                    <div
-                        v-for="friend in availableFriends"
-                        :key="friend.id"
-                        @click="selectedFriendId = friend.id"
-                        :class="[
-                            'p-3 rounded-lg border cursor-pointer transition-colors',
-                            selectedFriendId === friend.id
-                                ? 'border-blue-600 bg-blue-50'
-                                : 'border-gray-200 hover:border-gray-300'
-                        ]"
-                    >
-                        <div class="font-medium">
-                            {{ friend.nickname || friend.name }}
-                        </div>
-                        <div v-if="friend.nickname" class="text-sm text-gray-500">
-                            {{ friend.name }}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Waiting Players List -->
-                <div v-else-if="addMemberType === 'waiting'" class="space-y-2">
-                    <div
-                        v-for="player in waitingPlayers"
-                        :key="player.id"
-                        @click="selectedWaitingPlayerId = player.id"
-                        :class="[
-                            'p-3 rounded-lg border cursor-pointer transition-colors',
-                            selectedWaitingPlayerId === player.id
-                                ? 'border-blue-600 bg-blue-50'
-                                : 'border-gray-200 hover:border-gray-300'
-                        ]"
-                    >
-                        <div class="font-medium">{{ player.display_name }}</div>
-                    </div>
-                </div>
-
-                <!-- Modal Actions -->
-                <div class="flex justify-end gap-3 mt-6">
-                    <button
-                        @click="closeAddMemberModal"
-                        class="px-4 py-2 text-gray-700 hover:text-gray-900"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        @click="addTeamMember"
-                        :disabled="
-                            memberForm.processing ||
-                            (addMemberType === 'guest' && !guestNameInput) ||
-                            (addMemberType === 'friend' && !selectedFriendId) ||
-                            (addMemberType === 'waiting' && !selectedWaitingPlayerId)
-                        "
-                        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                    >
-                        Add Member
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Settings Modal -->
-        <div
-            v-if="showSettingsModal"
-            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-            @click.self="showSettingsModal = false"
-        >
-            <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-                <div class="p-6 border-b sticky top-0 bg-white">
-                    <h3 class="text-xl font-semibold">Edit Game Settings</h3>
-                </div>
-
-                <div class="p-6 space-y-8">
-                    <!-- Player Settings Section -->
-                    <div>
-                        <h4 class="text-lg font-semibold text-gray-800 mb-4">Player Settings</h4>
-
-                        <!-- Team Size -->
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-700 mb-3">
-                                Team Size
-                            </label>
-                            <div class="space-y-3">
-                                <label class="flex items-center gap-3 cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        name="modal_team_size_mode"
-                                        :checked="teamSizeMode === 'unlimited'"
-                                        @change="setTeamSizeMode('unlimited')"
-                                        class="text-blue-600 focus:ring-blue-500"
-                                    />
-                                    <div>
-                                        <span class="font-medium text-gray-700">Unlimited</span>
-                                        <p class="text-sm text-gray-500">You assign players to teams manually</p>
-                                    </div>
-                                </label>
-
-                                <label class="flex items-center gap-3 cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        name="modal_team_size_mode"
-                                        :checked="teamSizeMode === 'individual'"
-                                        @change="setTeamSizeMode('individual')"
-                                        class="text-blue-600 focus:ring-blue-500"
-                                    />
-                                    <div>
-                                        <span class="font-medium text-gray-700">Individual Play</span>
-                                        <p class="text-sm text-gray-500">Each player becomes their own team</p>
-                                    </div>
-                                </label>
-
-                                <div class="flex items-start gap-3">
-                                    <input
-                                        type="radio"
-                                        name="modal_team_size_mode"
-                                        :checked="teamSizeMode === 'fixed'"
-                                        @change="setTeamSizeMode('fixed')"
-                                        class="mt-1 text-blue-600 focus:ring-blue-500"
-                                    />
-                                    <div class="flex-1">
-                                        <div class="flex items-center gap-2">
-                                            <span class="font-medium text-gray-700">Fixed size:</span>
-                                            <input
-                                                v-model.number="customTeamSize"
-                                                type="number"
-                                                min="2"
-                                                max="20"
-                                                @input="updateCustomTeamSize"
-                                                @focus="setTeamSizeMode('fixed')"
-                                                class="w-20 rounded-lg border-gray-300 text-center"
-                                            />
-                                            <span class="text-gray-700">players per team</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Allow Team Selection -->
-                        <div v-if="!isIndividualPlay" class="flex items-center gap-3">
+            <!-- Teams -->
+            <Card title="Teams">
+                <template #headerActions>
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm text-muted">Number of teams</span>
+                        <div class="inline-flex items-center overflow-hidden rounded-lg border border-border">
+                            <button type="button" class="h-9 w-9 bg-surface-overlay text-lg text-body hover:bg-surface-elevated" @click="applyTeamCount(teamCountInput - 1)">−</button>
                             <input
-                                id="modal_allow_team_selection"
-                                v-model="settingsForm.settings.allow_team_selection"
-                                type="checkbox"
-                                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                v-model.number="teamCountInput"
+                                type="text"
+                                inputmode="numeric"
+                                aria-label="Number of teams"
+                                class="w-12 border-x border-border bg-surface-inset py-1.5 text-center text-body focus:outline-none"
+                                @change="applyTeamCount(teamCountInput)"
                             />
-                            <div>
-                                <label for="modal_allow_team_selection" class="text-sm font-medium text-gray-700">
-                                    Allow players to pick their team
-                                </label>
-                                <p class="text-sm text-gray-500">
-                                    When enabled, players can choose which team to join
-                                </p>
+                            <button type="button" class="h-9 w-9 bg-surface-overlay text-lg text-body hover:bg-surface-elevated" @click="applyTeamCount(teamCountInput + 1)">+</button>
+                        </div>
+                    </div>
+                </template>
+
+                <p class="mb-4 text-xs text-subtle">Members optional — a team can play with just a name</p>
+
+                <div class="space-y-3">
+                    <div v-for="team in gameSession.teams" :key="team.id" class="rounded-lg border border-border" :style="{ borderColor: team.color }">
+                        <div class="flex items-center justify-between gap-3 p-3" :style="{ backgroundColor: team.color + '20' }">
+                            <div class="flex flex-1 items-center gap-3">
+                                <span class="h-5 w-5 flex-none rounded-full" :style="{ backgroundColor: team.color }"></span>
+                                <input
+                                    :value="team.name"
+                                    type="text"
+                                    aria-label="Team name"
+                                    class="min-w-0 max-w-[16rem] flex-1 rounded bg-transparent px-2 py-1 text-lg font-semibold text-body transition hover:bg-surface-inset focus:bg-surface-inset focus:outline-none focus:ring-1 focus:ring-primary"
+                                    @change="renameTeam(team, $event)"
+                                    @keyup.enter="($event.target as HTMLInputElement).blur()"
+                                />
+                                <span class="whitespace-nowrap text-sm text-muted">({{ team.members?.length || 0 }} members)</span>
                             </div>
+                            <div class="flex items-center gap-2">
+                                <Button variant="secondary" size="xs" icon="plus" @click="openAddMember(team.id)">Members</Button>
+                                <Button variant="danger" size="xs" @click="removeTeam(team)">Remove</Button>
+                            </div>
+                        </div>
+                        <div v-if="team.members && team.members.length" class="flex flex-wrap gap-2 p-3">
+                            <span v-for="member in team.members" :key="member.id" class="flex items-center gap-2 rounded-full bg-surface-inset px-3 py-1.5 text-sm text-body">
+                                {{ member.display_name }}
+                                <button class="text-muted hover:text-danger" @click="removeTeamMember(team, member)">&times;</button>
+                            </span>
                         </div>
                     </div>
 
-                    <!-- Game Settings Section -->
-                    <div class="border-t pt-6">
-                        <h4 class="text-lg font-semibold text-gray-800 mb-4">{{ gameSession.game_type.name }} Settings</h4>
+                    <div v-if="!gameSession.teams.length" class="py-6 text-center text-muted">No teams yet — use the control above.</div>
+                </div>
 
-                        <!-- Family Feud Settings -->
-                        <div v-if="gameSlug === 'family-feud'" class="space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Strikes Before Steal
-                                </label>
-                                <select
-                                    v-model="settingsForm.settings.max_strikes"
-                                    class="w-full rounded-lg border-gray-300"
-                                >
-                                    <option :value="2">2 Strikes</option>
-                                    <option :value="3">3 Strikes</option>
-                                    <option :value="4">4 Strikes</option>
-                                </select>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <input
-                                    id="modal_fast_money"
-                                    v-model="settingsForm.settings.fast_money_enabled"
-                                    type="checkbox"
-                                    class="rounded border-gray-300"
-                                />
-                                <label for="modal_fast_money" class="text-sm font-medium text-gray-700">
-                                    Enable Fast Money Round
-                                </label>
-                            </div>
+                <div class="mt-4 border-t border-border pt-4">
+                    <Toggle v-model="settingsForm.settings.allow_team_selection" label="Let players pick their own team when they join by code" />
+                </div>
+            </Card>
+
+            <!-- Rounds & scoring (America Says) -->
+            <Card v-if="gameSlug === 'america-says'" title="Rounds & scoring">
+                <template #headerActions>
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm text-muted">Rounds</span>
+                        <div class="inline-flex items-center overflow-hidden rounded-lg border border-border">
+                            <button type="button" class="h-9 w-9 bg-surface-overlay text-lg text-body hover:bg-surface-elevated" @click="applyRoundCount(roundCountInput - 1)">−</button>
+                            <input
+                                v-model.number="roundCountInput"
+                                type="text"
+                                inputmode="numeric"
+                                aria-label="Number of rounds"
+                                class="w-12 border-x border-border bg-surface-inset py-1.5 text-center text-body focus:outline-none"
+                                @change="applyRoundCount(roundCountInput)"
+                            />
+                            <button type="button" class="h-9 w-9 bg-surface-overlay text-lg text-body hover:bg-surface-elevated" @click="applyRoundCount(roundCountInput + 1)">+</button>
                         </div>
+                    </div>
+                </template>
 
-                        <!-- America Says Settings -->
-                        <div v-else-if="gameSlug === 'america-says'" class="space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Answers Per Question
-                                </label>
-                                <select
-                                    v-model="settingsForm.settings.answers_per_question"
-                                    class="w-full rounded-lg border-gray-300"
-                                >
-                                    <option :value="5">5 Answers</option>
-                                    <option :value="6">6 Answers</option>
-                                    <option :value="7">7 Answers</option>
-                                    <option :value="8">8 Answers</option>
-                                </select>
-                            </div>
+                <p class="mb-4 text-sm text-muted">
+                    A round plays one question per team ({{ teamsCount }} {{ teamsCount === 1 ? 'team' : 'teams' }}). Each correct answer scores its round's points; sweep the whole board for the bonus.
+                    <span class="text-body">{{ rounds.length }} rounds × {{ teamsCount }} = {{ totalQuestions }} questions.</span>
+                </p>
 
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Gameplay Mode
-                                </label>
-                                <select
-                                    v-model="settingsForm.settings.gameplay_mode"
-                                    class="w-full rounded-lg border-gray-300"
-                                >
-                                    <option value="host_reveal">Host Reveals Answers</option>
-                                    <option value="team_buzzer">Teams Buzz In</option>
-                                </select>
-                                <p class="text-xs text-gray-500 mt-1">
-                                    {{ settingsForm.settings.gameplay_mode === 'host_reveal'
-                                        ? 'Host manually reveals correct answers'
-                                        : 'Teams buzz in to give their answers' }}
-                                </p>
-                            </div>
+                <div class="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                    <Select v-model="settingsForm.settings.answers_per_question" :options="answerOptions" label="Answers / question" />
+                    <NumberInput v-model="settingsForm.settings.control_timer_seconds" label="Control timer (s)" :min="10" :max="120" />
+                    <NumberInput v-model="settingsForm.settings.steal_timer_seconds" label="Steal timer (s)" :min="5" :max="60" />
+                    <NumberInput v-model="settingsForm.settings.steal_points_percentage" label="Steal points (%)" :min="0" :max="100" />
+                </div>
 
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                                        Control Timer (seconds)
-                                    </label>
-                                    <input
-                                        v-model.number="settingsForm.settings.control_timer_seconds"
-                                        type="number"
-                                        min="10"
-                                        max="120"
-                                        class="w-full rounded-lg border-gray-300"
-                                    />
-                                    <p class="text-xs text-gray-500 mt-1">Time for the controlling team</p>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                                        Steal Timer (seconds)
-                                    </label>
-                                    <input
-                                        v-model.number="settingsForm.settings.steal_timer_seconds"
-                                        type="number"
-                                        min="5"
-                                        max="60"
-                                        class="w-full rounded-lg border-gray-300"
-                                    />
-                                    <p class="text-xs text-gray-500 mt-1">Time for steal round</p>
-                                </div>
-                            </div>
+                <label class="mb-2 block text-sm font-medium text-body">Points per round</label>
+                <div class="space-y-2">
+                    <div v-for="(round, i) in rounds" :key="i" class="flex flex-wrap items-end gap-x-4 gap-y-2 rounded-lg border border-border bg-surface-inset p-3">
+                        <span class="mb-2 w-16 font-semibold text-body">Round {{ i + 1 }}</span>
+                        <NumberInput v-model="round.points_per_answer" label="Pts / answer" :min="0" class="w-28" />
+                        <NumberInput v-model="round.bonus_points" label="Sweep bonus" :min="0" class="w-28" />
+                        <span class="mb-2 text-xs text-primary">Sweep all {{ answersPerQuestion }} = {{ sweptTotal(round).toLocaleString() }} pts</span>
+                        <Button v-if="rounds.length > 1" variant="ghost" size="xs" class="mb-1 ml-auto !text-danger" @click="removeRound(i)">Remove</Button>
+                    </div>
+                </div>
+            </Card>
 
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                                        Points Per Answer
-                                    </label>
-                                    <input
-                                        v-model.number="settingsForm.settings.points_per_answer"
-                                        type="number"
-                                        min="1"
-                                        max="1000"
-                                        class="w-full rounded-lg border-gray-300"
-                                    />
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                                        Steal Points (%)
-                                    </label>
-                                    <input
-                                        v-model.number="settingsForm.settings.steal_points_percentage"
-                                        type="number"
-                                        min="0"
-                                        max="100"
-                                        class="w-full rounded-lg border-gray-300"
-                                    />
-                                    <p class="text-xs text-gray-500 mt-1">% of points during steal round</p>
-                                </div>
-                            </div>
+            <!-- Family Feud rules -->
+            <Card v-else-if="gameSlug === 'family-feud'" title="Rules">
+                <div class="mb-4 max-w-xs">
+                    <Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" />
+                </div>
+                <Toggle v-model="settingsForm.settings.fast_money_enabled" label="Enable Fast Money round" />
+            </Card>
 
-                            <!-- Winning Condition -->
-                            <div class="border-t pt-4">
-                                <label class="block text-sm font-medium text-gray-700 mb-3">
-                                    Winning Condition
-                                </label>
-                                <div class="space-y-3">
-                                    <label class="flex items-start gap-3 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            name="winning_condition"
-                                            value="most_points_after_questions"
-                                            v-model="settingsForm.settings.winning_condition"
-                                            class="mt-1 text-blue-600 focus:ring-blue-500"
-                                        />
-                                        <div class="flex-1">
-                                            <div class="flex items-center gap-2">
-                                                <span class="font-medium text-gray-700">Most points after</span>
-                                                <input
-                                                    v-model.number="settingsForm.settings.questions_per_game"
-                                                    type="number"
-                                                    min="1"
-                                                    max="50"
-                                                    class="w-20 rounded-lg border-gray-300 text-center"
-                                                    @focus="settingsForm.settings.winning_condition = 'most_points_after_questions'"
-                                                />
-                                                <span class="text-gray-700">questions</span>
-                                            </div>
-                                        </div>
-                                    </label>
+            <!-- Oodles rules -->
+            <Card v-else-if="gameSlug === 'oodles'" title="Rules">
+                <div class="grid max-w-md grid-cols-2 gap-4">
+                    <NumberInput v-model="settingsForm.settings.cards_per_game" label="Cards per game" :min="1" :max="26" />
+                    <NumberInput v-model="settingsForm.settings.control_timer_seconds" label="Timer (s)" :min="5" :max="120" />
+                </div>
+            </Card>
 
-                                    <label class="flex items-start gap-3 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            name="winning_condition"
-                                            value="first_to_points"
-                                            v-model="settingsForm.settings.winning_condition"
-                                            class="mt-1 text-blue-600 focus:ring-blue-500"
-                                        />
-                                        <div class="flex-1">
-                                            <div class="flex items-center gap-2">
-                                                <span class="font-medium text-gray-700">First team to</span>
-                                                <input
-                                                    v-model.number="settingsForm.settings.winning_condition_options.first_to_points"
-                                                    type="number"
-                                                    min="100"
-                                                    max="10000"
-                                                    step="100"
-                                                    placeholder="1000"
-                                                    class="w-24 rounded-lg border-gray-300 text-center"
-                                                    @focus="settingsForm.settings.winning_condition = 'first_to_points'"
-                                                />
-                                                <span class="text-gray-700">points</span>
-                                            </div>
-                                        </div>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
+            <!-- Share -->
+            <Card title="Share & display">
+                <label class="mb-1 block text-sm font-medium text-muted">Game code</label>
+                <div class="mb-4 flex items-center gap-3">
+                    <span class="rounded-lg border border-border bg-surface-inset px-6 py-2 font-mono text-2xl font-bold tracking-widest text-body">{{ gameSession.invite_code }}</span>
+                    <Button variant="primary" size="md" @click="copyInviteCode">{{ codeCopied ? 'Copied!' : 'Copy code' }}</Button>
+                </div>
+                <label class="mb-1 block text-sm font-medium text-muted">Join link</label>
+                <div class="mb-4 flex items-center gap-3">
+                    <span class="flex-1 truncate rounded-lg border border-border bg-surface-inset px-4 py-2 font-mono text-sm text-muted">{{ joinUrl }}</span>
+                    <Button variant="muted" size="md" @click="copyJoinUrl">{{ urlCopied ? 'Copied!' : 'Copy' }}</Button>
+                </div>
+                <label class="mb-1 block text-sm font-medium text-muted">TV / projector display</label>
+                <div class="flex items-center gap-3">
+                    <span class="flex-1 truncate rounded-lg border border-info/30 bg-surface-inset px-4 py-2 font-mono text-sm text-info">{{ displayUrl }}</span>
+                    <Button variant="secondary" size="md" @click="copyDisplayUrl">{{ displayUrlCopied ? 'Copied!' : 'Copy' }}</Button>
+                </div>
+            </Card>
 
-                        <!-- Oodles Settings -->
-                        <div v-else-if="gameSlug === 'oodles'" class="space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Cards Per Game
-                                </label>
-                                <input
-                                    v-model.number="settingsForm.settings.cards_per_game"
-                                    type="number"
-                                    min="1"
-                                    max="26"
-                                    class="w-full rounded-lg border-gray-300"
-                                />
-                            </div>
+        </div>
 
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Questions Per Card Mode
-                                </label>
-                                <select
-                                    v-model="settingsForm.settings.questions_per_card_mode"
-                                    class="w-full rounded-lg border-gray-300"
-                                >
-                                    <option value="random">Random (within min/max range)</option>
-                                    <option value="fixed">Fixed number per card</option>
-                                </select>
-                            </div>
+        <!-- Add member modal -->
+        <Modal :show="showAddMemberModal" max-width="md" @close="closeAddMemberModal">
+            <div class="p-6">
+                <h3 class="mb-4 text-lg font-semibold text-body">Add team member</h3>
+                <div class="mb-4 flex border-b border-border">
+                    <button :class="['-mb-px border-b-2 px-4 py-2 text-sm font-medium', addMemberType === 'guest' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-body']" @click="addMemberType = 'guest'">Guest</button>
+                    <button :class="['-mb-px border-b-2 px-4 py-2 text-sm font-medium', addMemberType === 'friend' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-body']" @click="addMemberType = 'friend'">Friends</button>
+                    <button v-if="waitingPlayers.length" :class="['-mb-px border-b-2 px-4 py-2 text-sm font-medium', addMemberType === 'waiting' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-body']" @click="addMemberType = 'waiting'">Joined ({{ waitingPlayers.length }})</button>
+                </div>
 
-                            <div v-if="settingsForm.settings.questions_per_card_mode === 'fixed'">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Fixed Questions Per Card
-                                </label>
-                                <input
-                                    v-model.number="settingsForm.settings.fixed_questions_per_card"
-                                    type="number"
-                                    min="1"
-                                    max="10"
-                                    class="w-full rounded-lg border-gray-300"
-                                />
-                            </div>
-
-                            <div v-else class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                                        Min Questions Per Card
-                                    </label>
-                                    <input
-                                        v-model.number="settingsForm.settings.min_questions_per_card"
-                                        type="number"
-                                        min="1"
-                                        max="10"
-                                        class="w-full rounded-lg border-gray-300"
-                                    />
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                                        Max Questions Per Card
-                                    </label>
-                                    <input
-                                        v-model.number="settingsForm.settings.max_questions_per_card"
-                                        type="number"
-                                        min="1"
-                                        max="10"
-                                        class="w-full rounded-lg border-gray-300"
-                                    />
-                                </div>
-                            </div>
-
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                                        Timer Duration (seconds)
-                                    </label>
-                                    <input
-                                        v-model.number="settingsForm.settings.control_timer_seconds"
-                                        type="number"
-                                        min="5"
-                                        max="120"
-                                        class="w-full rounded-lg border-gray-300"
-                                    />
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                                        All Play Timer (seconds)
-                                    </label>
-                                    <input
-                                        v-model.number="settingsForm.settings.all_play_timer_seconds"
-                                        type="number"
-                                        min="5"
-                                        max="60"
-                                        class="w-full rounded-lg border-gray-300"
-                                    />
-                                </div>
-                            </div>
-
-                            <div class="flex items-center gap-2">
-                                <input
-                                    id="modal_allow_letter_reuse"
-                                    v-model="settingsForm.settings.allow_letter_reuse"
-                                    type="checkbox"
-                                    class="rounded border-gray-300"
-                                />
-                                <label for="modal_allow_letter_reuse" class="text-sm font-medium text-gray-700">
-                                    Allow Letter Reuse
-                                </label>
-                                <span class="text-sm text-gray-500">
-                                    (same letter can appear on multiple cards)
-                                </span>
-                            </div>
-
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-3">
-                                    Points Mode
-                                </label>
-                                <div class="space-y-3">
-                                    <label class="flex items-start gap-3 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            name="points_mode"
-                                            value="database"
-                                            v-model="settingsForm.settings.points_mode"
-                                            class="mt-1 text-blue-600 focus:ring-blue-500"
-                                        />
-                                        <div>
-                                            <span class="font-medium text-gray-700">Use database values</span>
-                                            <p class="text-sm text-gray-500">Each question uses its own point value (100-300 based on difficulty)</p>
-                                        </div>
-                                    </label>
-
-                                    <div class="flex items-start gap-3">
-                                        <input
-                                            type="radio"
-                                            name="points_mode"
-                                            value="fixed"
-                                            v-model="settingsForm.settings.points_mode"
-                                            class="mt-1 text-blue-600 focus:ring-blue-500"
-                                        />
-                                        <div class="flex-1">
-                                            <div class="flex items-center gap-2">
-                                                <span class="font-medium text-gray-700">Fixed points:</span>
-                                                <input
-                                                    v-model.number="settingsForm.settings.points_per_answer"
-                                                    type="number"
-                                                    min="1"
-                                                    max="1000"
-                                                    class="w-24 rounded-lg border-gray-300 text-center"
-                                                    @focus="settingsForm.settings.points_mode = 'fixed'"
-                                                />
-                                                <span class="text-gray-700">per answer</span>
-                                            </div>
-                                            <p class="text-sm text-gray-500 mt-1">All questions worth the same amount</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Multi-Team Scoring
-                                </label>
-                                <p class="text-sm text-gray-500 mb-2">
-                                    When multiple teams answer correctly in All Play
-                                </p>
-                                <select
-                                    v-model="settingsForm.settings.multi_team_scoring"
-                                    class="w-full rounded-lg border-gray-300"
-                                >
-                                    <option value="full">Full points to each team</option>
-                                    <option value="split">Split points among teams</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Last Question Bonus
-                                </label>
-                                <p class="text-sm text-gray-500 mb-2">
-                                    Extra points for answering the last question on a card correctly
-                                </p>
-                                <div class="flex items-center gap-2">
-                                    <input
-                                        v-model.number="settingsForm.settings.last_question_bonus"
-                                        type="number"
-                                        min="0"
-                                        max="1000"
-                                        class="w-24 rounded-lg border-gray-300 text-center"
-                                    />
-                                    <span class="text-gray-500">bonus points</span>
-                                </div>
-                                <p class="text-xs text-gray-400 mt-1">Set to 0 for no bonus</p>
-                            </div>
-                        </div>
+                <TextField v-if="addMemberType === 'guest'" v-model="guestNameInput" label="Guest name" placeholder="Enter a name" />
+                <div v-else-if="addMemberType === 'friend'" class="space-y-2">
+                    <div v-if="!availableFriends.length" class="py-4 text-center text-muted">No friends available.</div>
+                    <div v-for="friend in availableFriends" :key="friend.id" :class="['cursor-pointer rounded-lg border p-3', selectedFriendId === friend.id ? 'border-primary bg-primary/10' : 'border-border hover:border-border-strong']" @click="selectedFriendId = friend.id">
+                        <div class="font-medium text-body">{{ friend.nickname || friend.name }}</div>
+                        <div v-if="friend.nickname" class="text-sm text-muted">{{ friend.name }}</div>
+                    </div>
+                </div>
+                <div v-else class="space-y-2">
+                    <div v-for="player in waitingPlayers" :key="player.id" :class="['cursor-pointer rounded-lg border p-3', selectedWaitingPlayerId === player.id ? 'border-primary bg-primary/10' : 'border-border hover:border-border-strong']" @click="selectedWaitingPlayerId = player.id">
+                        <div class="font-medium text-body">{{ player.display_name }}</div>
                     </div>
                 </div>
 
-                <!-- Modal Actions -->
-                <div class="p-6 border-t bg-gray-50 flex justify-end gap-3 sticky bottom-0">
-                    <button
-                        @click="showSettingsModal = false"
-                        class="px-4 py-2 text-gray-700 hover:text-gray-900"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        @click="saveSettings"
-                        :disabled="settingsForm.processing"
-                        class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                    >
-                        Save Settings
-                    </button>
+                <div class="mt-6 flex justify-end gap-3">
+                    <Button variant="ghost" size="md" @click="closeAddMemberModal">Cancel</Button>
+                    <Button variant="primary" size="md" :disabled="addMemberDisabled" @click="addTeamMember">Add</Button>
                 </div>
             </div>
-        </div>
-    </AuthenticatedLayout>
+        </Modal>
+
+        <!-- Confirmations -->
+        <Confirm
+            :show="confirmState.show"
+            :title="confirmState.title"
+            :message="confirmState.message"
+            :confirm-text="confirmState.confirmText"
+            variant="danger"
+            @confirm="runConfirm"
+            @close="confirmState.show = false"
+        />
+    </StandardLayout>
 </template>
