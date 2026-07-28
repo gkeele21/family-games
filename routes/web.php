@@ -52,11 +52,15 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/timer/start', [HostController::class, 'startTimer'])->name('host.timer.start');
     Route::post('/host/{gameSession}/timer/pause', [HostController::class, 'pauseTimer'])->name('host.timer.pause');
     Route::post('/host/{gameSession}/timer/reset', [HostController::class, 'resetTimer'])->name('host.timer.reset');
+    Route::post('/host/{gameSession}/board/reset', [HostController::class, 'resetBoard'])->name('host.board.reset');
     Route::post('/host/{gameSession}/reveal', [HostController::class, 'revealAnswer'])->name('host.reveal');
     Route::post('/host/{gameSession}/unreveal', [HostController::class, 'unrevealAnswer'])->name('host.unreveal');
     Route::post('/host/{gameSession}/control', [HostController::class, 'setControllingTeams'])->name('host.control');
+    Route::post('/host/{gameSession}/control/team', [HostController::class, 'setControllingTeam'])->name('host.control.team');
+    Route::post('/host/{gameSession}/bonus', [HostController::class, 'awardBonus'])->name('host.bonus');
     Route::post('/host/{gameSession}/question/select', [HostController::class, 'selectQuestion'])->name('host.question.select');
     Route::post('/host/{gameSession}/question/next', [HostController::class, 'nextQuestion'])->name('host.question.next');
+    Route::post('/host/{gameSession}/question/previous', [HostController::class, 'previousQuestion'])->name('host.question.previous');
     Route::post('/host/{gameSession}/question/correct', [HostController::class, 'markCorrect'])->name('host.question.correct');
     Route::post('/host/{gameSession}/question/wrong', [HostController::class, 'markWrong'])->name('host.question.wrong');
     Route::post('/host/{gameSession}/card/next', [HostController::class, 'nextCard'])->name('host.card.next');

@@ -330,15 +330,15 @@ const copyDisplayUrl = () => {
                 <p class="mb-4 text-xs text-subtle">Members optional — a team can play with just a name</p>
 
                 <div class="space-y-3">
-                    <div v-for="team in gameSession.teams" :key="team.id" class="rounded-lg border border-border" :style="{ borderColor: team.color }">
-                        <div class="flex items-center justify-between gap-3 p-3" :style="{ backgroundColor: team.color + '20' }">
+                    <div v-for="team in gameSession.teams" :key="team.id" class="rounded-lg border border-border">
+                        <div class="flex items-center justify-between gap-3 p-3">
                             <div class="flex flex-1 items-center gap-3">
-                                <span class="h-5 w-5 flex-none rounded-full" :style="{ backgroundColor: team.color }"></span>
                                 <input
                                     :value="team.name"
                                     type="text"
                                     aria-label="Team name"
-                                    class="min-w-0 max-w-[16rem] flex-1 rounded bg-transparent px-2 py-1 text-lg font-semibold text-body transition hover:bg-surface-inset focus:bg-surface-inset focus:outline-none focus:ring-1 focus:ring-primary"
+                                    :style="{ color: team.color }"
+                                    class="min-w-0 max-w-[16rem] flex-1 rounded bg-transparent px-2 py-1 text-lg font-semibold transition hover:bg-surface-inset focus:bg-surface-inset focus:outline-none focus:ring-1 focus:ring-primary"
                                     @change="renameTeam(team, $event)"
                                     @keyup.enter="($event.target as HTMLInputElement).blur()"
                                 />

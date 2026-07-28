@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-
 interface TeamMember {
     id: number;
     display_name: string;
@@ -20,20 +18,22 @@ interface Props {
     controllingTeamIds?: number[];
     playerTeamId?: number | null;
     showMembers?: boolean;
+    /** Host: clicking a team row hands control to that team. */
+    selectable?: boolean;
+    /** Host: show the pencil that opens the score-edit modal. */
     editable?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
     showMembers: false,
+    selectable: false,
     editable: false,
 });
 
 const emit = defineEmits<{
-    (e: 'update-score', teamId: number, newScore: number): void;
+    (e: 'select-team', teamId: number): void;
+    (e: 'edit-scores'): void;
 }>();
-
-const editingTeamId = ref<number | null>(null);
-const editScore = ref<string>('');
 
 const hasControl = (teamId: number): boolean => {
     return props.controllingTeamIds?.includes(teamId) ?? false;
@@ -43,93 +43,54 @@ const isPlayerTeam = (teamId: number): boolean => {
     return props.playerTeamId === teamId;
 };
 
-const startEditing = (team: Team) => {
-    if (!props.editable) return;
-    editingTeamId.value = team.id;
-    editScore.value = String(team.total_score);
-};
-
-const saveScore = () => {
-    if (editingTeamId.value !== null) {
-        const newScore = parseInt(editScore.value, 10);
-        if (!isNaN(newScore) && newScore >= 0) {
-            emit('update-score', editingTeamId.value, newScore);
-        }
-        cancelEditing();
-    }
-};
-
-const cancelEditing = () => {
-    editingTeamId.value = null;
-    editScore.value = '';
-};
-
-const handleKeydown = (event: KeyboardEvent) => {
-    if (event.key === 'Enter') {
-        saveScore();
-    } else if (event.key === 'Escape') {
-        cancelEditing();
-    }
+const onRowClick = (teamId: number) => {
+    if (props.selectable) emit('select-team', teamId);
 };
 </script>
 
 <template>
     <div class="rounded-lg border border-border bg-surface p-4">
-        <h3 class="mb-4 text-center text-lg font-bold text-body">Scoreboard</h3>
+        <div class="relative mb-4 flex items-center justify-center">
+            <h3 class="text-lg font-bold text-body">Scoreboard</h3>
+            <button
+                v-if="editable"
+                type="button"
+                class="absolute right-0 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-warning transition-colors hover:bg-warning/10"
+                title="Edit scores"
+                @click="emit('edit-scores')"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                </svg>
+            </button>
+        </div>
         <div class="space-y-3">
             <div
                 v-for="team in teams"
                 :key="team.id"
-                class="rounded-lg border transition-all duration-300"
-                :class="{
-                    'ring-2 ring-white/70 ring-offset-2 ring-offset-surface': activeTeamId === team.id,
-                    'ring-2 ring-success ring-offset-2 ring-offset-surface': !activeTeamId && isPlayerTeam(team.id),
-                    'opacity-60': activeTeamId && activeTeamId !== team.id,
-                }"
-                :style="{ backgroundColor: team.color + '22', borderColor: team.color + '80' }"
+                class="rounded-lg border border-border bg-surface-inset transition-all duration-300"
+                :class="[
+                    {
+                        'ring-2 ring-white shadow-[0_0_22px_2px_rgba(255,255,255,0.6)]': hasControl(team.id),
+                        'ring-2 ring-white/70 ring-offset-2 ring-offset-surface': !hasControl(team.id) && activeTeamId === team.id,
+                        'ring-2 ring-success ring-offset-2 ring-offset-surface': !hasControl(team.id) && !activeTeamId && isPlayerTeam(team.id),
+                    },
+                    selectable ? 'cursor-pointer hover-glow' : '',
+                ]"
+                @click="onRowClick(team.id)"
             >
                 <!-- Team Header -->
                 <div class="flex items-center justify-between p-3">
                     <div class="flex items-center gap-3">
-                        <div
-                            class="h-4 w-4 rounded-full"
-                            :style="{ backgroundColor: team.color }"
-                        ></div>
-                        <span class="font-semibold text-body">{{ team.name }}</span>
+                        <span class="font-semibold" :style="{ color: team.color }">{{ team.name }}</span>
                         <span
                             v-if="isPlayerTeam(team.id)"
                             class="rounded-full bg-success px-2 py-0.5 text-xs font-bold text-white"
                         >
                             YOUR TEAM
                         </span>
-                        <span
-                            v-if="hasControl(team.id)"
-                            class="rounded-full bg-warning px-2 py-0.5 text-xs font-bold text-black"
-                        >
-                            CONTROL
-                        </span>
                     </div>
-                    <!-- Editable Score -->
-                    <div v-if="editable && editingTeamId === team.id" class="flex items-center gap-2">
-                        <input
-                            v-model="editScore"
-                            type="number"
-                            min="0"
-                            class="w-20 rounded border border-primary bg-surface-inset px-2 py-1 text-center text-xl font-bold text-body focus:outline-none focus:ring-2 focus:ring-primary"
-                            @keydown="handleKeydown"
-                            @blur="saveScore"
-                            autofocus
-                        />
-                    </div>
-                    <span
-                        v-else
-                        class="text-2xl font-bold text-body"
-                        :class="{ 'cursor-pointer transition-colors hover:text-primary': editable }"
-                        :title="editable ? 'Click to edit score' : undefined"
-                        @click="startEditing(team)"
-                    >
-                        {{ team.total_score }}
-                    </span>
+                    <span class="text-2xl font-bold text-body">{{ team.total_score }}</span>
                 </div>
 
                 <!-- Team Members -->

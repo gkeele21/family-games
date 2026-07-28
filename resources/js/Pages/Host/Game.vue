@@ -43,6 +43,8 @@ interface CurrentQuestion {
     control_status: string;
     controlling_team_id: number | null;
     controlling_team_ids: number[];
+    bonus_points: number;
+    bonus_awarded_team_id: number | null;
     answers: Answer[];
     revealed_answer_ids: number[];
 }
@@ -89,15 +91,14 @@ const totalQuestions = ref<number | null>(null);
 const selectedControllingTeams = ref<number[]>([]);
 const showControlModal = ref(false);
 const selectedAllPlayTeams = ref<number[]>([]);
-const showStealModal = ref(false);
+const showScoreModal = ref(false);
+const scoreEdits = ref<Record<number, string>>({});
+const bonusDismissedQuestionId = ref<number | null>(null);
 const timerExpiredHandled = ref(false);
 let pollInterval: number | null = null;
 
 const isOodles = props.gameSession.game_type.slug === 'oodles';
 const isAmericaSays = props.gameSession.game_type.slug === 'america-says';
-
-const isStealRound = computed(() => gameState.value?.is_steal_round ?? false);
-const stealPointsPercentage = computed(() => gameState.value?.steal_points_percentage ?? 50);
 
 const allAnswersRevealed = computed(() => {
     if (!currentQuestion.value) return false;
@@ -108,6 +109,14 @@ const getControllingTeamName = computed(() => {
     if (!currentQuestion.value?.controlling_team_id) return null;
     const team = teams.value.find(t => t.id === currentQuestion.value?.controlling_team_id);
     return team?.name ?? null;
+});
+
+// Which team(s) to highlight as in-control on the scoreboard.
+const boardControllingTeamIds = computed<number[]>(() => {
+    const q = currentQuestion.value;
+    if (!q) return [];
+    if (q.controlling_team_ids?.length) return q.controlling_team_ids;
+    return q.controlling_team_id ? [q.controlling_team_id] : [];
 });
 
 const fetchState = async () => {
@@ -126,14 +135,10 @@ const fetchState = async () => {
 };
 
 const onTimerExpired = () => {
-    if (timerExpiredHandled.value) return;
-    if (isAmericaSays && currentQuestion.value && !allAnswersRevealed.value) {
-        const isSteal = gameState.value?.is_steal_round;
-        if (!isSteal) {
-            timerExpiredHandled.value = true;
-            showStealModal.value = true;
-        }
-    }
+    // Time's up. Nothing automatic happens — the host either keeps revealing
+    // for the current team or clicks the other team on the scoreboard to hand
+    // over the turn.
+    timerExpiredHandled.value = true;
 };
 
 const startTimer = async () => {
@@ -150,6 +155,20 @@ const pauseTimer = async () => {
 const resetTimer = async () => {
     timerExpiredHandled.value = false;
     await axios.post(route('host.timer.reset', props.gameSession.id));
+    fetchState();
+};
+
+// Reset the whole round: un-reveal every answer, reverse this round's points,
+// restore the original controlling team, and put the timer back to full.
+const showResetRoundConfirm = ref(false);
+const resetRound = async () => {
+    showResetRoundConfirm.value = false;
+    timerExpiredHandled.value = false;
+    bonusDismissedQuestionId.value = null;
+    await Promise.all([
+        axios.post(route('host.board.reset', props.gameSession.id)),
+        axios.post(route('host.timer.reset', props.gameSession.id)),
+    ]);
     fetchState();
 };
 
@@ -303,28 +322,62 @@ const updateTeamScore = async (teamId: number, newScore: number) => {
     }
 };
 
-const startStealRound = async () => {
-    try {
-        showStealModal.value = false;
-        await axios.post(route('host.steal.start', props.gameSession.id));
-        fetchState();
-    } catch (error: any) {
-        console.error('Failed to start steal round:', error);
-        alert('Error starting steal round: ' + (error.response?.data?.error || error.message));
-    }
-};
-const skipStealRound = async () => {
-    showStealModal.value = false;
+// Top-header "Next Question": advance to the next question.
+const advanceQuestion = async () => {
     await nextQuestion();
 };
-const endStealAndNextQuestion = async () => {
+
+// Step back to the previous question (non-destructive — boards/scores persist).
+const previousQuestion = async () => {
     try {
-        await axios.post(route('host.steal.end', props.gameSession.id));
-        await nextQuestion();
+        await axios.post(route('host.question.previous', props.gameSession.id));
+        fetchState();
     } catch (error: any) {
-        console.error('Failed to end steal round:', error);
+        console.error('Failed to go back a question:', error);
         alert('Error: ' + (error.response?.data?.error || error.message));
     }
+};
+
+// Clicking a team on the scoreboard hands control (the turn) to that team.
+const selectControllingTeam = async (teamId: number) => {
+    try {
+        await axios.post(route('host.control.team', props.gameSession.id), { team_id: teamId });
+        fetchState();
+    } catch (error: any) {
+        console.error('Failed to set controlling team:', error);
+        alert('Error: ' + (error.response?.data?.error || error.message));
+    }
+};
+
+// Dismiss the "All Answers Revealed" bonus prompt for this question (no sweep).
+const dismissBonus = () => {
+    if (currentQuestion.value) bonusDismissedQuestionId.value = currentQuestion.value.id;
+};
+
+// Award the current question's sweep bonus to a team.
+const awardBonus = async (teamId: number) => {
+    try {
+        await axios.post(route('host.bonus', props.gameSession.id), { team_id: teamId });
+        fetchState();
+    } catch (error: any) {
+        console.error('Failed to award bonus:', error);
+        alert('Error: ' + (error.response?.data?.error || error.message));
+    }
+};
+
+// Score-edit modal (opened by the scoreboard pencil).
+const openScoreModal = () => {
+    const edits: Record<number, string> = {};
+    teams.value.forEach(t => { edits[t.id] = String(t.total_score); });
+    scoreEdits.value = edits;
+    showScoreModal.value = true;
+};
+const saveScores = async () => {
+    const updates = teams.value
+        .map(t => ({ id: t.id, current: t.total_score, next: parseInt(scoreEdits.value[t.id], 10) }))
+        .filter(u => !isNaN(u.next) && u.next >= 0 && u.next !== u.current);
+    await Promise.all(updates.map(u => updateTeamScore(u.id, u.next)));
+    showScoreModal.value = false;
 };
 
 onMounted(() => {
@@ -346,7 +399,12 @@ onUnmounted(() => {
                     Hosting: {{ gameSession.game_type.name }}
                     <span class="ml-2 font-normal text-muted">Code: {{ gameSession.invite_code }}</span>
                 </h1>
-                <Button variant="danger" size="md" @click="endGame">End Game</Button>
+                <div class="flex items-center gap-3">
+                    <Button v-if="currentQuestion && (currentQuestionNumber ?? 1) > 1" variant="primary" size="md" @click="previousQuestion">&larr; Previous</Button>
+                    <Button v-if="currentQuestion" variant="primary" size="md" @click="advanceQuestion">Next Question &rarr;</Button>
+                    <Button v-if="currentQuestion" variant="danger" size="md" @click="showResetRoundConfirm = true">Reset Round</Button>
+                    <Button variant="secondary" size="md" @click="endGame">End Game</Button>
+                </div>
             </div>
         </template>
 
@@ -357,10 +415,15 @@ onUnmounted(() => {
                     <Scoreboard
                         :teams="teams"
                         :active-team-id="gameState?.active_team_id"
-                        :controlling-team-ids="currentQuestion?.controlling_team_ids || []"
+                        :controlling-team-ids="boardControllingTeamIds"
+                        :selectable="!isOodles"
                         :editable="true"
-                        @update-score="updateTeamScore"
+                        @select-team="selectControllingTeam"
+                        @edit-scores="openScoreModal"
                     />
+                    <p v-if="!isOodles && currentQuestion" class="mt-2 text-center text-xs text-muted">
+                        Click a team to give them the turn
+                    </p>
 
                     <div v-if="isOodles && currentQuestion" class="mt-4">
                         <Button variant="accent" size="md" class="w-full" @click="openControlModal">Set Team Control</Button>
@@ -382,20 +445,6 @@ onUnmounted(() => {
                             </div>
                             <Button variant="secondary" size="md" @click="nextCard">Next Card &rarr;</Button>
                         </div>
-                    </Card>
-
-                    <!-- Timer -->
-                    <Card>
-                        <GameTimer
-                            v-if="gameState"
-                            :timer-started-at="gameState.timer_started_at"
-                            :timer-duration="gameState.timer_duration"
-                            :is-host="true"
-                            @start="startTimer"
-                            @pause="pauseTimer"
-                            @reset="resetTimer"
-                            @expired="onTimerExpired"
-                        />
                     </Card>
 
                     <!-- Oodles: Question list -->
@@ -424,12 +473,25 @@ onUnmounted(() => {
                     <!-- Question & Answers -->
                     <Card>
                         <div v-if="currentQuestion">
-                            <!-- Question header -->
-                            <div class="mb-6 text-center">
-                                <div v-if="isAmericaSays && currentQuestionNumber && totalQuestions" class="mb-2">
-                                    <span class="rounded-full bg-surface-inset px-3 py-1 text-sm font-medium text-muted">Question {{ currentQuestionNumber }} of {{ totalQuestions }}</span>
+                            <!-- Header: question info (left, 2/3) + timer (right, 1/3) -->
+                            <div class="mb-6 grid grid-cols-1 items-center gap-4 lg:grid-cols-3">
+                                <div class="text-center lg:col-span-2 lg:text-left">
+                                    <div v-if="currentQuestionNumber && totalQuestions" class="mb-2">
+                                        <span class="rounded-full bg-surface-inset px-3 py-1 text-sm font-medium text-muted">Question {{ currentQuestionNumber }} of {{ totalQuestions }}</span>
+                                    </div>
+                                    <h3 class="text-2xl font-bold text-body">{{ currentQuestion.question_text }}</h3>
                                 </div>
-                                <h3 class="text-2xl font-bold text-body">{{ currentQuestion.question_text }}</h3>
+                                <GameTimer
+                                    v-if="gameState"
+                                    size="sm"
+                                    :timer-started-at="gameState.timer_started_at"
+                                    :timer-duration="gameState.timer_duration"
+                                    :is-host="true"
+                                    @start="startTimer"
+                                    @pause="pauseTimer"
+                                    @reset="resetTimer"
+                                    @expired="onTimerExpired"
+                                />
                             </div>
 
                             <!-- Oodles: control & actions -->
@@ -512,37 +574,33 @@ onUnmounted(() => {
                                 </div>
                             </div>
 
-                            <!-- America Says: steal round -->
-                            <div v-if="isAmericaSays && isStealRound" class="mb-4 rounded-lg border border-warning/40 bg-warning/10 p-4">
-                                <div class="flex items-center justify-between">
-                                    <div>
-                                        <span class="text-xl font-bold text-warning">STEAL ROUND!</span>
-                                        <p class="text-muted">{{ getControllingTeamName }} can steal for {{ stealPointsPercentage }}% points</p>
-                                    </div>
-                                    <Button variant="muted" size="md" @click="endStealAndNextQuestion">Next Question</Button>
-                                </div>
-                            </div>
-
-                            <!-- America Says: all revealed -->
-                            <div v-else-if="isAmericaSays && allAnswersRevealed" class="mb-4 rounded-lg border border-success/40 bg-success/10 p-4">
-                                <div class="flex items-center justify-between">
-                                    <div>
-                                        <span class="text-xl font-bold text-success">All Answers Revealed!</span>
-                                        <p class="text-muted">Great job! Ready for the next question?</p>
-                                    </div>
-                                    <Button variant="success" size="md" @click="nextQuestion">Next Question</Button>
-                                </div>
-                            </div>
-
-                            <!-- America Says: control round -->
-                            <div v-else-if="isAmericaSays && currentQuestion.controlling_team_id" class="mb-4 rounded-lg border border-info/40 bg-info/10 p-4">
-                                <div class="flex items-center justify-between">
-                                    <div>
-                                        <span class="text-xl font-bold text-info">{{ getControllingTeamName }}'s Turn</span>
-                                        <p class="text-muted">Full points for correct answers</p>
-                                    </div>
-                                    <Button variant="accent" size="md" @click="showStealModal = true">Start Steal Round</Button>
-                                </div>
+                            <!-- America Says: all revealed + optional sweep bonus -->
+                            <div
+                                v-if="isAmericaSays && allAnswersRevealed && bonusDismissedQuestionId !== currentQuestion.id"
+                                class="mb-4 rounded-lg border border-success/40 bg-success/10 p-4 text-center"
+                            >
+                                <span class="text-xl font-bold text-success">All Answers Revealed!</span>
+                                <template v-if="currentQuestion.bonus_points > 0">
+                                    <p v-if="currentQuestion.bonus_awarded_team_id" class="mt-2 text-muted">
+                                        Sweep bonus ({{ currentQuestion.bonus_points }} pts) awarded.
+                                    </p>
+                                    <template v-else>
+                                        <p class="mt-2 text-muted">Award the {{ currentQuestion.bonus_points }} pt sweep bonus if one team cleared the board:</p>
+                                        <div class="mt-3 flex flex-wrap justify-center gap-2">
+                                            <Button
+                                                v-for="team in teams"
+                                                :key="team.id"
+                                                size="md"
+                                                class="text-white"
+                                                :style="{ backgroundColor: team.color }"
+                                                @click="awardBonus(team.id)"
+                                            >
+                                                {{ team.name }}
+                                            </Button>
+                                            <Button variant="muted" size="md" @click="dismissBonus">No Bonus</Button>
+                                        </div>
+                                    </template>
+                                </template>
                             </div>
 
                             <!-- Answers (America Says / Family Feud) -->
@@ -551,23 +609,15 @@ onUnmounted(() => {
                                     v-for="answer in currentQuestion.answers"
                                     :key="answer.id"
                                     :title="answer.revealed ? 'Click to undo' : 'Click to reveal'"
-                                    class="cursor-pointer rounded-lg border p-4 text-left transition-all"
+                                    class="hover-glow cursor-pointer rounded-lg border p-4 text-left transition-all"
                                     :class="answer.revealed
                                         ? 'border-success bg-success/10 text-body shadow-[0_0_18px_-2px_rgb(var(--color-success)_/_0.55)]'
-                                        : (isStealRound
-                                            ? 'border-warning/40 bg-warning/10 text-body'
-                                            : 'border-border bg-surface-inset text-body')"
+                                        : 'border-border bg-surface-inset text-body'"
                                     @click="toggleAnswer(answer)"
                                 >
                                     <div class="flex items-center justify-between">
                                         <span class="font-semibold">{{ answer.answer_text }}</span>
-                                        <span class="text-lg font-bold" :class="isStealRound && !answer.revealed ? 'text-warning' : 'text-muted'">
-                                            <template v-if="isStealRound && !answer.revealed">
-                                                {{ Math.floor(answer.points * stealPointsPercentage / 100) }} pts
-                                                <span class="ml-1 text-sm text-subtle line-through">{{ answer.points }}</span>
-                                            </template>
-                                            <template v-else>{{ answer.points }} pts</template>
-                                        </span>
+                                        <span class="text-lg font-bold text-muted">{{ answer.points }} pts</span>
                                     </div>
                                 </button>
                             </div>
@@ -616,17 +666,45 @@ onUnmounted(() => {
             </div>
         </Modal>
 
-        <!-- Steal Round Modal -->
-        <Modal :show="showStealModal" max-width="md" :closeable="false">
+        <!-- Score edit modal (opened by the scoreboard pencil) -->
+        <Modal :show="showScoreModal" max-width="md" @close="showScoreModal = false">
             <div class="p-6">
-                <h3 class="mb-2 text-xl font-bold text-warning">Start Steal Round?</h3>
-                <p class="mb-4 text-muted">Time's up! The other team can now try to steal remaining answers for {{ stealPointsPercentage }}% of the points.</p>
+                <h3 class="mb-4 text-xl font-bold text-body">Adjust Scores</h3>
+                <div class="mb-6 space-y-3">
+                    <div
+                        v-for="team in teams"
+                        :key="team.id"
+                        class="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface-inset p-3"
+                    >
+                        <div class="flex items-center gap-3">
+                            <span class="font-semibold" :style="{ color: team.color }">{{ team.name }}</span>
+                        </div>
+                        <input
+                            v-model="scoreEdits[team.id]"
+                            type="number"
+                            min="0"
+                            class="w-28 rounded-lg border-border bg-surface-inset text-center text-xl font-bold text-body focus:border-primary focus:ring-primary"
+                        />
+                    </div>
+                </div>
                 <div class="flex justify-end gap-3">
-                    <Button variant="ghost" size="md" @click="skipStealRound">Skip to Next Question</Button>
-                    <Button variant="accent" size="md" @click="startStealRound">Start Steal Round</Button>
+                    <Button variant="ghost" size="md" @click="showScoreModal = false">Cancel</Button>
+                    <Button variant="primary" size="md" @click="saveScores">Save Scores</Button>
                 </div>
             </div>
         </Modal>
+
+        <!-- Reset round confirm -->
+        <Confirm
+            :show="showResetRoundConfirm"
+            title="Reset this round?"
+            message="This clears every revealed answer and reverses the points (and any sweep bonus) earned this round. Scores from earlier rounds are not affected."
+            confirm-text="Reset Round"
+            variant="danger"
+            @confirm="resetRound"
+            @cancel="showResetRoundConfirm = false"
+            @close="showResetRoundConfirm = false"
+        />
 
         <!-- End game confirm -->
         <Confirm
@@ -636,6 +714,7 @@ onUnmounted(() => {
             confirm-text="End Game"
             variant="danger"
             @confirm="confirmEndGame"
+            @cancel="showEndConfirm = false"
             @close="showEndConfirm = false"
         />
     </StandardLayout>

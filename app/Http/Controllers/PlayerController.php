@@ -424,8 +424,9 @@ class PlayerController extends Controller
     }
 
     /**
-     * Obfuscate answer text for unrevealed answers
-     * Shows first letter + underscores
+     * Obfuscate answer text for unrevealed answers.
+     * Shows first letter + underscores, joined with NO space so the
+     * result reads as one continuous solid line that hides the word count.
      */
     private function obfuscateAnswer(string $text): string
     {
@@ -439,6 +440,6 @@ class PlayerController extends Controller
             return $firstLetter . str_repeat('_', $underscoreCount);
         }, $words);
 
-        return implode(' ', $obfuscated);
+        return implode('', $obfuscated);
     }
 }
