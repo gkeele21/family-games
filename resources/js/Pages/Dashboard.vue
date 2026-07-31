@@ -110,12 +110,12 @@ const getActiveGameLink = (game: ActiveGame) => {
                         <p class="cap">Includes</p>
                         <ul class="gamelist">
                             <li>
-                                <GameBadge slug="family-feud" variant="bare" />
-                                <span class="gname" style="color: rgb(var(--color-warning))">Family Feud</span>
-                            </li>
-                            <li>
                                 <GameBadge slug="america-says" variant="bare" />
                                 <span class="gname" style="color: rgb(var(--color-text))">America Says</span>
+                            </li>
+                            <li>
+                                <GameBadge slug="family-feud" variant="bare" />
+                                <span class="gname" style="color: rgb(var(--color-warning))">Family Feud</span>
                             </li>
                             <li>
                                 <GameBadge slug="oodles" variant="bare" />

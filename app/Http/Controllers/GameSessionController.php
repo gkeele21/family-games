@@ -371,6 +371,22 @@ class GameSessionController extends Controller
         return back()->with('success', 'Settings updated successfully');
     }
 
+    /**
+     * Return a started game to its setup lobby. Questions/cards are left as-is —
+     * they're cleared and rebuilt the next time the host starts — so this just
+     * flips the status back to 'lobby' and sends the host to the setup screen.
+     */
+    public function backToLobby(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $gameSession->update(['status' => 'lobby']);
+
+        return redirect()->route('host.lobby', $gameSession);
+    }
+
     public function startGame(GameSession $gameSession, GameInitializationService $initService)
     {
         if ($gameSession->host_user_id !== auth()->id()) {

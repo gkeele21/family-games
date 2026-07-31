@@ -13,6 +13,16 @@ class GameInitializationService
     {
         $gameType = $gameSession->gameType;
 
+        // Make (re)starting idempotent: clear any questions/cards materialized by
+        // a prior start so we never accumulate duplicates. Null the game-state
+        // pointers first so the deletes don't trip the foreign keys.
+        $gameSession->gameState?->update([
+            'current_question_id' => null,
+            'current_card_id' => null,
+        ]);
+        $gameSession->sessionQuestions()->delete();
+        $gameSession->sessionCards()->delete();
+
         match ($gameType->slug) {
             'oodles' => $this->initializeOodles($gameSession),
             'family-feud' => $this->initializeFamilyFeud($gameSession),
@@ -112,54 +122,81 @@ class GameInitializationService
     protected function initializeFamilyFeud(GameSession $gameSession): void
     {
         $config = $gameSession->settings ?? $gameSession->gameType->default_config;
-        $roundsPerGame = $config['rounds_per_game'] ?? 4;
+        $roundsPerGame = (int) ($config['rounds_per_game'] ?? 4);
         $fastMoneyEnabled = $config['fast_money_enabled'] ?? true;
 
-        // Regular-round questions, honoring the host's selection (random filters
-        // or hand-picked). selectQuestions() already excludes the final pool.
-        $regularQuestions = $this->selectQuestions($gameSession, $roundsPerGame);
+        // The host assigns a question to each slot in setup (one per round, plus
+        // 5 Fast Money slots). Use those explicit picks; fall back to a random
+        // eligible question for any slot left unset.
+        $sel = is_array($config['question_selection'] ?? null) ? $config['question_selection'] : null;
+        $usedIds = [];
+        $order = 0;
 
-        // Create session questions for regular rounds
-        foreach ($regularQuestions as $index => $question) {
+        // Regular rounds: one question per round (a face-off both teams play).
+        for ($roundIndex = 0; $roundIndex < $roundsPerGame; $roundIndex++) {
+            $qid = $sel['regular'][$roundIndex][0]['id'] ?? null;
+            $question = $qid ? Question::find($qid) : null;
+
+            if (!$question) {
+                $question = Question::where('game_type_id', $gameSession->game_type_id)
+                    ->where('is_active', true)
+                    ->where('round_type', '!=', 'final')
+                    ->whereNotIn('id', $usedIds)
+                    ->inRandomOrder()
+                    ->first();
+            }
+            if (!$question) {
+                break; // Nothing left to assign.
+            }
+
+            $usedIds[] = $question->id;
+            $order++;
             SessionQuestion::create([
                 'game_session_id' => $gameSession->id,
                 'question_id' => $question->id,
-                'display_order' => $index + 1,
+                'display_order' => $order,
+                'round_number' => $roundIndex + 1,
                 'status' => 'pending',
                 'segment' => 'main',
-                'points_available' => $this->calculateRoundMultiplier($index + 1, $config),
+                'points_available' => $this->calculateRoundMultiplier($roundIndex + 1, $config),
             ]);
-
-            // Track question usage statistics
             $question->incrementUsed();
         }
 
-        // Add fast money questions if enabled
+        // Fast Money: 5 fixed slots drawn from the Final pool. Both players answer
+        // the same set, so it's a flat list (no per-slot answer-count tiers).
         if ($fastMoneyEnabled) {
-            $fastMoneyQuestions = Question::where('game_type_id', $gameSession->game_type_id)
-                ->where('is_active', true)
-                ->where('round_type', 'final')
-                ->inRandomOrder()
-                ->limit(5) // Typically 5 questions for fast money
-                ->get();
+            for ($k = 0; $k < 5; $k++) {
+                $qid = $sel['final'][$k]['id'] ?? null;
+                $question = $qid ? Question::find($qid) : null;
 
-            $startOrder = $roundsPerGame + 1;
-            foreach ($fastMoneyQuestions as $index => $question) {
+                if (!$question) {
+                    $question = Question::where('game_type_id', $gameSession->game_type_id)
+                        ->where('is_active', true)
+                        ->where('round_type', 'final')
+                        ->whereNotIn('id', $usedIds)
+                        ->inRandomOrder()
+                        ->first();
+                }
+                if (!$question) {
+                    continue; // No eligible Final question for this slot.
+                }
+
+                $usedIds[] = $question->id;
+                $order++;
                 SessionQuestion::create([
                     'game_session_id' => $gameSession->id,
                     'question_id' => $question->id,
-                    'display_order' => $startOrder + $index,
+                    'display_order' => $order,
                     'status' => 'pending',
-                    'segment' => 'final',
+                    'segment' => 'fast_money',
                 ]);
-
-                // Track question usage statistics
                 $question->incrementUsed();
             }
         }
 
-        // Set the first question as current
-        $firstQuestion = $gameSession->sessionQuestions()->first();
+        // Set the first question as current.
+        $firstQuestion = $gameSession->sessionQuestions()->orderBy('display_order')->first();
         if ($firstQuestion) {
             $gameSession->gameState->update([
                 'current_question_id' => $firstQuestion->id,
@@ -268,49 +305,6 @@ class GameInitializationService
                 'round_number' => $firstQuestion->round_number ?? 1,
             ]);
         }
-    }
-
-    /**
-     * Choose the questions for a session based on its `question_selection` config:
-     *   - hand_picked: exactly the chosen questions, in the chosen order
-     *   - random + category: random from the selected categories
-     *   - random + difficulty: random at the selected difficulty
-     *   - random + any (default): random from the whole active bank
-     * Falls back to whole-bank random when nothing is configured.
-     */
-    protected function selectQuestions(GameSession $gameSession, int $needed): \Illuminate\Support\Collection
-    {
-        $config = $gameSession->settings ?? $gameSession->gameType->default_config ?? [];
-        $sel = $config['question_selection'] ?? null;
-
-        // Regular play draws from non-final questions; final-round questions
-        // (Family Feud "Fast Money", America Says final) are a separate pool.
-        $base = Question::where('game_type_id', $gameSession->game_type_id)
-            ->where('is_active', true)
-            ->where('round_type', '!=', 'final');
-
-        if (is_array($sel) && ($sel['mode'] ?? 'random') === 'hand_picked' && !empty($sel['question_ids'])) {
-            $ids = array_values($sel['question_ids']);
-            $found = (clone $base)->whereIn('id', $ids)->get()->keyBy('id');
-
-            // Preserve the host's chosen order, dropping any now-inactive picks.
-            return collect($ids)
-                ->map(fn ($id) => $found->get($id))
-                ->filter()
-                ->take($needed)
-                ->values();
-        }
-
-        if (is_array($sel) && ($sel['mode'] ?? 'random') === 'random') {
-            $filter = $sel['filter'] ?? 'any';
-            if ($filter === 'category' && !empty($sel['category_ids'])) {
-                $base->whereIn('category_id', array_values($sel['category_ids']));
-            } elseif ($filter === 'difficulty' && !empty($sel['difficulty'])) {
-                $base->where('difficulty', $sel['difficulty']);
-            }
-        }
-
-        return $base->inRandomOrder()->limit($needed)->get();
     }
 
     /**

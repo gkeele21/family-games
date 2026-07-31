@@ -227,13 +227,9 @@ watch(
 // ---- Rounds & scoring (America Says) ----
 interface RoundScore { points_per_answer: number; bonus_points: number }
 const teamsCount = computed(() => props.gameSession.teams.length || 1);
+// Answers per question is a fixed rule of the game (7), not a host setting — the
+// value still drives the sweep-bonus math below.
 const answersPerQuestion = computed(() => Number(settingsForm.settings.answers_per_question) || 7);
-const answerOptions = [
-    { value: 5, label: '5' },
-    { value: 6, label: '6' },
-    { value: 7, label: '7' },
-    { value: 8, label: '8' },
-];
 const strikeOptions = [
     { value: 2, label: '2' },
     { value: 3, label: '3' },
@@ -265,7 +261,10 @@ const removeRound = (index: number) => {
     rounds.value = rounds.value.filter((_, i) => i !== index);
 };
 
-// ---- Question selection (America Says: per-slot picker) ----
+// ---- Question selection (per-slot picker: America Says + Family Feud) ----
+// The picker backs both games; Oodles stays random and has no picker.
+const isPickerGame = computed(() => gameSlug.value === 'america-says' || gameSlug.value === 'family-feud');
+
 // America Says defaults to 3 rounds when first set up.
 if (gameSlug.value === 'america-says' && (!Array.isArray(settingsForm.settings.round_scoring) || !settingsForm.settings.round_scoring.length)) {
     settingsForm.settings.round_scoring = [
@@ -274,13 +273,46 @@ if (gameSlug.value === 'america-says' && (!Array.isArray(settingsForm.settings.r
         { points_per_answer: 300, bonus_points: 3000 },
     ];
 }
-if (settingsForm.settings.final_round_enabled === undefined) {
+if (gameSlug.value === 'america-says' && settingsForm.settings.final_round_enabled === undefined) {
     settingsForm.settings.final_round_enabled = true;
 }
 if (!settingsForm.settings.question_selection || !Array.isArray((settingsForm.settings.question_selection as QSelection).regular)) {
     settingsForm.settings.question_selection = { regular: [], final: [] } as QSelection;
 }
 const qsel = computed(() => settingsForm.settings.question_selection as QSelection);
+
+// Per-game slot shape. Regular grid = rows (rounds) × cols (America Says: one
+// per team; Family Feud: one face-off per round). Final section = America Says'
+// 4 answer-count tiers, or Family Feud's 5 flat Fast Money slots.
+const regularCols = computed(() => (gameSlug.value === 'family-feud' ? 1 : teamsCount.value));
+const regularRowCount = computed(() =>
+    gameSlug.value === 'family-feud'
+        ? Math.max(1, Math.min(8, Number(settingsForm.settings.rounds_per_game) || 4))
+        : rounds.value.length,
+);
+const regularRowLabel = (i: number) => `Round ${i + 1}`;
+
+// Family Feud rounds stepper (America Says gets its count from Rounds & scoring).
+const ffRoundsInput = ref(regularRowCount.value);
+watch(regularRowCount, (n) => (ffRoundsInput.value = n));
+const applyFfRounds = (n: number) => {
+    const target = Math.max(1, Math.min(8, Number(n) || 1));
+    ffRoundsInput.value = target;
+    settingsForm.settings.rounds_per_game = target;
+};
+
+// Final-section config, driven by game.
+const finalEnabledKey = computed(() => (gameSlug.value === 'family-feud' ? 'fast_money_enabled' : 'final_round_enabled'));
+const finalTiered = computed(() => gameSlug.value !== 'family-feud'); // AS tiers by answer count; FF is flat
+const finalToggleLabel = computed(() => (gameSlug.value === 'family-feud' ? 'Fast Money round' : 'Final round'));
+const finalSectionTitle = computed(() => (gameSlug.value === 'family-feud' ? 'Fast Money' : 'Final round'));
+const finalHint = computed(() => (gameSlug.value === 'family-feud' ? '5 questions · 2 players' : 'top 1 → 4 · 60s'));
+const finalNote = computed(() => gameSlug.value === 'family-feud'
+    ? 'Fast Money draws from Final-type questions — both players answer the same five. Author them in the library.'
+    : 'Final slots use only Final-type questions with the exact answer count — author them in the library.');
+const finalSlotBadge = (i: number) => (gameSlug.value === 'family-feud' ? `FM${i + 1}` : `F${i + 1}`);
+const finalLabel = (i: number) => (gameSlug.value === 'family-feud' ? `Fast Money ${i + 1}` : `Final ${i + 1}`);
+const finalEmptyText = (i: number) => (gameSlug.value === 'family-feud' ? 'No Fast Money questions yet' : `No ${i + 1}-answer Final questions yet`);
 
 const qBank = computed(() => props.questionData?.bank ?? []);
 const questionById = computed(() => {
@@ -336,8 +368,15 @@ const finalByCount = computed<Record<number, BankQuestion[]>>(() => {
     qBank.value.forEach((q) => { if (q.round_type === 'final' && g[q.answers_count]) g[q.answers_count].push(q); });
     return g;
 });
-const finalEnabled = computed(() => !!settingsForm.settings.final_round_enabled);
-const finalSlotCount = computed(() => Number(settingsForm.settings.final_round_questions ?? 4));
+const allFinalPool = computed(() => qBank.value.filter((q) => q.round_type === 'final'));
+// Eligible bank for a given final slot (0-based): tiered by answer count for
+// America Says, or the whole Final pool for Family Feud's flat Fast Money.
+const finalPoolFor = (idx: number): BankQuestion[] =>
+    finalTiered.value ? (finalByCount.value[idx + 1] ?? []) : allFinalPool.value;
+const finalEnabled = computed(() => !!settingsForm.settings[finalEnabledKey.value]);
+const finalSlotCount = computed(() =>
+    gameSlug.value === 'family-feud' ? 5 : Number(settingsForm.settings.final_round_questions ?? 4),
+);
 
 // ---- slot grid: regular = rounds x teams, final = N answer-count slots ----
 const pickRandom = (pool: { id: number }[], exclude: Set<number>): number | null => {
@@ -354,14 +393,14 @@ const usedFinal = () => {
     qsel.value.final.forEach((slot) => { if (slot.id != null) s.add(slot.id); });
     return s;
 };
-// Keep the slot grid sized to rounds x teams (+ final slots), filling empties at random.
+// Keep the slot grid sized to rows x cols (+ final slots), filling empties at random.
 const reconcileSlots = () => {
-    if (gameSlug.value !== 'america-says') return;
+    if (!isPickerGame.value) return;
     const prev = qsel.value;
     const regular: Slot[][] = [];
-    for (let i = 0; i < rounds.value.length; i++) {
+    for (let i = 0; i < regularRowCount.value; i++) {
         const row: Slot[] = [];
-        for (let j = 0; j < teamsCount.value; j++) row.push(prev.regular?.[i]?.[j] ?? { id: null, pinned: false });
+        for (let j = 0; j < regularCols.value; j++) row.push(prev.regular?.[i]?.[j] ?? { id: null, pinned: false });
         regular.push(row);
     }
     const final: Slot[] = [];
@@ -373,11 +412,11 @@ const reconcileSlots = () => {
 
     const uf = new Set<number>();
     final.forEach((s) => { if (s.id != null) uf.add(s.id); });
-    final.forEach((s, idx) => { if (s.id == null) { const id = pickRandom(finalByCount.value[idx + 1] ?? [], uf); if (id != null) { s.id = id; uf.add(id); } } });
+    final.forEach((s, idx) => { if (s.id == null) { const id = pickRandom(finalPoolFor(idx), uf); if (id != null) { s.id = id; uf.add(id); } } });
 
     settingsForm.settings.question_selection = { regular, final };
 };
-watch([() => rounds.value.length, teamsCount, finalSlotCount], reconcileSlots);
+watch([regularRowCount, regularCols, finalSlotCount], reconcileSlots);
 onMounted(reconcileSlots);
 
 // ---- active slot + assignment ----
@@ -389,13 +428,15 @@ const isRegularActive = (i: number, j: number) => activeSlot.value.group === 're
 const isFinalActive = (i: number) => activeSlot.value.group === 'final' && activeSlot.value.index === i;
 const setRegularActive = (i: number, j: number) => { activeSlot.value = { group: 'regular', round: i, team: j }; };
 const setFinalActive = (i: number) => { activeSlot.value = { group: 'final', index: i }; };
+const regularSlotLabel = (i: number, j: number) =>
+    regularCols.value > 1 ? `Round ${i + 1} · ${teamName(j)}` : `Round ${i + 1}`;
 const activeSlotLabel = computed(() => {
     const a = activeSlot.value;
-    return a.group === 'final' ? `Final ${a.index + 1}` : `Round ${a.round + 1} · ${teamName(a.team)}`;
+    return a.group === 'final' ? finalLabel(a.index) : regularSlotLabel(a.round, a.team);
 });
 const activeList = computed<BankQuestion[]>(() => {
     const a = activeSlot.value;
-    return a.group === 'final' ? (finalByCount.value[a.index + 1] ?? []) : regularPool.value;
+    return a.group === 'final' ? finalPoolFor(a.index) : regularPool.value;
 });
 const activeCurrentId = computed(() => {
     const a = activeSlot.value;
@@ -404,8 +445,8 @@ const activeCurrentId = computed(() => {
 // Every question already assigned to a slot → its slot label (shown in the bank).
 const assignedLabels = computed(() => {
     const m = new Map<number, string>();
-    qsel.value.regular.forEach((r, i) => r.forEach((s, j) => { if (s.id != null) m.set(s.id, `Round ${i + 1} · ${teamName(j)}`); }));
-    qsel.value.final.forEach((s, idx) => { if (s.id != null) m.set(s.id, `Final ${idx + 1}`); });
+    qsel.value.regular.forEach((r, i) => r.forEach((s, j) => { if (s.id != null) m.set(s.id, regularSlotLabel(i, j)); }));
+    qsel.value.final.forEach((s, idx) => { if (s.id != null) m.set(s.id, finalLabel(idx)); });
     return m;
 });
 const slotOf = (a: ActiveSlot): Slot | undefined =>
@@ -419,7 +460,7 @@ const swapSlot = (a: ActiveSlot) => {
     if (!s) return;
     const id = a.group === 'regular'
         ? pickRandom(regularPool.value, usedRegular())
-        : pickRandom(finalByCount.value[a.index + 1] ?? [], usedFinal());
+        : pickRandom(finalPoolFor(a.index), usedFinal());
     if (id != null) { s.id = id; s.pinned = false; }
 };
 const swapRegular = (i: number, j: number) => swapSlot({ group: 'regular', round: i, team: j });
@@ -433,7 +474,7 @@ const slotMeta = (id: number | null) => {
 };
 
 const questionSelectionReady = computed(() => {
-    if (gameSlug.value !== 'america-says') return true;
+    if (!isPickerGame.value) return true;
     return qsel.value.regular.length > 0 && qsel.value.regular.every((r) => r.length > 0 && r.every((s) => s.id != null));
 });
 
@@ -505,18 +546,7 @@ const copyDisplayUrl = () => {
                 <template #headerActions>
                     <div class="flex items-center gap-3">
                         <span class="text-sm text-muted">Number of teams</span>
-                        <div class="inline-flex items-center overflow-hidden rounded-lg border border-border">
-                            <button type="button" class="h-9 w-9 bg-surface-overlay text-lg text-body hover:bg-surface-elevated" @click="applyTeamCount(teamCountInput - 1)">−</button>
-                            <input
-                                v-model.number="teamCountInput"
-                                type="text"
-                                inputmode="numeric"
-                                aria-label="Number of teams"
-                                class="w-12 border-x border-border bg-surface-inset py-1.5 text-center text-body focus:outline-none"
-                                @change="applyTeamCount(teamCountInput)"
-                            />
-                            <button type="button" class="h-9 w-9 bg-surface-overlay text-lg text-body hover:bg-surface-elevated" @click="applyTeamCount(teamCountInput + 1)">+</button>
-                        </div>
+                        <NumberInput :model-value="teamCountInput" :min="1" :max="8" @update:model-value="applyTeamCount" />
                     </div>
                 </template>
 
@@ -561,19 +591,15 @@ const copyDisplayUrl = () => {
             <!-- Rounds & scoring (America Says) -->
             <Card v-if="gameSlug === 'america-says'" title="Rounds & scoring">
                 <template #headerActions>
-                    <div class="flex items-center gap-3">
-                        <span class="text-sm text-muted">Rounds</span>
-                        <div class="inline-flex items-center overflow-hidden rounded-lg border border-border">
-                            <button type="button" class="h-9 w-9 bg-surface-overlay text-lg text-body hover:bg-surface-elevated" @click="applyRoundCount(roundCountInput - 1)">−</button>
-                            <input
-                                v-model.number="roundCountInput"
-                                type="text"
-                                inputmode="numeric"
-                                aria-label="Number of rounds"
-                                class="w-12 border-x border-border bg-surface-inset py-1.5 text-center text-body focus:outline-none"
-                                @change="applyRoundCount(roundCountInput)"
-                            />
-                            <button type="button" class="h-9 w-9 bg-surface-overlay text-lg text-body hover:bg-surface-elevated" @click="applyRoundCount(roundCountInput + 1)">+</button>
+                    <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-sm text-muted">Rounds</span>
+                            <NumberInput :model-value="roundCountInput" :min="1" :max="8" @update:model-value="applyRoundCount" />
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-sm text-muted">Round Timer</span>
+                            <NumberInput v-model="settingsForm.settings.control_timer_seconds" :min="10" :max="120" />
+                            <span class="text-sm text-muted">sec</span>
                         </div>
                     </div>
                 </template>
@@ -583,27 +609,33 @@ const copyDisplayUrl = () => {
                     <span class="text-body">{{ rounds.length }} rounds × {{ teamsCount }} = {{ totalQuestions }} questions.</span>
                 </p>
 
-                <div class="mb-5 grid max-w-md grid-cols-2 gap-4">
-                    <Select v-model="settingsForm.settings.answers_per_question" :options="answerOptions" label="Answers / question" />
-                    <NumberInput v-model="settingsForm.settings.control_timer_seconds" label="Control timer (s)" :min="10" :max="120" />
-                </div>
-
                 <label class="mb-2 block text-sm font-medium text-body">Points per round</label>
                 <div class="space-y-2">
-                    <div v-for="(round, i) in rounds" :key="i" class="flex flex-wrap items-end gap-x-4 gap-y-2 rounded-lg border border-border bg-surface-inset p-3">
-                        <span class="mb-2 w-16 font-semibold text-body">Round {{ i + 1 }}</span>
-                        <NumberInput v-model="round.points_per_answer" label="Pts / answer" :min="0" class="w-28" />
-                        <NumberInput v-model="round.bonus_points" label="Sweep bonus" :min="0" class="w-28" />
-                        <span class="mb-2 text-xs text-primary">Sweep all {{ answersPerQuestion }} = {{ sweptTotal(round).toLocaleString() }} pts</span>
-                        <Button v-if="rounds.length > 1" variant="ghost" size="xs" class="mb-1 ml-auto !text-danger" @click="removeRound(i)">Remove</Button>
+                    <div v-for="(round, i) in rounds" :key="i" class="flex flex-wrap items-end gap-x-5 gap-y-2 rounded-lg border border-border bg-surface-inset p-3">
+                        <span class="w-16 self-center font-semibold text-body">Round {{ i + 1 }}</span>
+                        <NumberInput v-model="round.points_per_answer" label="Pts / answer" :min="0" input-class="w-20" />
+                        <NumberInput v-model="round.bonus_points" label="Sweep bonus" :min="0" input-class="w-24" />
+                        <span class="self-center text-xs text-primary">Sweep all {{ answersPerQuestion }} = {{ sweptTotal(round).toLocaleString() }} pts</span>
+                        <Button v-if="rounds.length > 1" variant="ghost" size="xs" class="ml-auto self-center !text-danger" @click="removeRound(i)">Remove</Button>
                     </div>
                 </div>
             </Card>
 
-            <!-- Questions (America Says: per-slot picker) -->
-            <Card v-if="gameSlug === 'america-says'" title="Questions">
+            <!-- Family Feud rules -->
+            <Card v-if="gameSlug === 'family-feud'" title="Rules">
+                <div class="max-w-xs">
+                    <Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" />
+                </div>
+            </Card>
+
+            <!-- Questions (per-slot picker: America Says + Family Feud) -->
+            <Card v-if="isPickerGame" title="Questions">
                 <template #headerActions>
-                    <span class="text-sm text-muted">{{ rounds.length }} rounds × {{ teamsCount }} {{ teamsCount === 1 ? 'team' : 'teams' }}</span>
+                    <div v-if="gameSlug === 'family-feud'" class="flex items-center gap-3">
+                        <span class="text-sm text-muted">Rounds</span>
+                        <NumberInput :model-value="ffRoundsInput" :min="1" :max="8" @update:model-value="applyFfRounds" />
+                    </div>
+                    <span v-else class="text-sm text-muted">{{ rounds.length }} rounds × {{ teamsCount }} {{ teamsCount === 1 ? 'team' : 'teams' }}</span>
                 </template>
 
                 <div class="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
@@ -627,13 +659,13 @@ const copyDisplayUrl = () => {
                                 v-for="q in activeList"
                                 :key="q.id"
                                 type="button"
-                                :class="['flex w-full items-center gap-3 border-t border-border/60 px-3 py-2.5 text-left first:border-t-0', q.id === activeCurrentId ? 'bg-primary/10' : (assignedLabels.has(q.id) ? 'bg-surface-inset' : 'hover:bg-surface-inset')]"
+                                :class="['flex w-full items-center gap-3 border-t border-border/60 px-3 py-2.5 text-left first:border-t-0', q.id === activeCurrentId ? 'bg-primary/10' : 'hover:bg-surface-inset']"
                                 @click="assignToActive(q.id)"
                             >
-                                <span :class="['flex-1 text-sm', assignedLabels.has(q.id) && q.id !== activeCurrentId ? 'text-muted' : 'text-body']">{{ q.question_text }}</span>
+                                <span class="flex-1 text-sm text-body">{{ q.question_text }}</span>
                                 <span v-if="q.round_type === 'final'" class="flex-none rounded border border-info/40 px-1.5 py-0.5 text-[10px] font-bold uppercase text-info">Final</span>
                                 <span v-if="q.id === activeCurrentId" class="flex-none rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Current</span>
-                                <span v-else-if="assignedLabels.has(q.id)" class="flex-none whitespace-nowrap rounded-full border border-border-strong px-2 py-0.5 text-[10px] font-semibold text-muted">{{ assignedLabels.get(q.id) }}</span>
+                                <span v-else-if="assignedLabels.has(q.id)" class="flex-none whitespace-nowrap rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-semibold text-primary">{{ assignedLabels.get(q.id) }}</span>
                                 <span class="flex-none whitespace-nowrap text-xs text-subtle">{{ q.answers_count }} ans</span>
                             </button>
                             <p v-if="!activeList.length" class="px-3 py-6 text-center text-sm text-muted">No matching questions.</p>
@@ -644,12 +676,12 @@ const copyDisplayUrl = () => {
                     <div>
                         <div class="mb-2 flex items-center gap-2">
                             <h4 class="text-sm font-semibold text-body">Rounds</h4>
-                            <span class="text-xs text-subtle">{{ rounds.length }} × {{ teamsCount }}</span>
-                            <button type="button" class="ml-auto rounded-md border border-border bg-surface-elevated px-2.5 py-1 text-xs font-semibold text-muted hover:text-body" @click="shuffleRegular">Shuffle all</button>
+                            <span class="text-xs text-subtle"><template v-if="regularCols > 1">{{ regularRowCount }} × {{ teamsCount }}</template><template v-else>{{ regularRowCount }}</template></span>
+                            <Button variant="muted" size="xs" class="ml-auto" @click="shuffleRegular">Shuffle all</Button>
                         </div>
                         <div class="space-y-3">
                             <div v-for="(round, i) in qsel.regular" :key="i" class="rounded-lg border border-border bg-surface-inset p-2">
-                                <div class="mb-1.5 px-1 text-xs font-semibold text-muted">Round {{ i + 1 }}</div>
+                                <div class="mb-1.5 px-1 text-xs font-semibold text-muted">{{ regularRowLabel(i) }}</div>
                                 <div class="space-y-1.5">
                                     <div
                                         v-for="(slot, j) in round"
@@ -657,27 +689,30 @@ const copyDisplayUrl = () => {
                                         :class="['flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2', isRegularActive(i, j) ? 'border-primary bg-primary/10' : 'border-border bg-surface hover:border-border-strong']"
                                         @click="setRegularActive(i, j)"
                                     >
-                                        <span class="h-2.5 w-2.5 flex-none rounded-full" :style="{ backgroundColor: teamColor(j) }"></span>
+                                        <span v-if="regularCols > 1" class="h-2.5 w-2.5 flex-none rounded-full" :style="{ backgroundColor: teamColor(j) }"></span>
                                         <span class="min-w-0 flex-1">
                                             <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']">{{ slotText(slot.id) || '— pick a question —' }}</span>
-                                            <span class="block text-xs text-subtle">{{ teamName(j) }}<template v-if="slot.id"> · {{ slotMeta(slot.id) }}</template></span>
+                                            <span class="block text-xs text-subtle">
+                                                <template v-if="regularCols > 1">{{ teamName(j) }}<template v-if="slot.id"> · {{ slotMeta(slot.id) }}</template></template>
+                                                <template v-else>{{ slot.id ? slotMeta(slot.id) : 'Face-off — both teams play' }}</template>
+                                            </span>
                                         </span>
-                                        <button type="button" class="flex-none rounded-md border border-border px-2 py-1 text-xs font-semibold text-muted hover:text-body" @click.stop="swapRegular(i, j)">⇄ Swap</button>
+                                        <Button variant="muted" size="xs" class="flex-none" @click.stop="swapRegular(i, j)">⇄ Swap</Button>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
                         <div class="mt-4 flex items-center gap-2 border-t border-border pt-4">
-                            <Toggle v-model="settingsForm.settings.final_round_enabled" label="Final round" />
-                            <span class="ml-auto text-xs text-subtle">top 1 → 4 · 60s</span>
+                            <Toggle v-model="settingsForm.settings[finalEnabledKey]" :label="finalToggleLabel" />
+                            <span class="ml-auto text-xs text-subtle">{{ finalHint }}</span>
                         </div>
 
                         <div v-if="finalEnabled" class="mt-3">
                             <div class="mb-2 flex items-center gap-2">
-                                <h4 class="text-sm font-semibold text-body">Final round</h4>
+                                <h4 class="text-sm font-semibold text-body">{{ finalSectionTitle }}</h4>
                                 <span class="text-xs text-subtle">{{ finalSlotCount }} slots</span>
-                                <button type="button" class="ml-auto rounded-md border border-border bg-surface-elevated px-2.5 py-1 text-xs font-semibold text-muted hover:text-body" @click="shuffleFinal">Shuffle all</button>
+                                <Button variant="muted" size="xs" class="ml-auto" @click="shuffleFinal">Shuffle all</Button>
                             </div>
                             <div class="space-y-1.5">
                                 <div
@@ -686,15 +721,16 @@ const copyDisplayUrl = () => {
                                     :class="['flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2', isFinalActive(i) ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset hover:border-border-strong']"
                                     @click="setFinalActive(i)"
                                 >
-                                    <span class="flex-none rounded-md bg-surface-elevated px-2 py-1 text-[10px] font-bold text-info">F{{ i + 1 }}</span>
+                                    <span class="flex-none rounded-md bg-surface-elevated px-2 py-1 text-[10px] font-bold text-info">{{ finalSlotBadge(i) }}</span>
                                     <span class="min-w-0 flex-1">
-                                        <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']">{{ slotText(slot.id) || `No ${i + 1}-answer Final questions yet` }}</span>
-                                        <span class="block text-xs text-subtle">Needs {{ i + 1 }} answer{{ i === 0 ? '' : 's' }}</span>
+                                        <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']">{{ slotText(slot.id) || finalEmptyText(i) }}</span>
+                                        <span v-if="finalTiered" class="block text-xs text-subtle">Needs {{ i + 1 }} answer{{ i === 0 ? '' : 's' }}</span>
+                                        <span v-else-if="slot.id" class="block text-xs text-subtle">{{ slotMeta(slot.id) }}</span>
                                     </span>
-                                    <button v-if="slot.id" type="button" class="flex-none rounded-md border border-border px-2 py-1 text-xs font-semibold text-muted hover:text-body" @click.stop="swapFinal(i)">⇄ Swap</button>
+                                    <Button v-if="slot.id" variant="muted" size="xs" class="flex-none" @click.stop="swapFinal(i)">⇄ Swap</Button>
                                 </div>
                             </div>
-                            <p class="mt-2 text-xs text-subtle">Final slots use only Final-type questions with the exact answer count — author them in the library.</p>
+                            <p class="mt-2 text-xs text-subtle">{{ finalNote }}</p>
                         </div>
                     </div>
                 </div>
@@ -702,18 +738,6 @@ const copyDisplayUrl = () => {
                 <div class="mt-5 flex items-center gap-2 border-t border-border pt-4 text-sm">
                     <Link :href="route('questions.index')" class="font-semibold text-primary hover:underline">Manage question library →</Link>
                     <span class="text-subtle">Add or edit questions</span>
-                </div>
-            </Card>
-
-            <!-- Family Feud rules -->
-            <Card v-if="gameSlug === 'family-feud'" title="Rules">
-                <div class="mb-4 max-w-xs">
-                    <Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" />
-                </div>
-                <Toggle v-model="settingsForm.settings.fast_money_enabled" label="Enable Fast Money round" />
-                <div class="mt-5 flex items-center gap-2 border-t border-border pt-4 text-sm">
-                    <Link :href="route('questions.index')" class="font-semibold text-primary hover:underline">Manage question library →</Link>
-                    <span class="text-subtle">Questions are pulled at random. Add or edit them here.</span>
                 </div>
             </Card>
 

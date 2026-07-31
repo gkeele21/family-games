@@ -12,6 +12,7 @@ class GameTypeSeeder extends Seeder
         GameType::create([
             'name' => 'Family Feud',
             'slug' => 'family-feud',
+            'display_order' => 2,
             'description' => 'Survey-based game where teams compete to guess the most popular answers. Features face-offs, strikes, steals, and an optional Fast Money round.',
             'default_config' => [
                 'team_size' => 0, // 0 = unlimited, 1 = individual play
@@ -40,6 +41,7 @@ class GameTypeSeeder extends Seeder
         GameType::create([
             'name' => 'America Says',
             'slug' => 'america-says',
+            'display_order' => 1,
             'description' => 'Survey-based game where teams try to guess all answers within a time limit. Features control timers, steal rounds, and flat scoring.',
             'default_config' => [
                 'team_size' => 0, // 0 = unlimited, 1 = individual play
@@ -74,6 +76,7 @@ class GameTypeSeeder extends Seeder
         GameType::create([
             'name' => 'Oodles',
             'slug' => 'oodles',
+            'display_order' => 3,
             'description' => 'Word-guessing game with cards. Each card has questions where all answers start with the same letter. Teams control questions and can earn control through steals.',
             'default_config' => [
                 'team_size' => 0, // 0 = unlimited, 1 = individual play

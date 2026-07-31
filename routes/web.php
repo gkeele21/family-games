@@ -43,6 +43,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/games/{gameSession}/teams/{team}/members', [GameSessionController::class, 'addTeamMember'])->name('games.teams.members.add');
     Route::delete('/games/{gameSession}/teams/{team}/members/{teamMember}', [GameSessionController::class, 'removeTeamMember'])->name('games.teams.members.remove');
     Route::post('/games/{gameSession}/start', [GameSessionController::class, 'startGame'])->name('games.start');
+    Route::post('/games/{gameSession}/back-to-lobby', [GameSessionController::class, 'backToLobby'])->name('games.back-to-lobby');
     Route::patch('/games/{gameSession}/settings', [GameSessionController::class, 'updateSettings'])->name('games.settings.update');
     Route::delete('/games/{gameSession}', [GameSessionController::class, 'destroy'])->name('games.destroy');
 
@@ -61,6 +62,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/timer/pause', [HostController::class, 'pauseTimer'])->name('host.timer.pause');
     Route::post('/host/{gameSession}/timer/reset', [HostController::class, 'resetTimer'])->name('host.timer.reset');
     Route::post('/host/{gameSession}/board/reset', [HostController::class, 'resetBoard'])->name('host.board.reset');
+    Route::post('/host/{gameSession}/round/reset', [HostController::class, 'resetRound'])->name('host.round.reset');
     Route::post('/host/{gameSession}/reveal', [HostController::class, 'revealAnswer'])->name('host.reveal');
     Route::post('/host/{gameSession}/unreveal', [HostController::class, 'unrevealAnswer'])->name('host.unreveal');
     Route::post('/host/{gameSession}/control', [HostController::class, 'setControllingTeams'])->name('host.control');

@@ -52,9 +52,9 @@ class HostController extends Controller
      */
     protected function questionSelectionData(GameSession $gameSession): ?array
     {
-        // The per-slot picker is America Says only. Oodles is random; Family Feud
-        // pulls randomly for now (its Fast Money picker comes later).
-        if ($gameSession->gameType->slug !== 'america-says') {
+        // The per-slot picker backs America Says and Family Feud. Oodles stays
+        // random (no picker), so it gets no bank.
+        if (!in_array($gameSession->gameType->slug, ['america-says', 'family-feud'], true)) {
             return null;
         }
 
@@ -130,14 +130,31 @@ class HostController extends Controller
         $currentQuestion = $state?->currentQuestion;
         $currentCard = $state?->currentCard;
 
-        // Get question progress for America Says
+        // Question progress for America Says / Family Feud — counted within the
+        // current round (regular play) or the whole final / fast-money segment,
+        // so it reads "Question 1 of 2" per round rather than lumping the whole
+        // game together next to the "Round 1" label. Also flag whether this is
+        // the last question of the session (used to reveal "End Game").
         $currentQuestionNumber = null;
         $totalQuestions = null;
-        if ($gameSession->gameType->slug === 'america-says') {
+        $hasPreviousQuestion = false;
+        $isLastQuestion = false;
+        if (in_array($gameSession->gameType->slug, ['america-says', 'family-feud'], true)) {
             $allQuestions = $gameSession->sessionQuestions()->orderBy('display_order')->get();
-            $totalQuestions = $allQuestions->count();
             if ($currentQuestion) {
-                $currentQuestionNumber = $allQuestions->search(fn ($q) => $q->id === $currentQuestion->id) + 1;
+                $segment = $currentQuestion->segment ?? 'main';
+                $group = $segment === 'main'
+                    ? $allQuestions->filter(fn ($q) => ($q->segment ?? 'main') === 'main' && $q->round_number === $currentQuestion->round_number)->values()
+                    : $allQuestions->filter(fn ($q) => ($q->segment ?? 'main') === $segment)->values();
+                $totalQuestions = $group->count();
+                $pos = $group->search(fn ($q) => $q->id === $currentQuestion->id);
+                $currentQuestionNumber = $pos === false ? null : $pos + 1;
+                $hasPreviousQuestion = $allQuestions
+                    ->contains(fn ($q) => $q->display_order < $currentQuestion->display_order);
+                $isLastQuestion = !$allQuestions
+                    ->contains(fn ($q) => $q->display_order > $currentQuestion->display_order);
+            } else {
+                $totalQuestions = $allQuestions->count();
             }
         }
 
@@ -173,6 +190,9 @@ class HostController extends Controller
                 'id' => $currentQuestion->id,
                 'question_text' => $currentQuestion->question->question_text,
                 'status' => $currentQuestion->status,
+                'round_number' => $currentQuestion->round_number,
+                'segment' => $currentQuestion->segment,
+                'points_available' => (int) $currentQuestion->points_available,
                 'control_status' => $currentQuestion->control_status,
                 'controlling_team_id' => $currentQuestion->controlling_team_id,
                 'controlling_team_ids' => $currentQuestion->getControllingTeamIdsArray(),
@@ -197,6 +217,8 @@ class HostController extends Controller
             'totalCards' => $gameSession->sessionCards->count(),
             'currentQuestionNumber' => $currentQuestionNumber,
             'totalQuestions' => $totalQuestions,
+            'hasPreviousQuestion' => $hasPreviousQuestion,
+            'isLastQuestion' => $isLastQuestion,
         ]);
     }
 
@@ -274,6 +296,81 @@ class HostController extends Controller
                 ]);
             }
             $state->setStateValue($bonusKey, null);
+        }
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Reset the entire current round: un-reveal every answer and reverse the
+     * points (and any sweep bonus) for every question in the round, set them all
+     * back to pending, and reactivate the round's first question — restoring the
+     * scoreboard to exactly where it stood at the end of the previous round.
+     *
+     * A "round" is every session question sharing the current question's
+     * round_number for regular play, or the whole final / fast-money segment.
+     */
+    public function resetRound(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $currentQuestion = $state?->currentQuestion;
+
+        if (!$currentQuestion) {
+            return response()->json(['success' => true]);
+        }
+
+        $segment = $currentQuestion->segment ?? 'main';
+        $query = $gameSession->sessionQuestions();
+        if (in_array($segment, ['final', 'fast_money'], true)) {
+            $query->where('segment', $segment);
+        } else {
+            $query->where('round_number', $currentQuestion->round_number);
+        }
+        $roundQuestions = $query->orderBy('display_order')->get();
+
+        foreach ($roundQuestions as $sq) {
+            // Reverse the points from every reveal on this question, then remove them.
+            $reveals = $sq->answerReveals()->get();
+            foreach ($reveals->whereNotNull('team_id')->groupBy('team_id') as $teamId => $teamReveals) {
+                $team = Team::find($teamId);
+                if (!$team) {
+                    continue;
+                }
+                $team->update([
+                    'total_score' => max(0, $team->total_score - (int) $teamReveals->sum('points_awarded')),
+                ]);
+            }
+            $sq->answerReveals()->delete();
+
+            // Reverse a manually-awarded sweep bonus for this question, if any.
+            $bonusKey = "bonus_q{$sq->id}";
+            $bonus = $state->getStateValue($bonusKey, null);
+            if (is_array($bonus) && !empty($bonus['team_id'])) {
+                $bonusTeam = Team::find($bonus['team_id']);
+                if ($bonusTeam) {
+                    $bonusTeam->update([
+                        'total_score' => max(0, $bonusTeam->total_score - (int) ($bonus['amount'] ?? 0)),
+                    ]);
+                }
+                $state->setStateValue($bonusKey, null);
+            }
+
+            $sq->update(['status' => 'pending']);
+        }
+
+        // Reactivate the round's first question so the round replays from the top.
+        $first = $roundQuestions->first();
+        if ($first) {
+            $first->update(['status' => 'active']);
+            $state->update([
+                'current_question_id' => $first->id,
+                'round_number' => $first->round_number ?? $state->round_number,
+                'active_team_id' => $first->controlling_team_id ?? $state->active_team_id,
+            ]);
         }
 
         return response()->json(['success' => true]);

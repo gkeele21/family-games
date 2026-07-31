@@ -38,6 +38,9 @@ interface CurrentQuestion {
     id: number;
     question_text: string;
     status: string;
+    round_number: number | null;
+    segment: string | null;
+    points_available: number;
     control_status: string;
     controlling_team_id: number | null;
     controlling_team_ids: number[];
@@ -86,6 +89,8 @@ const currentCard = ref<CurrentCard | null>(null);
 const totalCards = ref(0);
 const currentQuestionNumber = ref<number | null>(null);
 const totalQuestions = ref<number | null>(null);
+const hasPreviousQuestion = ref(false);
+const isLastQuestion = ref(false);
 const selectedControllingTeams = ref<number[]>([]);
 const showControlModal = ref(false);
 const selectedAllPlayTeams = ref<number[]>([]);
@@ -97,6 +102,22 @@ let pollInterval: number | null = null;
 
 const isOodles = props.gameSession.game_type.slug === 'oodles';
 const isAmericaSays = props.gameSession.game_type.slug === 'america-says';
+
+// Label for the current question's round/segment (e.g. "Round 2", "Final Round").
+const roundLabel = computed(() => {
+    const q = currentQuestion.value;
+    if (!q) return '';
+    if (q.segment === 'final') return 'Final Round';
+    if (q.segment === 'fast_money') return 'Fast Money';
+    return q.round_number ? `Round ${q.round_number}` : '';
+});
+
+// America Says scores a flat per-round value for every answer; other games use
+// each answer's own points.
+const answerPoints = (answer: Answer): number =>
+    isAmericaSays && (currentQuestion.value?.points_available ?? 0) > 0
+        ? (currentQuestion.value?.points_available ?? 0)
+        : answer.points;
 
 const allAnswersRevealed = computed(() => {
     if (!currentQuestion.value) return false;
@@ -127,6 +148,8 @@ const fetchState = async () => {
         totalCards.value = response.data.totalCards || 0;
         currentQuestionNumber.value = response.data.currentQuestionNumber;
         totalQuestions.value = response.data.totalQuestions;
+        hasPreviousQuestion.value = !!response.data.hasPreviousQuestion;
+        isLastQuestion.value = !!response.data.isLastQuestion;
     } catch (error) {
         console.error('Failed to fetch state:', error);
     }
@@ -156,15 +179,16 @@ const resetTimer = async () => {
     fetchState();
 };
 
-// Reset the whole round: un-reveal every answer, reverse this round's points,
-// restore the original controlling team, and put the timer back to full.
+// Reset the whole round: un-reveal every answer, reverse this round's points
+// (and sweep bonuses) across all of its questions, replay from the round's first
+// question, and put the timer back to full.
 const showResetRoundConfirm = ref(false);
 const resetRound = async () => {
     showResetRoundConfirm.value = false;
     timerExpiredHandled.value = false;
     bonusDismissedQuestionId.value = null;
     await Promise.all([
-        axios.post(route('host.board.reset', props.gameSession.id)),
+        axios.post(route('host.round.reset', props.gameSession.id)),
         axios.post(route('host.timer.reset', props.gameSession.id)),
     ]);
     fetchState();
@@ -198,6 +222,13 @@ const confirmEndGame = async () => {
     showEndConfirm.value = false;
     await axios.post(route('host.end', props.gameSession.id));
     window.location.href = route('games.index');
+};
+
+const showBackToSetupConfirm = ref(false);
+const confirmBackToSetup = async () => {
+    showBackToSetupConfirm.value = false;
+    await axios.post(route('games.back-to-lobby', props.gameSession.id));
+    window.location.href = route('host.lobby', props.gameSession.id);
 };
 
 const selectQuestion = async (sessionQuestionId: number) => {
@@ -398,15 +429,16 @@ onUnmounted(() => {
                     <span class="ml-2 font-normal text-muted">Code: {{ gameSession.invite_code }}</span>
                 </h1>
                 <div class="flex items-center gap-3">
-                    <Button v-if="currentQuestion && (currentQuestionNumber ?? 1) > 1" variant="primary" size="md" @click="previousQuestion">&larr; Previous</Button>
-                    <Button v-if="currentQuestion" variant="primary" size="md" @click="advanceQuestion">Next Question &rarr;</Button>
+                    <Button variant="outline" size="md" @click="showBackToSetupConfirm = true">Back to Setup</Button>
                     <Button v-if="currentQuestion" variant="danger" size="md" @click="showResetRoundConfirm = true">Reset Round</Button>
-                    <Button variant="secondary" size="md" @click="endGame">End Game</Button>
+                    <Button v-if="currentQuestion && hasPreviousQuestion" variant="primary" size="md" @click="previousQuestion">&larr; Previous</Button>
+                    <Button v-if="currentQuestion && !isLastQuestion" variant="primary" size="md" @click="advanceQuestion">Next Question &rarr;</Button>
+                    <Button v-if="currentQuestion && isLastQuestion" variant="secondary" size="md" @click="endGame">End Game</Button>
                 </div>
             </div>
         </template>
 
-        <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
             <div class="grid grid-cols-1 gap-6 lg:grid-cols-4">
                 <!-- Scoreboard (left) -->
                 <div class="lg:col-span-1">
@@ -474,8 +506,9 @@ onUnmounted(() => {
                             <!-- Header: question info (left, 2/3) + timer (right, 1/3) -->
                             <div class="mb-6 grid grid-cols-1 items-center gap-4 lg:grid-cols-3">
                                 <div class="text-center lg:col-span-2 lg:text-left">
-                                    <div v-if="currentQuestionNumber && totalQuestions" class="mb-2">
-                                        <span class="rounded-full bg-surface-inset px-3 py-1 text-sm font-medium text-muted">Question {{ currentQuestionNumber }} of {{ totalQuestions }}</span>
+                                    <div v-if="roundLabel || (currentQuestionNumber && (totalQuestions ?? 0) > 1)" class="mb-2 flex flex-wrap items-center gap-2">
+                                        <span v-if="roundLabel" class="rounded-full border border-primary/50 px-3 py-1 text-sm font-semibold text-primary">{{ roundLabel }}</span>
+                                        <span v-if="currentQuestionNumber && (totalQuestions ?? 0) > 1" class="rounded-full bg-surface-inset px-3 py-1 text-sm font-medium text-muted">Question {{ currentQuestionNumber }} of {{ totalQuestions }}</span>
                                     </div>
                                     <h3 class="text-2xl font-bold text-body">{{ currentQuestion.question_text }}</h3>
                                 </div>
@@ -615,7 +648,7 @@ onUnmounted(() => {
                                 >
                                     <div class="flex items-center justify-between">
                                         <span class="font-semibold">{{ answer.answer_text }}</span>
-                                        <span class="text-lg font-bold text-muted">{{ answer.points }} pts</span>
+                                        <span class="text-lg font-bold text-muted">{{ answerPoints(answer) }} pts</span>
                                     </div>
                                 </button>
                             </div>
@@ -714,6 +747,18 @@ onUnmounted(() => {
             @confirm="confirmEndGame"
             @cancel="showEndConfirm = false"
             @close="showEndConfirm = false"
+        />
+
+        <!-- Back to setup confirm -->
+        <Confirm
+            :show="showBackToSetupConfirm"
+            title="Back to setup?"
+            message="This returns the game to its setup screen so you can change teams, rounds, or questions. When you start again, the questions are rebuilt from your setup."
+            confirm-text="Back to Setup"
+            variant="danger"
+            @confirm="confirmBackToSetup"
+            @cancel="showBackToSetupConfirm = false"
+            @close="showBackToSetupConfirm = false"
         />
     </StandardLayout>
 </template>
