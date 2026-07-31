@@ -6,6 +6,7 @@ use App\Http\Controllers\GameSessionController;
 use App\Http\Controllers\HostController;
 use App\Http\Controllers\PlayerController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\QuestionController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -45,6 +46,13 @@ Route::middleware('auth')->group(function () {
     Route::patch('/games/{gameSession}/settings', [GameSessionController::class, 'updateSettings'])->name('games.settings.update');
     Route::delete('/games/{gameSession}', [GameSessionController::class, 'destroy'])->name('games.destroy');
 
+    // Question Library (admin)
+    Route::get('/questions', [QuestionController::class, 'index'])->name('questions.index');
+    Route::post('/questions', [QuestionController::class, 'store'])->name('questions.store');
+    Route::patch('/questions/{question}', [QuestionController::class, 'update'])->name('questions.update');
+    Route::delete('/questions/{question}', [QuestionController::class, 'destroy'])->name('questions.destroy');
+    Route::post('/question-categories', [QuestionController::class, 'storeCategory'])->name('questions.categories.store');
+
     // Host Routes
     Route::get('/host/{gameSession}/lobby', [HostController::class, 'lobby'])->name('host.lobby');
     Route::get('/host/{gameSession}/game', [HostController::class, 'game'])->name('host.game');
@@ -66,8 +74,6 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/card/next', [HostController::class, 'nextCard'])->name('host.card.next');
     Route::post('/host/{gameSession}/end', [HostController::class, 'endGame'])->name('host.end');
     Route::patch('/host/{gameSession}/teams/{team}/score', [HostController::class, 'updateTeamScore'])->name('host.teams.score.update');
-    Route::post('/host/{gameSession}/steal/start', [HostController::class, 'startStealRound'])->name('host.steal.start');
-    Route::post('/host/{gameSession}/steal/end', [HostController::class, 'endStealRound'])->name('host.steal.end');
 });
 
 // Player Routes (no auth required)

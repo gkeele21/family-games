@@ -28,7 +28,6 @@ interface GameState {
     timer_started_at: string | null;
     timer_duration: number;
     remaining_seconds: number | null;
-    is_steal_round?: boolean;
 }
 
 interface CurrentQuestion {

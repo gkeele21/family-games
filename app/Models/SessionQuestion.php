@@ -18,6 +18,8 @@ class SessionQuestion extends Model
         'display_order',
         'round_number',
         'status',
+        'segment',
+        'answers_needed',
         'controlling_team_id',
         'controlling_team_ids',
         'control_status',

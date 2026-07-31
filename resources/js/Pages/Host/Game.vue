@@ -32,8 +32,6 @@ interface GameState {
     timer_duration: number;
     remaining_seconds: number | null;
     state_data: Record<string, any>;
-    is_steal_round: boolean;
-    steal_points_percentage: number;
 }
 
 interface CurrentQuestion {

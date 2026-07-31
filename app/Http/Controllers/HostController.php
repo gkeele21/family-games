@@ -41,7 +41,64 @@ class HostController extends Controller
             'friends' => $friends,
             'waitingPlayers' => $waitingPlayers,
             'gameTypes' => \App\Models\GameType::online()->get(['id', 'name', 'slug']),
+            'questionData' => $this->questionSelectionData($gameSession),
         ]);
+    }
+
+    /**
+     * Data backing the "Questions" setup card: the active question bank plus
+     * per-category / per-difficulty counts so the host can filter (Random) or
+     * hand-pick. Only built for games that pull from the shared bank.
+     */
+    protected function questionSelectionData(GameSession $gameSession): ?array
+    {
+        // Oodles pulls cards at random, so it has no selection card.
+        if (!in_array($gameSession->gameType->slug, ['america-says', 'family-feud'], true)) {
+            return null;
+        }
+
+        $typeId = $gameSession->game_type_id;
+
+        // The choosable bank is regular-play questions. Final-round questions
+        // (Family Feud "Fast Money", America Says final) live in a separate pool.
+        $active = \App\Models\Question::where('game_type_id', $typeId)
+            ->where('is_active', true)
+            ->where('round_type', '!=', 'final');
+
+        $categories = \App\Models\Category::where('game_type_id', $typeId)
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'count' => (clone $active)->where('category_id', $c->id)->count(),
+            ]);
+
+        $bank = (clone $active)
+            ->withCount('answers')
+            ->with('category:id,name')
+            ->orderBy('question_text')
+            ->get()
+            ->map(fn ($q) => [
+                'id' => $q->id,
+                'question_text' => $q->question_text,
+                'category' => $q->category?->name,
+                'difficulty' => $q->difficulty,
+                'answers_count' => $q->answers_count,
+            ]);
+
+        return [
+            'categories' => $categories,
+            'stats' => [
+                'total' => (clone $active)->count(),
+                'by_difficulty' => [
+                    'easy' => (clone $active)->where('difficulty', 'easy')->count(),
+                    'medium' => (clone $active)->where('difficulty', 'medium')->count(),
+                    'hard' => (clone $active)->where('difficulty', 'hard')->count(),
+                ],
+            ],
+            'bank' => $bank,
+        ];
     }
 
     public function game(GameSession $gameSession): Response
@@ -131,8 +188,6 @@ class HostController extends Controller
                 'timer_duration' => $state?->timer_duration,
                 'remaining_seconds' => $state?->getRemainingSeconds(),
                 'state_data' => $state?->state_data,
-                'is_steal_round' => $state?->getStateValue('is_steal_round', false),
-                'steal_points_percentage' => $gameSession->getConfig('steal_points_percentage', 50),
             ],
             'currentQuestion' => $currentQuestion ? [
                 'id' => $currentQuestion->id,
@@ -398,78 +453,6 @@ class HostController extends Controller
         return response()->json(['success' => true, 'bonus' => $bonus]);
     }
 
-    public function startStealRound(GameSession $gameSession)
-    {
-        if ($gameSession->host_user_id !== auth()->id()) {
-            abort(403);
-        }
-
-        $state = $gameSession->gameState;
-        $currentQuestion = $state->currentQuestion;
-
-        if (!$currentQuestion) {
-            return response()->json(['error' => 'No active question'], 400);
-        }
-
-        // Get all teams and find the next team
-        $teams = $gameSession->teams()->orderBy('display_order')->get();
-        $currentTeamId = $currentQuestion->controlling_team_id ?? $state->active_team_id;
-
-        // Find the next team in rotation
-        $currentIndex = $teams->search(fn($t) => $t->id === $currentTeamId);
-        $nextIndex = ($currentIndex + 1) % $teams->count();
-        $nextTeam = $teams[$nextIndex];
-
-        // Remember who had control before the steal so a Reset can restore the
-        // round to its pre-steal state.
-        $state->setStateValue('pre_steal_controlling_team_id', $currentQuestion->controlling_team_id);
-        $state->setStateValue('pre_steal_active_team_id', $state->active_team_id);
-
-        // Update controlling team for the steal round
-        // Keep control_status as 'team_control' since a team does have control
-        // The is_steal_round flag in state_data indicates it's a steal round
-        $currentQuestion->update([
-            'controlling_team_id' => $nextTeam->id,
-            'controlling_team_ids' => null,
-            'control_status' => 'team_control',
-        ]);
-
-        // Update game state
-        $state->update(['active_team_id' => $nextTeam->id]);
-
-        // Set steal round flag and reset timer
-        $stealTimerSeconds = $gameSession->getConfig('steal_timer_seconds', 10);
-        $state->setStateValue('is_steal_round', true);
-        $state->update([
-            'timer_duration' => $stealTimerSeconds,
-            'timer_started_at' => now(),
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'steal_team_id' => $nextTeam->id,
-            'steal_team_name' => $nextTeam->name,
-            'steal_timer_seconds' => $stealTimerSeconds,
-        ]);
-    }
-
-    public function endStealRound(GameSession $gameSession)
-    {
-        if ($gameSession->host_user_id !== auth()->id()) {
-            abort(403);
-        }
-
-        $state = $gameSession->gameState;
-
-        // Clear steal round flag
-        $state->setStateValue('is_steal_round', false);
-
-        // Stop the timer
-        $state->update(['timer_started_at' => null]);
-
-        return response()->json(['success' => true]);
-    }
-
     public function endGame(GameSession $gameSession)
     {
         $gameSession->update([
@@ -685,9 +668,6 @@ class HostController extends Controller
             $team->addScore($pointsPerTeam);
         }
 
-        // Track question statistics - question was answered correctly
-        $currentQuestion->question->recordCorrect();
-
         // Mark question as completed
         $currentQuestion->update(['status' => 'completed']);
 
@@ -751,9 +731,6 @@ class HostController extends Controller
         if (!$currentQuestion) {
             return response()->json(['error' => 'No active question'], 400);
         }
-
-        // Track question statistics - question was answered incorrectly (went to All Play)
-        $currentQuestion->question->recordWrong();
 
         // Switch to All Play mode - clear controlling team
         $currentQuestion->update([

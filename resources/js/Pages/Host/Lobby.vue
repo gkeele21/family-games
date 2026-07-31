@@ -9,7 +9,7 @@ import Select from '@/Components/Form/Select.vue';
 import NumberInput from '@/Components/Form/NumberInput.vue';
 import Toggle from '@/Components/Form/Toggle.vue';
 import Confirm from '@/Components/Feedback/Confirm.vue';
-import { Head, useForm, router } from '@inertiajs/vue3';
+import { Head, Link, useForm, router } from '@inertiajs/vue3';
 import { ref, computed, watch } from 'vue';
 
 interface TeamMember {
@@ -57,12 +57,28 @@ interface GameTypeOption {
     slug: string;
 }
 
+interface QuestionCategory { id: number; name: string; count: number }
+interface BankQuestion { id: number; question_text: string; category: string | null; difficulty: string; answers_count: number }
+interface QuestionData {
+    categories: QuestionCategory[];
+    stats: { total: number; by_difficulty: { easy: number; medium: number; hard: number } };
+    bank: BankQuestion[];
+}
+interface QuestionSelection {
+    mode: 'random' | 'hand_picked';
+    filter: 'any' | 'category' | 'difficulty';
+    category_ids: number[];
+    difficulty: 'easy' | 'medium' | 'hard';
+    question_ids: number[];
+}
+
 interface Props {
     gameSession: GameSession;
     config: Record<string, any>;
     friends: Friend[];
     waitingPlayers: WaitingPlayer[];
     gameTypes: GameTypeOption[];
+    questionData: QuestionData | null;
 }
 
 const props = defineProps<Props>();
@@ -203,6 +219,21 @@ const saveSettings = (after?: () => void) => {
     });
 };
 
+// Auto-save name & settings shortly after they change (debounced), so there's
+// no separate "Save" step — everything on this page persists on its own.
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+watch(
+    () => settingsForm.data(),
+    () => {
+        if (!settingsForm.isDirty) return;
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+            if (settingsForm.isDirty && !settingsForm.processing) saveSettings();
+        }, 700);
+    },
+    { deep: true },
+);
+
 // ---- Rounds & scoring (America Says) ----
 interface RoundScore { points_per_answer: number; bonus_points: number }
 const teamsCount = computed(() => props.gameSession.teams.length || 1);
@@ -243,6 +274,69 @@ const applyRoundCount = (n: number) => {
 const removeRound = (index: number) => {
     rounds.value = rounds.value.filter((_, i) => i !== index);
 };
+
+// ---- Question selection (America Says) ----
+if (!settingsForm.settings.question_selection) {
+    settingsForm.settings.question_selection = {
+        mode: 'random', filter: 'any', category_ids: [], difficulty: 'medium', question_ids: [],
+    } as QuestionSelection;
+}
+if (settingsForm.settings.final_round_enabled === undefined) {
+    settingsForm.settings.final_round_enabled = true;
+}
+const qsel = computed(() => settingsForm.settings.question_selection as QuestionSelection);
+const qCategories = computed(() => props.questionData?.categories ?? []);
+const qBank = computed(() => props.questionData?.bank ?? []);
+const qStats = computed(() => props.questionData?.stats ?? { total: 0, by_difficulty: { easy: 0, medium: 0, hard: 0 } });
+const difficultyOptions = [
+    { value: 'easy', label: 'Easy' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'hard', label: 'Hard' },
+];
+const questionSearch = ref('');
+const filteredBank = computed(() => {
+    const s = questionSearch.value.trim().toLowerCase();
+    return s ? qBank.value.filter((q) => q.question_text.toLowerCase().includes(s)) : qBank.value;
+});
+const toggleCategory = (id: number) => {
+    const arr = qsel.value.category_ids;
+    const i = arr.indexOf(id);
+    if (i >= 0) arr.splice(i, 1); else arr.push(id);
+};
+const togglePick = (id: number) => {
+    const arr = qsel.value.question_ids;
+    const i = arr.indexOf(id);
+    if (i >= 0) arr.splice(i, 1); else arr.push(id);
+};
+// Games whose questions are chosen in setup. Oodles is always random (card omitted).
+const usesSelection = computed(() => ['america-says', 'family-feud'].includes(gameSlug.value));
+const neededQuestions = computed(() =>
+    gameSlug.value === 'family-feud'
+        ? Number(settingsForm.settings.rounds_per_game ?? 4)
+        : totalQuestions.value);
+const matchCount = computed(() => {
+    const sel = qsel.value;
+    if (sel.filter === 'category') return qCategories.value.filter((c) => sel.category_ids.includes(c.id)).reduce((n, c) => n + c.count, 0);
+    if (sel.filter === 'difficulty') return qStats.value.by_difficulty[sel.difficulty] ?? 0;
+    return qStats.value.total;
+});
+const enoughRandom = computed(() => matchCount.value >= neededQuestions.value);
+const enoughPicked = computed(() => qsel.value.question_ids.length >= neededQuestions.value);
+// America Says final round: 4 slots pulled at random; needs that many extra in the bank.
+const finalRoundCount = computed(() =>
+    gameSlug.value === 'america-says' && settingsForm.settings.final_round_enabled
+        ? Number(settingsForm.settings.final_round_questions ?? 4)
+        : 0);
+const finalReady = computed(() =>
+    finalRoundCount.value === 0 || qStats.value.total >= neededQuestions.value + finalRoundCount.value);
+const questionSelectionReady = computed(() => {
+    if (!usesSelection.value) return true;
+    const mainOk = qsel.value.mode === 'hand_picked' ? enoughPicked.value : enoughRandom.value;
+    return mainOk && finalReady.value;
+});
+const tileClass = (on: boolean) => ['rounded-lg border p-3 text-left transition', on ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset hover:border-border-strong'];
+const pillClass = (on: boolean) => ['rounded-full border px-4 py-2 text-sm font-semibold', on ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-surface-inset text-muted'];
+const catClass = (on: boolean) => ['inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm', on ? 'border-primary bg-primary/10 text-body' : 'border-border bg-surface-inset text-muted'];
 
 // ---- Start / cancel ----
 const startGame = () => {
@@ -290,10 +384,10 @@ const copyDisplayUrl = () => {
                     <p class="mt-1 text-sm text-muted">Pick a game, name it, set teams &amp; scoring, then start.</p>
                 </div>
                 <div class="flex items-center gap-3">
-                    <span v-if="justSaved" class="text-sm text-primary">Saved ✓</span>
-                    <Button v-if="settingsForm.isDirty" variant="muted" size="md" :loading="settingsForm.processing" @click="saveSettings()">Save changes</Button>
+                    <span v-if="settingsForm.processing" class="text-sm text-muted">Saving…</span>
+                    <span v-else-if="justSaved" class="text-sm text-primary">Saved ✓</span>
                     <Button variant="outline" size="md" @click="cancelGame">Cancel</Button>
-                    <Button variant="success" size="md" :disabled="!gameSession.teams.length" @click="startGame">Start Game →</Button>
+                    <Button variant="success" size="md" :disabled="!gameSession.teams.length || !questionSelectionReady" @click="startGame">Start Game →</Button>
                 </div>
             </div>
         </template>
@@ -390,11 +484,9 @@ const copyDisplayUrl = () => {
                     <span class="text-body">{{ rounds.length }} rounds × {{ teamsCount }} = {{ totalQuestions }} questions.</span>
                 </p>
 
-                <div class="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div class="mb-5 grid max-w-md grid-cols-2 gap-4">
                     <Select v-model="settingsForm.settings.answers_per_question" :options="answerOptions" label="Answers / question" />
                     <NumberInput v-model="settingsForm.settings.control_timer_seconds" label="Control timer (s)" :min="10" :max="120" />
-                    <NumberInput v-model="settingsForm.settings.steal_timer_seconds" label="Steal timer (s)" :min="5" :max="60" />
-                    <NumberInput v-model="settingsForm.settings.steal_points_percentage" label="Steal points (%)" :min="0" :max="100" />
                 </div>
 
                 <label class="mb-2 block text-sm font-medium text-body">Points per round</label>
@@ -409,8 +501,93 @@ const copyDisplayUrl = () => {
                 </div>
             </Card>
 
+            <!-- Questions (America Says & Family Feud) -->
+            <Card v-if="usesSelection" title="Questions">
+                <template #headerActions>
+                    <span class="text-sm text-muted">{{ neededQuestions }} needed<span v-if="gameSlug === 'america-says'"> · {{ rounds.length }} × {{ teamsCount }}</span><span v-else> · {{ neededQuestions }} rounds</span></span>
+                </template>
+
+                <div class="mb-5 grid grid-cols-2 gap-3">
+                    <button type="button" :class="tileClass(qsel.mode === 'random')" @click="qsel.mode = 'random'">
+                        <div class="font-semibold text-body">🎲 Random</div>
+                        <p class="mt-1 text-xs text-muted">Pull questions automatically when the game starts.</p>
+                    </button>
+                    <button type="button" :class="tileClass(qsel.mode === 'hand_picked')" @click="qsel.mode = 'hand_picked'">
+                        <div class="font-semibold text-body">✋ Hand-Picked</div>
+                        <p class="mt-1 text-xs text-muted">Choose exactly which questions play, in order.</p>
+                    </button>
+                </div>
+
+                <!-- Random -->
+                <div v-if="qsel.mode === 'random'">
+                    <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-subtle">Pull from</p>
+                    <div class="mb-4 flex flex-wrap gap-2">
+                        <button type="button" :class="pillClass(qsel.filter === 'any')" @click="qsel.filter = 'any'">Any</button>
+                        <button type="button" :class="pillClass(qsel.filter === 'category')" @click="qsel.filter = 'category'">By Category</button>
+                        <button type="button" :class="pillClass(qsel.filter === 'difficulty')" @click="qsel.filter = 'difficulty'">By Difficulty</button>
+                    </div>
+
+                    <div v-if="qsel.filter === 'category'" class="flex flex-wrap gap-2">
+                        <button v-for="c in qCategories" :key="c.id" type="button" :class="catClass(qsel.category_ids.includes(c.id))" @click="toggleCategory(c.id)">
+                            <span v-if="qsel.category_ids.includes(c.id)" class="text-primary">✓</span>
+                            {{ c.name }} <span class="text-xs text-subtle">{{ c.count }}</span>
+                        </button>
+                        <p v-if="!qCategories.length" class="text-sm text-muted">No categories yet — add some in the Question Library.</p>
+                    </div>
+
+                    <div v-else-if="qsel.filter === 'difficulty'" class="max-w-[200px]">
+                        <Select v-model="qsel.difficulty" :options="difficultyOptions" />
+                    </div>
+
+                    <div :class="['mt-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm', enoughRandom ? 'border-primary/40 bg-surface-inset' : 'border-warning/50 bg-warning/5']">
+                        <span :class="['h-2 w-2 flex-none rounded-full', enoughRandom ? 'bg-primary' : 'bg-warning']"></span>
+                        <span v-if="enoughRandom" class="text-body"><b>{{ matchCount }}</b> questions match — enough for a {{ neededQuestions }}-question game.</span>
+                        <span v-else class="text-body"><b>{{ matchCount }}</b> match — need {{ neededQuestions }}. Widen the filter or add questions.</span>
+                        <span class="ml-auto whitespace-nowrap text-xs text-subtle">picks {{ neededQuestions }} at random</span>
+                    </div>
+                </div>
+
+                <!-- Hand-Picked -->
+                <div v-else>
+                    <TextField v-model="questionSearch" placeholder="Search the bank…" class="mb-3" />
+                    <div class="max-h-72 overflow-y-auto rounded-lg border border-border">
+                        <button
+                            v-for="q in filteredBank"
+                            :key="q.id"
+                            type="button"
+                            :class="['flex w-full items-center gap-3 border-t border-border/60 px-3 py-2.5 text-left first:border-t-0', qsel.question_ids.includes(q.id) ? 'bg-primary/5' : 'hover:bg-surface-inset']"
+                            @click="togglePick(q.id)"
+                        >
+                            <span :class="['flex h-5 w-5 flex-none items-center justify-center rounded border-2 text-xs font-bold', qsel.question_ids.includes(q.id) ? 'border-primary bg-primary text-surface-inset' : 'border-border-strong']">
+                                <span v-if="qsel.question_ids.includes(q.id)">✓</span>
+                            </span>
+                            <span class="flex-1 text-sm text-body">{{ q.question_text }}</span>
+                            <span class="whitespace-nowrap text-xs text-subtle">{{ q.category || '—' }} · {{ q.answers_count }}</span>
+                        </button>
+                        <p v-if="!filteredBank.length" class="px-3 py-6 text-center text-sm text-muted">No questions found.</p>
+                    </div>
+                    <div class="mt-3 flex items-center gap-3">
+                        <div class="h-1.5 flex-1 overflow-hidden rounded-full border border-border bg-surface-inset">
+                            <div class="h-full bg-primary" :style="{ width: Math.min(100, (qsel.question_ids.length / Math.max(1, neededQuestions)) * 100) + '%' }"></div>
+                        </div>
+                        <span :class="['whitespace-nowrap text-sm font-semibold', enoughPicked ? 'text-primary' : 'text-warning']">{{ qsel.question_ids.length }} / {{ neededQuestions }} selected</span>
+                    </div>
+                </div>
+
+                <div v-if="gameSlug === 'america-says'" class="mt-5 border-t border-border pt-4">
+                    <Toggle v-model="settingsForm.settings.final_round_enabled" label="Final round" />
+                    <p class="mt-1 text-xs text-subtle">4 questions revealing the top 1 → 4 answers on one 60-second clock. Pulled at random from questions with enough answers.</p>
+                    <p v-if="settingsForm.settings.final_round_enabled && !finalReady" class="mt-1 text-xs text-warning">Needs {{ neededQuestions + finalRoundCount }} active questions to fill the main game plus the final round — add more or widen the filter.</p>
+                </div>
+
+                <div class="mt-5 flex items-center gap-2 border-t border-border pt-4 text-sm">
+                    <Link :href="route('questions.index')" class="font-semibold text-primary hover:underline">Manage question library →</Link>
+                    <span class="text-subtle">Add or edit questions</span>
+                </div>
+            </Card>
+
             <!-- Family Feud rules -->
-            <Card v-else-if="gameSlug === 'family-feud'" title="Rules">
+            <Card v-if="gameSlug === 'family-feud'" title="Rules">
                 <div class="mb-4 max-w-xs">
                     <Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" />
                 </div>
@@ -418,10 +595,14 @@ const copyDisplayUrl = () => {
             </Card>
 
             <!-- Oodles rules -->
-            <Card v-else-if="gameSlug === 'oodles'" title="Rules">
+            <Card v-if="gameSlug === 'oodles'" title="Rules">
                 <div class="grid max-w-md grid-cols-2 gap-4">
                     <NumberInput v-model="settingsForm.settings.cards_per_game" label="Cards per game" :min="1" :max="26" />
                     <NumberInput v-model="settingsForm.settings.control_timer_seconds" label="Timer (s)" :min="5" :max="120" />
+                </div>
+                <div class="mt-5 flex items-center gap-2 border-t border-border pt-4 text-sm">
+                    <Link :href="route('questions.index')" class="font-semibold text-primary hover:underline">Manage question library →</Link>
+                    <span class="text-subtle">Oodles cards are pulled at random. Add or edit questions.</span>
                 </div>
             </Card>
 
@@ -485,6 +666,7 @@ const copyDisplayUrl = () => {
             :confirm-text="confirmState.confirmText"
             variant="danger"
             @confirm="runConfirm"
+            @cancel="confirmState.show = false"
             @close="confirmState.show = false"
         />
     </StandardLayout>

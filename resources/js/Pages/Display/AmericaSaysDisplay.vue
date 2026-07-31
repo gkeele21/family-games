@@ -10,6 +10,7 @@ interface Team {
     name: string;
     color: string;
     total_score: number;
+    display_order?: number;
 }
 
 interface Answer {
@@ -127,7 +128,7 @@ const answerColorClass = computed(() =>
 // Sort teams by score
 // Fixed team order (Team 1 first, Team 2 second) — never reorder by score.
 const sortedTeams = computed(() => {
-    return [...props.teams].sort((a, b) => a.display_order - b.display_order);
+    return [...props.teams].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
 });
 
 // Sort answers by display_order for proper grid layout

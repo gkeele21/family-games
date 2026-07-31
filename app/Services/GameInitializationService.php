@@ -115,16 +115,9 @@ class GameInitializationService
         $roundsPerGame = $config['rounds_per_game'] ?? 4;
         $fastMoneyEnabled = $config['fast_money_enabled'] ?? true;
 
-        // Get random questions for regular rounds
-        $regularQuestions = Question::where('game_type_id', $gameSession->game_type_id)
-            ->where('is_active', true)
-            ->where(function ($query) {
-                $query->where('is_fast_money', false)
-                    ->orWhereNull('is_fast_money');
-            })
-            ->inRandomOrder()
-            ->limit($roundsPerGame)
-            ->get();
+        // Regular-round questions, honoring the host's selection (random filters
+        // or hand-picked). selectQuestions() already excludes the final pool.
+        $regularQuestions = $this->selectQuestions($gameSession, $roundsPerGame);
 
         // Create session questions for regular rounds
         foreach ($regularQuestions as $index => $question) {
@@ -133,6 +126,7 @@ class GameInitializationService
                 'question_id' => $question->id,
                 'display_order' => $index + 1,
                 'status' => 'pending',
+                'segment' => 'main',
                 'points_available' => $this->calculateRoundMultiplier($index + 1, $config),
             ]);
 
@@ -144,7 +138,7 @@ class GameInitializationService
         if ($fastMoneyEnabled) {
             $fastMoneyQuestions = Question::where('game_type_id', $gameSession->game_type_id)
                 ->where('is_active', true)
-                ->where('is_fast_money', true)
+                ->where('round_type', 'final')
                 ->inRandomOrder()
                 ->limit(5) // Typically 5 questions for fast money
                 ->get();
@@ -156,7 +150,7 @@ class GameInitializationService
                     'question_id' => $question->id,
                     'display_order' => $startOrder + $index,
                     'status' => 'pending',
-                    'control_status' => 'fast_money',
+                    'segment' => 'final',
                 ]);
 
                 // Track question usage statistics
@@ -186,13 +180,10 @@ class GameInitializationService
         // settings, so existing games keep working before the setup UI lands.
         $roundScoring = $this->resolveRoundScoring($config, $teamCount);
 
-        // Pull enough questions for every slot (rounds x teams).
+        // Pull enough questions for every slot (rounds x teams), honoring the
+        // host's question selection (random-with-filters or hand-picked).
         $needed = count($roundScoring) * $teamCount;
-        $questions = Question::where('game_type_id', $gameSession->game_type_id)
-            ->where('is_active', true)
-            ->inRandomOrder()
-            ->limit($needed)
-            ->get();
+        $questions = $this->selectQuestions($gameSession, $needed);
 
         $order = 0;
         foreach ($roundScoring as $roundIndex => $round) {
@@ -212,11 +203,54 @@ class GameInitializationService
                     'display_order' => $order,
                     'round_number' => $roundNumber,
                     'status' => 'pending',
+                    'segment' => 'main',
                     'points_available' => $round['points_per_answer'],
                     'bonus_points' => $round['bonus_points'],
                 ]);
 
                 $question->incrementUsed();
+            }
+        }
+
+        // Reserve the final round: slots requiring the top 1..N answers. Each slot
+        // draws a random unused question with at least that many answers (a 2-answer
+        // question can't fill a slot needing 3). Gameplay is wired up later.
+        if ($config['final_round_enabled'] ?? true) {
+            $finalCount = (int) ($config['final_round_questions'] ?? 4);
+            $usedIds = SessionQuestion::where('game_session_id', $gameSession->id)->pluck('question_id')->all();
+
+            for ($n = 1; $n <= $finalCount; $n++) {
+                // Prefer questions authored for the final round; otherwise fall
+                // back to any regular question with enough answers (capacity rule).
+                $finalQuestion = Question::where('game_type_id', $gameSession->game_type_id)
+                        ->where('is_active', true)
+                        ->where('round_type', 'final')
+                        ->whereNotIn('id', $usedIds)
+                        ->has('answers', '>=', $n)
+                        ->inRandomOrder()
+                        ->first()
+                    ?? Question::where('game_type_id', $gameSession->game_type_id)
+                        ->where('is_active', true)
+                        ->whereNotIn('id', $usedIds)
+                        ->has('answers', '>=', $n)
+                        ->inRandomOrder()
+                        ->first();
+
+                if (!$finalQuestion) {
+                    break; // Not enough eligible questions; stop reserving.
+                }
+
+                $usedIds[] = $finalQuestion->id;
+                $order++;
+                SessionQuestion::create([
+                    'game_session_id' => $gameSession->id,
+                    'question_id' => $finalQuestion->id,
+                    'display_order' => $order,
+                    'status' => 'pending',
+                    'segment' => 'final',
+                    'answers_needed' => $n,
+                ]);
+                $finalQuestion->incrementUsed();
             }
         }
 
@@ -228,6 +262,49 @@ class GameInitializationService
                 'round_number' => $firstQuestion->round_number ?? 1,
             ]);
         }
+    }
+
+    /**
+     * Choose the questions for a session based on its `question_selection` config:
+     *   - hand_picked: exactly the chosen questions, in the chosen order
+     *   - random + category: random from the selected categories
+     *   - random + difficulty: random at the selected difficulty
+     *   - random + any (default): random from the whole active bank
+     * Falls back to whole-bank random when nothing is configured.
+     */
+    protected function selectQuestions(GameSession $gameSession, int $needed): \Illuminate\Support\Collection
+    {
+        $config = $gameSession->settings ?? $gameSession->gameType->default_config ?? [];
+        $sel = $config['question_selection'] ?? null;
+
+        // Regular play draws from non-final questions; final-round questions
+        // (Family Feud "Fast Money", America Says final) are a separate pool.
+        $base = Question::where('game_type_id', $gameSession->game_type_id)
+            ->where('is_active', true)
+            ->where('round_type', '!=', 'final');
+
+        if (is_array($sel) && ($sel['mode'] ?? 'random') === 'hand_picked' && !empty($sel['question_ids'])) {
+            $ids = array_values($sel['question_ids']);
+            $found = (clone $base)->whereIn('id', $ids)->get()->keyBy('id');
+
+            // Preserve the host's chosen order, dropping any now-inactive picks.
+            return collect($ids)
+                ->map(fn ($id) => $found->get($id))
+                ->filter()
+                ->take($needed)
+                ->values();
+        }
+
+        if (is_array($sel) && ($sel['mode'] ?? 'random') === 'random') {
+            $filter = $sel['filter'] ?? 'any';
+            if ($filter === 'category' && !empty($sel['category_ids'])) {
+                $base->whereIn('category_id', array_values($sel['category_ids']));
+            } elseif ($filter === 'difficulty' && !empty($sel['difficulty'])) {
+                $base->where('difficulty', $sel['difficulty']);
+            }
+        }
+
+        return $base->inRandomOrder()->limit($needed)->get();
     }
 
     /**

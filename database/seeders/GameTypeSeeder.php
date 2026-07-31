@@ -47,8 +47,12 @@ class GameTypeSeeder extends Seeder
                 'allow_team_selection' => false, // If true, players can pick their team
                 'answers_per_question' => 7,
                 'control_timer_seconds' => 30,
-                'steal_timer_seconds' => 10,
-                'steal_points_percentage' => 100, // steal earns the full round value
+                // Final round: 4 questions revealing the top 1 → 4 answers, one 60s
+                // clock. Questions are pulled at random, each needing at least as
+                // many answers as its slot requires. (Gameplay wired up later.)
+                'final_round_enabled' => true,
+                'final_round_questions' => 4,
+                'final_round_seconds' => 60,
                 // Per-round scoring: a round plays one question per team. Each correct
                 // answer scores points_per_answer; sweeping the whole board adds bonus_points.
                 'rounds' => 3,

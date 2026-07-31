@@ -27,6 +27,7 @@ class DatabaseSeeder extends Seeder
             GameTypeSeeder::class,
             OodlesQuestionSeeder::class,
             AmericaSaysQuestionSeeder::class,
+            CategorySeeder::class,
         ]);
     }
 }
