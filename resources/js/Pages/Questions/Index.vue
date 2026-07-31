@@ -44,6 +44,10 @@ const roundTypeOptions = computed(() => [
     { value: 'regular', label: 'Regular play' },
     { value: 'final', label: finalLabel.value },
 ]);
+const roundFilterOptions = computed(() => [
+    { value: 'regular', label: 'Standard' },
+    { value: 'final', label: finalLabel.value },
+]);
 // Only Family Feud assigns points to individual answers. America Says scores per
 // round (set in setup); Oodles scores by cards won — neither uses answer points.
 const showPoints = computed(() => props.activeSlug === 'family-feud');
@@ -59,6 +63,7 @@ const categoryFilter = ref<number | ''>('');
 const difficultyFilter = ref<string>('');
 const sourceFilter = ref<string>('');
 const statusFilter = ref<string>('');
+const roundFilter = ref<string>('');
 const openId = ref<number | null>(null);
 
 const categoryFilterOptions = computed(() => props.categories.map((c) => ({ value: c.id, label: c.name })));
@@ -85,6 +90,7 @@ const filtered = computed(() => {
         if (difficultyFilter.value && q.difficulty !== difficultyFilter.value) return false;
         if (sourceFilter.value === 'official' && !q.is_official) return false;
         if (sourceFilter.value === 'custom' && q.is_official) return false;
+        if (roundFilter.value && q.round_type !== roundFilter.value) return false;
         if (s && !q.question_text.toLowerCase().includes(s)) return false;
         return true;
     });
@@ -217,6 +223,7 @@ const inputClass = 'w-full rounded-lg border-border bg-surface-inset text-body p
                 <Select v-model="categoryFilter" :options="categoryFilterOptions" allow-empty empty-label="All categories" />
                 <Select v-model="difficultyFilter" :options="difficultyOptions" allow-empty empty-label="Any difficulty" />
                 <Select v-model="sourceFilter" :options="sourceOptions" allow-empty empty-label="Any source" />
+                <Select v-if="hasFinalRound" v-model="roundFilter" :options="roundFilterOptions" allow-empty empty-label="Any round" />
                 <Select v-model="statusFilter" :options="statusOptions" allow-empty empty-label="All statuses" />
             </div>
 

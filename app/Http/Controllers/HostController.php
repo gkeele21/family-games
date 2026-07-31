@@ -52,29 +52,17 @@ class HostController extends Controller
      */
     protected function questionSelectionData(GameSession $gameSession): ?array
     {
-        // Oodles pulls cards at random, so it has no selection card.
-        if (!in_array($gameSession->gameType->slug, ['america-says', 'family-feud'], true)) {
+        // The per-slot picker is America Says only. Oodles is random; Family Feud
+        // pulls randomly for now (its Fast Money picker comes later).
+        if ($gameSession->gameType->slug !== 'america-says') {
             return null;
         }
 
-        $typeId = $gameSession->game_type_id;
-
-        // The choosable bank is regular-play questions. Final-round questions
-        // (Family Feud "Fast Money", America Says final) live in a separate pool.
-        $active = \App\Models\Question::where('game_type_id', $typeId)
+        // One bank of every active question (Standard + Final). The picker
+        // filters it client-side by source / round type; final slots pull the
+        // Final questions matching their answer count.
+        $bank = \App\Models\Question::where('game_type_id', $gameSession->game_type_id)
             ->where('is_active', true)
-            ->where('round_type', '!=', 'final');
-
-        $categories = \App\Models\Category::where('game_type_id', $typeId)
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($c) => [
-                'id' => $c->id,
-                'name' => $c->name,
-                'count' => (clone $active)->where('category_id', $c->id)->count(),
-            ]);
-
-        $bank = (clone $active)
             ->withCount('answers')
             ->with('category:id,name')
             ->orderBy('question_text')
@@ -82,23 +70,15 @@ class HostController extends Controller
             ->map(fn ($q) => [
                 'id' => $q->id,
                 'question_text' => $q->question_text,
-                'category' => $q->category?->name,
-                'difficulty' => $q->difficulty,
+                'round_type' => $q->round_type,
+                'is_official' => $q->is_official,
                 'answers_count' => $q->answers_count,
+                'category' => $q->category?->name,
+                'category_id' => $q->category_id,
+                'difficulty' => $q->difficulty,
             ]);
 
-        return [
-            'categories' => $categories,
-            'stats' => [
-                'total' => (clone $active)->count(),
-                'by_difficulty' => [
-                    'easy' => (clone $active)->where('difficulty', 'easy')->count(),
-                    'medium' => (clone $active)->where('difficulty', 'medium')->count(),
-                    'hard' => (clone $active)->where('difficulty', 'hard')->count(),
-                ],
-            ],
-            'bank' => $bank,
-        ];
+        return ['bank' => $bank];
     }
 
     public function game(GameSession $gameSession): Response

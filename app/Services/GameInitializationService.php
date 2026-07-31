@@ -180,23 +180,35 @@ class GameInitializationService
         // settings, so existing games keep working before the setup UI lands.
         $roundScoring = $this->resolveRoundScoring($config, $teamCount);
 
-        // Pull enough questions for every slot (rounds x teams), honoring the
-        // host's question selection (random-with-filters or hand-picked).
-        $needed = count($roundScoring) * $teamCount;
-        $questions = $this->selectQuestions($gameSession, $needed);
-
+        // The host assigns a question to each slot in setup (round x team, plus
+        // the final round). Use those explicit picks; fall back to a random
+        // eligible question for any slot left unset.
+        $sel = is_array($config['question_selection'] ?? null) ? $config['question_selection'] : null;
+        $usedIds = [];
         $order = 0;
+
         foreach ($roundScoring as $roundIndex => $round) {
             $roundNumber = $roundIndex + 1;
 
             // One question per team in this round.
             for ($slot = 0; $slot < $teamCount; $slot++) {
-                $question = $questions->get($order);
-                if (!$question) {
-                    break 2; // Not enough questions in the bank; stop gracefully.
-                }
-                $order++;
+                $qid = $sel['regular'][$roundIndex][$slot]['id'] ?? null;
+                $question = $qid ? Question::find($qid) : null;
 
+                if (!$question) {
+                    $question = Question::where('game_type_id', $gameSession->game_type_id)
+                        ->where('is_active', true)
+                        ->where('round_type', '!=', 'final')
+                        ->whereNotIn('id', $usedIds)
+                        ->inRandomOrder()
+                        ->first();
+                }
+                if (!$question) {
+                    break 2; // Nothing left to assign.
+                }
+
+                $usedIds[] = $question->id;
+                $order++;
                 SessionQuestion::create([
                     'game_session_id' => $gameSession->id,
                     'question_id' => $question->id,
@@ -207,37 +219,31 @@ class GameInitializationService
                     'points_available' => $round['points_per_answer'],
                     'bonus_points' => $round['bonus_points'],
                 ]);
-
                 $question->incrementUsed();
             }
         }
 
-        // Reserve the final round: slots requiring the top 1..N answers. Each slot
-        // draws a random unused question with at least that many answers (a 2-answer
-        // question can't fill a slot needing 3). Gameplay is wired up later.
+        // Final round: slot N needs a Final question with exactly N answers. Use
+        // the host's pick, else a random eligible Final question. A slot with no
+        // eligible question is skipped.
         if ($config['final_round_enabled'] ?? true) {
             $finalCount = (int) ($config['final_round_questions'] ?? 4);
-            $usedIds = SessionQuestion::where('game_session_id', $gameSession->id)->pluck('question_id')->all();
 
             for ($n = 1; $n <= $finalCount; $n++) {
-                // Prefer questions authored for the final round; otherwise fall
-                // back to any regular question with enough answers (capacity rule).
-                $finalQuestion = Question::where('game_type_id', $gameSession->game_type_id)
+                $qid = $sel['final'][$n - 1]['id'] ?? null;
+                $finalQuestion = $qid ? Question::find($qid) : null;
+
+                if (!$finalQuestion) {
+                    $finalQuestion = Question::where('game_type_id', $gameSession->game_type_id)
                         ->where('is_active', true)
                         ->where('round_type', 'final')
                         ->whereNotIn('id', $usedIds)
-                        ->has('answers', '>=', $n)
-                        ->inRandomOrder()
-                        ->first()
-                    ?? Question::where('game_type_id', $gameSession->game_type_id)
-                        ->where('is_active', true)
-                        ->whereNotIn('id', $usedIds)
-                        ->has('answers', '>=', $n)
+                        ->has('answers', '=', $n)
                         ->inRandomOrder()
                         ->first();
-
+                }
                 if (!$finalQuestion) {
-                    break; // Not enough eligible questions; stop reserving.
+                    continue; // No eligible Final question for this slot.
                 }
 
                 $usedIds[] = $finalQuestion->id;
