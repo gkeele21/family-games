@@ -29,7 +29,11 @@ class ScoredGameController extends Controller
             'household' => $household->only(['id', 'name']),
             'games'     => $household->scoredGames()
                 ->with(['competitors.players:players.id,players.name', 'rounds.scores'])
+                // started_at is a date-only play date, so same-day games
+                // tie-break on creation time, newest first.
                 ->orderByDesc('started_at')
+                ->orderByDesc('created_at')
+                ->orderByDesc('id')
                 ->get()
                 ->map(function (ScoredGame $g) {
                     $players = $g->competitors->flatMap->players->unique('id')->values();
