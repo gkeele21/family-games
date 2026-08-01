@@ -6,21 +6,25 @@ use App\Http\Controllers\Scorekeeper\HouseholdController;
 use App\Http\Controllers\Scorekeeper\HouseholdInviteController;
 use App\Http\Controllers\Scorekeeper\PlayerController;
 use App\Http\Controllers\Scorekeeper\ScoredGameController;
+use App\Models\Scorekeeper\Household;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('scorekeeper')->name('scorekeeper.')->group(function () {
     // Public invite preview (accepting requires auth below).
     Route::get('invites/{token}', [HouseholdInviteController::class, 'show'])->name('invites.show');
 
-    Route::middleware('auth')->group(function () {
+    Route::middleware(['auth', \App\Http\Middleware\RememberLastHousehold::class])->group(function () {
         Route::get('/', [HouseholdController::class, 'home'])->name('home');
         Route::get('households', [HouseholdController::class, 'index'])->name('households.index');
         Route::post('households', [HouseholdController::class, 'store'])->name('households.store');
         Route::get('households/{household}', [HouseholdController::class, 'show'])->name('households.show');
-        Route::get('households/{household}/players', [HouseholdController::class, 'players'])
-            ->name('households.players.index');
-        Route::get('households/{household}/sharing', [HouseholdController::class, 'sharing'])
-            ->name('households.sharing');
+        Route::get('households/{household}/people', [HouseholdController::class, 'people'])
+            ->name('households.people');
+        // Legacy URLs from before Players and Sharing merged into People.
+        Route::get('households/{household}/players', fn (Household $household) => redirect()
+            ->route('scorekeeper.households.people', $household));
+        Route::get('households/{household}/sharing', fn (Household $household) => redirect()
+            ->route('scorekeeper.households.people', $household));
         Route::patch('households/{household}', [HouseholdController::class, 'update'])->name('households.update');
         Route::delete('households/{household}', [HouseholdController::class, 'destroy'])->name('households.destroy');
         Route::delete('households/{household}/membership', [HouseholdController::class, 'leave'])->name('households.leave');

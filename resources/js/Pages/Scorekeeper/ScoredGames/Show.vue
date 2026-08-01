@@ -50,6 +50,11 @@ const props = defineProps<{
     household: { id: number; name: string };
     competitors: Competitor[];
     availablePlayers: Array<{ id: number; name: string }>;
+    suggestions: Array<{
+        name: string;
+        user_id: number | null;
+        source: string;
+    }>;
     rounds: Round[];
     totals: Record<string, number>;
     fieldSubtotals: Record<string, Record<string, number>>;
@@ -215,6 +220,7 @@ const refresh = () => {
             'completionMet',
             'competitors',
             'availablePlayers',
+            'suggestions',
             'game',
         ],
     });
@@ -374,6 +380,7 @@ const orderedCompetitors = computed(() => {
 type AddPayload = {
     player_id?: number;
     new_player_name?: string;
+    user_id?: number | null;
     add_to_household?: boolean;
 };
 const newTeamName = ref('');
@@ -1164,6 +1171,7 @@ const deleteGame = () => {
                             <div class="mt-2">
                                 <AddPlayerControl
                                     :available-players="availablePlayers"
+                                    :suggestions="suggestions"
                                     @add="(p) => addMemberToTeam(c.id, p)"
                                 />
                             </div>
@@ -1262,6 +1270,7 @@ const deleteGame = () => {
                         <div class="border-t pt-3">
                             <AddPlayerControl
                                 :available-players="availablePlayers"
+                                :suggestions="suggestions"
                                 label="Add a player"
                                 @add="addPlayer"
                             />

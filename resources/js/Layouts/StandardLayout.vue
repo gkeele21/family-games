@@ -4,9 +4,9 @@
  * Modeled on the PropOff game layout: emblem + configurable context menu +
  * gear/profile over a grayish ground, with the orange accent-glow divider.
  *
- * Pages migrate onto this over time. The Dashboard uses it with no context
- * menu (games are reached from the hub tiles); each game module passes its
- * own `navItems` plus `backToDashboard` for a link home.
+ * Pages migrate onto this over time. The Dashboard passes the game-module
+ * links (Trivia / Scorekeeper / PropOff); each game module passes its own
+ * `navItems` plus `backToDashboard` for a link home.
  */
 import { ref, computed } from 'vue';
 import { Link, usePage } from '@inertiajs/vue3';

@@ -7,7 +7,7 @@ import { computed } from 'vue';
 
 const props = defineProps<{
     household: { id: number; name: string };
-    tab: 'games' | 'templates' | 'players' | 'sharing';
+    tab: 'games' | 'templates' | 'people';
 }>();
 
 const page = usePage();
@@ -28,14 +28,9 @@ const tabs = computed(() => [
         ),
     },
     {
-        key: 'players',
-        label: 'Players',
-        href: route('scorekeeper.households.players.index', props.household.id),
-    },
-    {
-        key: 'sharing',
-        label: 'Sharing',
-        href: route('scorekeeper.households.sharing', props.household.id),
+        key: 'people',
+        label: 'People',
+        href: route('scorekeeper.households.people', props.household.id),
     },
 ]);
 </script>

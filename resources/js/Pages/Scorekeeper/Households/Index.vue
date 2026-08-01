@@ -171,16 +171,6 @@ const leave = (h: HouseholdRow) => {
                         <Link
                             :href="
                                 route(
-                                    'scorekeeper.households.players.index',
-                                    h.id,
-                                )
-                            "
-                            class="text-[#0b5d3b] hover:text-[#084a2f]"
-                            >Players</Link
-                        >
-                        <Link
-                            :href="
-                                route(
                                     'scorekeeper.households.templates.index',
                                     h.id,
                                 )
@@ -189,9 +179,9 @@ const leave = (h: HouseholdRow) => {
                             >Game templates</Link
                         >
                         <Link
-                            :href="route('scorekeeper.households.sharing', h.id)"
+                            :href="route('scorekeeper.households.people', h.id)"
                             class="text-[#0b5d3b] hover:text-[#084a2f]"
-                            >Sharing</Link
+                            >People</Link
                         >
                     </div>
                 </div>

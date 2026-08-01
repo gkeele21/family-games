@@ -141,13 +141,32 @@ class CompetitorController extends Controller
         $validated = $request->validate([
             'player_id'        => 'nullable|integer',
             'new_player_name'  => 'nullable|string|max:255',
+            'user_id'          => 'nullable|integer|exists:users,id',
             'add_to_household' => 'boolean',
         ]);
 
-        // New player typed in — guest unless they chose to save to the roster.
+        // New player typed in (or picked from the other-households/friends
+        // suggestions, which carry an account link) — guest unless they chose
+        // to save to the roster.
         if (! empty($validated['new_player_name'])) {
+            $userId = $validated['user_id'] ?? null;
+
+            if ($userId !== null) {
+                abort_unless(
+                    $request->user()->canLinkRosterAccount($userId),
+                    403,
+                    'You can only link people from your households or friends.',
+                );
+                abort_if(
+                    $scoredGame->household->players()->where('user_id', $userId)->exists(),
+                    422,
+                    'That person is already on this roster.',
+                );
+            }
+
             return $scoredGame->household->players()->create([
                 'name'     => trim($validated['new_player_name']),
+                'user_id'  => $userId,
                 'is_guest' => ! ($validated['add_to_household'] ?? false),
             ])->id;
         }
