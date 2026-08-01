@@ -45,6 +45,7 @@ class DisplayController extends Controller
                 'name' => $team->name,
                 'color' => $team->color,
                 'total_score' => $team->total_score,
+                'display_order' => $team->display_order,
             ]),
         ]);
     }
@@ -108,6 +109,7 @@ class DisplayController extends Controller
                 'name' => $team->name,
                 'color' => $team->color,
                 'total_score' => $team->total_score,
+                'display_order' => $team->display_order,
             ]),
             'gameState' => [
                 'round_number' => $state?->round_number,
@@ -136,7 +138,8 @@ class DisplayController extends Controller
 
     /**
      * Obfuscate answer text for unrevealed answers.
-     * Shows first letter + underscores.
+     * Shows first letter + underscores, joined with NO space so the
+     * result reads as one continuous solid line that hides the word count.
      */
     private function obfuscateAnswer(string $text): string
     {
@@ -150,6 +153,6 @@ class DisplayController extends Controller
             return $firstLetter . str_repeat('_', $underscoreCount);
         }, $words);
 
-        return implode(' ', $obfuscated);
+        return implode('', $obfuscated);
     }
 }

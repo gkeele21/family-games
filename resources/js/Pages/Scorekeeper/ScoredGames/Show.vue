@@ -123,6 +123,46 @@ const fieldWidths = computed<Record<string, string>>(() => {
     return out;
 });
 
+// Only the current (latest) round is editable by default; earlier rounds
+// render as plain labels. The pencil on a past round unlocks it for fixes.
+const currentRoundId = computed(() =>
+    props.rounds.length ? props.rounds[props.rounds.length - 1].id : null,
+);
+const unlockedRounds = reactive(new Set<number>());
+const roundHasUnsaved = (roundId: number): boolean =>
+    [...dirty].some((k) => k.startsWith(`${roundId}:`));
+// A round with unsaved edits stays editable even if it stops being current
+// (e.g. a new round gets added mid-typing) so the edits stay visible.
+const isRoundEditable = (roundId: number): boolean =>
+    roundId === currentRoundId.value ||
+    unlockedRounds.has(roundId) ||
+    roundHasUnsaved(roundId);
+const toggleRoundEdit = (roundId: number) => {
+    if (!unlockedRounds.has(roundId)) {
+        unlockedRounds.add(roundId);
+        return;
+    }
+    if (
+        roundHasUnsaved(roundId) &&
+        !confirm('Discard unsaved changes to this round?')
+    )
+        return;
+    // Relock: drop the round's unsaved edits so its labels show saved values.
+    unlockedRounds.delete(roundId);
+    [...dirty]
+        .filter((k) => k.startsWith(`${roundId}:`))
+        .forEach((k) => dirty.delete(k));
+    const round = props.rounds.find((r) => r.id === roundId);
+    if (round) {
+        props.competitors.forEach((c) => {
+            fields.value.forEach((f) => {
+                inputs[roundId][c.id][f.key] =
+                    round.scores?.[c.id]?.[f.key] ?? '';
+            });
+        });
+    }
+};
+
 // Editable cells: inputs[roundId][competitorId][fieldKey]
 const inputs = reactive<
     Record<number, Record<number, Record<string, number | string>>>
@@ -461,8 +501,12 @@ const onScoreTab = (
             `[data-cell="${roundId}:${next.c}:${next.f}"]`,
         );
     } else if (!e.shiftKey) {
+        // Continue into the next round that's open for editing (locked past
+        // rounds have no inputs to land on).
         const ri = props.rounds.findIndex((r) => r.id === roundId);
-        const nextRound = props.rounds[ri + 1];
+        const nextRound = props.rounds
+            .slice(ri + 1)
+            .find((r) => isRoundEditable(r.id));
         target =
             nextRound && cells[0]
                 ? document.querySelector<HTMLElement>(
@@ -481,7 +525,10 @@ const saveAll = () => {
         number,
         Record<number, Record<string, number | null>>
     > = {};
+    // Submit only rounds open for editing — locked rounds show saved values
+    // and shouldn't overwrite anyone else's concurrent fixes.
     props.rounds.forEach((r) => {
+        if (!isRoundEditable(r.id)) return;
         rounds[r.id] = {};
         props.competitors.forEach((c) => {
             if (!canEditCompetitor(c.id)) return; // guests submit only their own
@@ -500,8 +547,12 @@ const saveAll = () => {
         {
             preserveScroll: true,
             onFinish: () => (saving.value = false),
-            // Saved — server is the source of truth again.
-            onSuccess: () => dirty.clear(),
+            // Saved — server is the source of truth again, and any past
+            // rounds opened for fixes lock back up.
+            onSuccess: () => {
+                dirty.clear();
+                unlockedRounds.clear();
+            },
         },
     );
 };
@@ -755,7 +806,29 @@ const deleteGame = () => {
                                     <td
                                         class="px-3 py-2 align-top font-medium text-gray-700"
                                     >
-                                        {{ r.round_number }}
+                                        <span class="flex items-center gap-1.5">
+                                            {{ r.round_number }}
+                                            <button
+                                                v-if="
+                                                    isEditor &&
+                                                    r.id !== currentRoundId
+                                                "
+                                                type="button"
+                                                :class="
+                                                    unlockedRounds.has(r.id)
+                                                        ? 'text-[#0b5d3b] hover:text-[#084a2f]'
+                                                        : 'text-gray-400 hover:text-[#0b5d3b]'
+                                                "
+                                                :title="
+                                                    unlockedRounds.has(r.id)
+                                                        ? 'Done editing this round'
+                                                        : 'Edit this round'
+                                                "
+                                                @click="toggleRoundEdit(r.id)"
+                                            >
+                                                ✎
+                                            </button>
+                                        </span>
                                     </td>
                                     <td
                                         v-for="c in orderedCompetitors"
@@ -766,7 +839,10 @@ const deleteGame = () => {
                                         }"
                                     >
                                         <input
-                                            v-if="canEditCompetitor(c.id)"
+                                            v-if="
+                                                canEditCompetitor(c.id) &&
+                                                isRoundEditable(r.id)
+                                            "
                                             v-model="
                                                 inputs[r.id][c.id][
                                                     fields[0].key
@@ -800,7 +876,33 @@ const deleteGame = () => {
                                             :rowspan="fields.length"
                                             class="px-3 py-2 align-top font-medium text-gray-700"
                                         >
-                                            {{ r.round_number }}
+                                            <span
+                                                class="flex items-center gap-1.5"
+                                            >
+                                                {{ r.round_number }}
+                                                <button
+                                                    v-if="
+                                                        isEditor &&
+                                                        r.id !== currentRoundId
+                                                    "
+                                                    type="button"
+                                                    :class="
+                                                        unlockedRounds.has(r.id)
+                                                            ? 'text-[#0b5d3b] hover:text-[#084a2f]'
+                                                            : 'text-gray-400 hover:text-[#0b5d3b]'
+                                                    "
+                                                    :title="
+                                                        unlockedRounds.has(r.id)
+                                                            ? 'Done editing this round'
+                                                            : 'Edit this round'
+                                                    "
+                                                    @click="
+                                                        toggleRoundEdit(r.id)
+                                                    "
+                                                >
+                                                    ✎
+                                                </button>
+                                            </span>
                                         </td>
                                         <td
                                             class="whitespace-nowrap px-2 py-1"
@@ -829,7 +931,10 @@ const deleteGame = () => {
                                             }"
                                         >
                                             <input
-                                                v-if="canEditCompetitor(c.id)"
+                                                v-if="
+                                                    canEditCompetitor(c.id) &&
+                                                    isRoundEditable(r.id)
+                                                "
                                                 v-model="
                                                     inputs[r.id][c.id][f.key]
                                                 "

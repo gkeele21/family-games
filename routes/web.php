@@ -6,6 +6,7 @@ use App\Http\Controllers\GameSessionController;
 use App\Http\Controllers\HostController;
 use App\Http\Controllers\PlayerController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\QuestionController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -33,14 +34,25 @@ Route::middleware('auth')->group(function () {
     Route::get('/games', [GameSessionController::class, 'index'])->name('games.index');
     Route::get('/games/create', [GameSessionController::class, 'create'])->name('games.create');
     Route::post('/games', [GameSessionController::class, 'store'])->name('games.store');
+    Route::post('/games/{gameSession}/game-type', [GameSessionController::class, 'changeGameType'])->name('games.game-type.update');
     Route::post('/games/{gameSession}/teams', [GameSessionController::class, 'addTeam'])->name('games.teams.add');
+    Route::post('/games/{gameSession}/teams/count', [GameSessionController::class, 'setTeamCount'])->name('games.teams.count');
     Route::post('/games/{gameSession}/teams/reorder', [GameSessionController::class, 'reorderTeams'])->name('games.teams.reorder');
+    Route::patch('/games/{gameSession}/teams/{team}', [GameSessionController::class, 'updateTeam'])->name('games.teams.update');
     Route::delete('/games/{gameSession}/teams/{team}', [GameSessionController::class, 'removeTeam'])->name('games.teams.remove');
     Route::post('/games/{gameSession}/teams/{team}/members', [GameSessionController::class, 'addTeamMember'])->name('games.teams.members.add');
     Route::delete('/games/{gameSession}/teams/{team}/members/{teamMember}', [GameSessionController::class, 'removeTeamMember'])->name('games.teams.members.remove');
     Route::post('/games/{gameSession}/start', [GameSessionController::class, 'startGame'])->name('games.start');
+    Route::post('/games/{gameSession}/back-to-lobby', [GameSessionController::class, 'backToLobby'])->name('games.back-to-lobby');
     Route::patch('/games/{gameSession}/settings', [GameSessionController::class, 'updateSettings'])->name('games.settings.update');
     Route::delete('/games/{gameSession}', [GameSessionController::class, 'destroy'])->name('games.destroy');
+
+    // Question Library (admin)
+    Route::get('/questions', [QuestionController::class, 'index'])->name('questions.index');
+    Route::post('/questions', [QuestionController::class, 'store'])->name('questions.store');
+    Route::patch('/questions/{question}', [QuestionController::class, 'update'])->name('questions.update');
+    Route::delete('/questions/{question}', [QuestionController::class, 'destroy'])->name('questions.destroy');
+    Route::post('/question-categories', [QuestionController::class, 'storeCategory'])->name('questions.categories.store');
 
     // Host Routes
     Route::get('/host/{gameSession}/lobby', [HostController::class, 'lobby'])->name('host.lobby');
@@ -49,17 +61,21 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/timer/start', [HostController::class, 'startTimer'])->name('host.timer.start');
     Route::post('/host/{gameSession}/timer/pause', [HostController::class, 'pauseTimer'])->name('host.timer.pause');
     Route::post('/host/{gameSession}/timer/reset', [HostController::class, 'resetTimer'])->name('host.timer.reset');
+    Route::post('/host/{gameSession}/board/reset', [HostController::class, 'resetBoard'])->name('host.board.reset');
+    Route::post('/host/{gameSession}/round/reset', [HostController::class, 'resetRound'])->name('host.round.reset');
     Route::post('/host/{gameSession}/reveal', [HostController::class, 'revealAnswer'])->name('host.reveal');
+    Route::post('/host/{gameSession}/unreveal', [HostController::class, 'unrevealAnswer'])->name('host.unreveal');
     Route::post('/host/{gameSession}/control', [HostController::class, 'setControllingTeams'])->name('host.control');
+    Route::post('/host/{gameSession}/control/team', [HostController::class, 'setControllingTeam'])->name('host.control.team');
+    Route::post('/host/{gameSession}/bonus', [HostController::class, 'awardBonus'])->name('host.bonus');
     Route::post('/host/{gameSession}/question/select', [HostController::class, 'selectQuestion'])->name('host.question.select');
     Route::post('/host/{gameSession}/question/next', [HostController::class, 'nextQuestion'])->name('host.question.next');
+    Route::post('/host/{gameSession}/question/previous', [HostController::class, 'previousQuestion'])->name('host.question.previous');
     Route::post('/host/{gameSession}/question/correct', [HostController::class, 'markCorrect'])->name('host.question.correct');
     Route::post('/host/{gameSession}/question/wrong', [HostController::class, 'markWrong'])->name('host.question.wrong');
     Route::post('/host/{gameSession}/card/next', [HostController::class, 'nextCard'])->name('host.card.next');
     Route::post('/host/{gameSession}/end', [HostController::class, 'endGame'])->name('host.end');
     Route::patch('/host/{gameSession}/teams/{team}/score', [HostController::class, 'updateTeamScore'])->name('host.teams.score.update');
-    Route::post('/host/{gameSession}/steal/start', [HostController::class, 'startStealRound'])->name('host.steal.start');
-    Route::post('/host/{gameSession}/steal/end', [HostController::class, 'endStealRound'])->name('host.steal.end');
 });
 
 // Player Routes (no auth required)

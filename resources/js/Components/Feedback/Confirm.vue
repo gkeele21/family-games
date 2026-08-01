@@ -90,7 +90,9 @@ function handleConfirm() {
 }
 
 function handleCancel() {
+    // Emit 'close' as well so callers that only wired @close still dismiss.
     emit('cancel');
+    emit('close');
     emit('update:show', false);
 }
 

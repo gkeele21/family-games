@@ -12,6 +12,7 @@ class GameTypeSeeder extends Seeder
         GameType::create([
             'name' => 'Family Feud',
             'slug' => 'family-feud',
+            'display_order' => 2,
             'description' => 'Survey-based game where teams compete to guess the most popular answers. Features face-offs, strikes, steals, and an optional Fast Money round.',
             'default_config' => [
                 'team_size' => 0, // 0 = unlimited, 1 = individual play
@@ -40,16 +41,29 @@ class GameTypeSeeder extends Seeder
         GameType::create([
             'name' => 'America Says',
             'slug' => 'america-says',
+            'display_order' => 1,
             'description' => 'Survey-based game where teams try to guess all answers within a time limit. Features control timers, steal rounds, and flat scoring.',
             'default_config' => [
                 'team_size' => 0, // 0 = unlimited, 1 = individual play
+                'number_of_teams' => 2, // teams auto-created in the lobby (Team A, Team B…)
                 'allow_team_selection' => false, // If true, players can pick their team
-                'questions_per_game' => 10,
                 'answers_per_question' => 7,
                 'control_timer_seconds' => 30,
-                'steal_timer_seconds' => 10,
-                'steal_points_percentage' => 50,
-                'points_per_answer' => 100,
+                // Final round: 4 questions revealing the top 1 → 4 answers, one 60s
+                // clock. Questions are pulled at random, each needing at least as
+                // many answers as its slot requires. (Gameplay wired up later.)
+                'final_round_enabled' => true,
+                'final_round_questions' => 4,
+                'final_round_seconds' => 60,
+                // Per-round scoring: a round plays one question per team. Each correct
+                // answer scores points_per_answer; sweeping the whole board adds bonus_points.
+                'rounds' => 3,
+                'round_scoring' => [
+                    ['points_per_answer' => 100, 'bonus_points' => 1000],
+                    ['points_per_answer' => 200, 'bonus_points' => 2000],
+                    ['points_per_answer' => 300, 'bonus_points' => 3000],
+                ],
+                'points_per_answer' => 100, // fallback for legacy/flat scoring
                 'gameplay_mode' => 'host_reveal', // 'host_reveal' or 'team_buzzer'
                 'winning_condition' => 'most_points_after_questions',
                 'winning_condition_options' => [
@@ -62,6 +76,7 @@ class GameTypeSeeder extends Seeder
         GameType::create([
             'name' => 'Oodles',
             'slug' => 'oodles',
+            'display_order' => 3,
             'description' => 'Word-guessing game with cards. Each card has questions where all answers start with the same letter. Teams control questions and can earn control through steals.',
             'default_config' => [
                 'team_size' => 0, // 0 = unlimited, 1 = individual play

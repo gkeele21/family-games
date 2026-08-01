@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import Button from '@/Components/Base/Button.vue';
 
 interface Props {
     timerStartedAt: string | null;
     timerDuration: number;
     isHost?: boolean;
+    size?: 'md' | 'sm';
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), { size: 'md' });
+
+const displayClass = computed(() =>
+    props.size === 'sm' ? 'text-4xl py-2 px-6' : 'text-6xl py-4 px-8'
+);
+const controlsClass = computed(() => (props.size === 'sm' ? 'mt-2' : 'mt-4'));
 
 const emit = defineEmits<{
     (e: 'start'): void;
@@ -67,38 +74,21 @@ watch(() => props.timerStartedAt, () => {
 <template>
     <div class="text-center">
         <div
-            class="text-6xl font-mono font-bold py-4 px-8 rounded-lg transition-all duration-300"
-            :class="{
-                'bg-green-600 text-white': !isWarning && !isExpired && isRunning,
-                'bg-gray-700 text-white': !isRunning && !isExpired,
-                'bg-red-600 text-white animate-pulse': isWarning,
-                'bg-red-900 text-white': isExpired,
-            }"
+            class="font-mono font-bold rounded-lg transition-all duration-300"
+            :class="[displayClass, {
+                'bg-success text-white': !isWarning && !isExpired && isRunning,
+                'bg-surface-inset text-body border border-border': !isRunning && !isExpired,
+                'bg-danger text-white animate-pulse': isWarning,
+                'bg-danger/70 text-white': isExpired,
+            }]"
         >
             {{ formattedTime }}
         </div>
 
-        <div v-if="isHost" class="flex gap-2 mt-4 justify-center">
-            <button
-                v-if="!isRunning"
-                @click="emit('start')"
-                class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-            >
-                Start
-            </button>
-            <button
-                v-if="isRunning"
-                @click="emit('pause')"
-                class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition"
-            >
-                Pause
-            </button>
-            <button
-                @click="emit('reset')"
-                class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
-            >
-                Reset
-            </button>
+        <div v-if="isHost" class="flex gap-2 justify-center" :class="controlsClass">
+            <Button v-if="!isRunning" variant="success" :size="size" @click="emit('start')">Start</Button>
+            <Button v-if="isRunning" variant="accent" :size="size" @click="emit('pause')">Pause</Button>
+            <Button variant="muted" :size="size" @click="emit('reset')">Reset</Button>
         </div>
     </div>
 </template>

@@ -2,7 +2,7 @@
     <button
         :type="type"
         :class="[
-            'rounded-lg font-semibold transition whitespace-nowrap cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed',
+            'hover-glow rounded-lg font-semibold transition whitespace-nowrap cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed',
             variants[variant],
             sizes[size]
         ]"
@@ -31,20 +31,22 @@ const props = defineProps({
     loading: { type: Boolean, default: false },
 });
 
+// Hover feedback is the shared white glow (`hover-glow` in the base class), so
+// variants only define their resting colors — no per-variant hover swaps.
 const variants = {
-    primary: 'bg-primary hover:bg-white text-white hover:text-primary border-2 border-transparent hover:border-primary',  // Theme color - main actions
-    success: 'bg-success hover:bg-white text-white hover:text-success border-2 border-transparent hover:border-success',  // Green - positive/CTA actions
-    secondary: 'bg-info hover:bg-white text-white hover:text-info border-2 border-transparent hover:border-info',  // Blue - secondary actions
-    accent: 'bg-warning hover:bg-white text-white hover:text-warning border-2 border-transparent hover:border-warning',  // Orange - accent/highlight actions
-    outline: 'bg-transparent hover:bg-primary/10 text-primary border-2 border-primary hover:border-primary',  // Outline with primary - cancel/back
-    danger: 'bg-danger hover:bg-white text-white hover:text-danger border-2 border-transparent hover:border-danger',
-    muted: 'bg-surface-inset hover:bg-surface-header text-body border-2 border-border hover:border-border-strong',  // Neutral/muted actions
-    neutral: 'bg-black hover:bg-white text-white hover:text-black border-2 border-black hover:border-black',
-    ghost: 'bg-transparent hover:bg-surface text-primary border-2 border-transparent',
+    primary: 'bg-primary text-white border-2 border-transparent',  // Theme color - main actions
+    success: 'bg-success text-white border-2 border-transparent',  // Green - positive/CTA actions
+    secondary: 'bg-info text-white border-2 border-transparent',  // Blue - secondary actions
+    accent: 'bg-warning text-white border-2 border-transparent',  // Orange - accent/highlight actions
+    outline: 'bg-transparent text-primary border-2 border-primary',  // Outline with primary - cancel/back
+    danger: 'bg-danger text-white border-2 border-transparent',
+    muted: 'bg-surface-inset text-body border-2 border-border',  // Neutral/muted actions
+    neutral: 'bg-black text-white border-2 border-black',
+    ghost: 'bg-transparent text-primary border-2 border-transparent',
     // Light variants for use on dark backgrounds
-    'secondary-light': 'bg-white/10 hover:bg-white/20 text-white border border-white/30',
-    'ghost-light': 'bg-transparent hover:bg-white/10 text-white',
-    'outline-light': 'bg-transparent hover:bg-white/10 text-white border border-white/50',
+    'secondary-light': 'bg-white/10 text-white border border-white/30',
+    'ghost-light': 'bg-transparent text-white',
+    'outline-light': 'bg-transparent text-white border border-white/50',
 };
 
 const sizes = {

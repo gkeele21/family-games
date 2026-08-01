@@ -13,6 +13,16 @@ class GameInitializationService
     {
         $gameType = $gameSession->gameType;
 
+        // Make (re)starting idempotent: clear any questions/cards materialized by
+        // a prior start so we never accumulate duplicates. Null the game-state
+        // pointers first so the deletes don't trip the foreign keys.
+        $gameSession->gameState?->update([
+            'current_question_id' => null,
+            'current_card_id' => null,
+        ]);
+        $gameSession->sessionQuestions()->delete();
+        $gameSession->sessionCards()->delete();
+
         match ($gameType->slug) {
             'oodles' => $this->initializeOodles($gameSession),
             'family-feud' => $this->initializeFamilyFeud($gameSession),
@@ -112,60 +122,81 @@ class GameInitializationService
     protected function initializeFamilyFeud(GameSession $gameSession): void
     {
         $config = $gameSession->settings ?? $gameSession->gameType->default_config;
-        $roundsPerGame = $config['rounds_per_game'] ?? 4;
+        $roundsPerGame = (int) ($config['rounds_per_game'] ?? 4);
         $fastMoneyEnabled = $config['fast_money_enabled'] ?? true;
 
-        // Get random questions for regular rounds
-        $regularQuestions = Question::where('game_type_id', $gameSession->game_type_id)
-            ->where('is_active', true)
-            ->where(function ($query) {
-                $query->where('is_fast_money', false)
-                    ->orWhereNull('is_fast_money');
-            })
-            ->inRandomOrder()
-            ->limit($roundsPerGame)
-            ->get();
+        // The host assigns a question to each slot in setup (one per round, plus
+        // 5 Fast Money slots). Use those explicit picks; fall back to a random
+        // eligible question for any slot left unset.
+        $sel = is_array($config['question_selection'] ?? null) ? $config['question_selection'] : null;
+        $usedIds = [];
+        $order = 0;
 
-        // Create session questions for regular rounds
-        foreach ($regularQuestions as $index => $question) {
+        // Regular rounds: one question per round (a face-off both teams play).
+        for ($roundIndex = 0; $roundIndex < $roundsPerGame; $roundIndex++) {
+            $qid = $sel['regular'][$roundIndex][0]['id'] ?? null;
+            $question = $qid ? Question::find($qid) : null;
+
+            if (!$question) {
+                $question = Question::where('game_type_id', $gameSession->game_type_id)
+                    ->where('is_active', true)
+                    ->where('round_type', '!=', 'final')
+                    ->whereNotIn('id', $usedIds)
+                    ->inRandomOrder()
+                    ->first();
+            }
+            if (!$question) {
+                break; // Nothing left to assign.
+            }
+
+            $usedIds[] = $question->id;
+            $order++;
             SessionQuestion::create([
                 'game_session_id' => $gameSession->id,
                 'question_id' => $question->id,
-                'display_order' => $index + 1,
+                'display_order' => $order,
+                'round_number' => $roundIndex + 1,
                 'status' => 'pending',
-                'points_available' => $this->calculateRoundMultiplier($index + 1, $config),
+                'segment' => 'main',
+                'points_available' => $this->calculateRoundMultiplier($roundIndex + 1, $config),
             ]);
-
-            // Track question usage statistics
             $question->incrementUsed();
         }
 
-        // Add fast money questions if enabled
+        // Fast Money: 5 fixed slots drawn from the Final pool. Both players answer
+        // the same set, so it's a flat list (no per-slot answer-count tiers).
         if ($fastMoneyEnabled) {
-            $fastMoneyQuestions = Question::where('game_type_id', $gameSession->game_type_id)
-                ->where('is_active', true)
-                ->where('is_fast_money', true)
-                ->inRandomOrder()
-                ->limit(5) // Typically 5 questions for fast money
-                ->get();
+            for ($k = 0; $k < 5; $k++) {
+                $qid = $sel['final'][$k]['id'] ?? null;
+                $question = $qid ? Question::find($qid) : null;
 
-            $startOrder = $roundsPerGame + 1;
-            foreach ($fastMoneyQuestions as $index => $question) {
+                if (!$question) {
+                    $question = Question::where('game_type_id', $gameSession->game_type_id)
+                        ->where('is_active', true)
+                        ->where('round_type', 'final')
+                        ->whereNotIn('id', $usedIds)
+                        ->inRandomOrder()
+                        ->first();
+                }
+                if (!$question) {
+                    continue; // No eligible Final question for this slot.
+                }
+
+                $usedIds[] = $question->id;
+                $order++;
                 SessionQuestion::create([
                     'game_session_id' => $gameSession->id,
                     'question_id' => $question->id,
-                    'display_order' => $startOrder + $index,
+                    'display_order' => $order,
                     'status' => 'pending',
-                    'control_status' => 'fast_money',
+                    'segment' => 'fast_money',
                 ]);
-
-                // Track question usage statistics
                 $question->incrementUsed();
             }
         }
 
-        // Set the first question as current
-        $firstQuestion = $gameSession->sessionQuestions()->first();
+        // Set the first question as current.
+        $firstQuestion = $gameSession->sessionQuestions()->orderBy('display_order')->first();
         if ($firstQuestion) {
             $gameSession->gameState->update([
                 'current_question_id' => $firstQuestion->id,
@@ -176,35 +207,132 @@ class GameInitializationService
     protected function initializeAmericaSays(GameSession $gameSession): void
     {
         $config = $gameSession->settings ?? $gameSession->gameType->default_config;
-        $questionsPerGame = $config['questions_per_game'] ?? 10;
 
-        // Get random questions
-        $questions = Question::where('game_type_id', $gameSession->game_type_id)
-            ->where('is_active', true)
-            ->inRandomOrder()
-            ->limit($questionsPerGame)
-            ->get();
+        // A round plays one question per team, so questions per round = team count.
+        $teamCount = max(1, $gameSession->teams()->count());
 
-        // Create session questions
-        foreach ($questions as $index => $question) {
-            SessionQuestion::create([
-                'game_session_id' => $gameSession->id,
-                'question_id' => $question->id,
-                'display_order' => $index + 1,
-                'status' => 'pending',
-            ]);
+        // Build the per-round scoring plan. When the host has configured
+        // round_scoring (from the setup screen), use it. Otherwise fall back to
+        // a flat plan derived from the older questions_per_game / points_per_answer
+        // settings, so existing games keep working before the setup UI lands.
+        $roundScoring = $this->resolveRoundScoring($config, $teamCount);
 
-            // Track question usage statistics
-            $question->incrementUsed();
+        // The host assigns a question to each slot in setup (round x team, plus
+        // the final round). Use those explicit picks; fall back to a random
+        // eligible question for any slot left unset.
+        $sel = is_array($config['question_selection'] ?? null) ? $config['question_selection'] : null;
+        $usedIds = [];
+        $order = 0;
+
+        foreach ($roundScoring as $roundIndex => $round) {
+            $roundNumber = $roundIndex + 1;
+
+            // One question per team in this round.
+            for ($slot = 0; $slot < $teamCount; $slot++) {
+                $qid = $sel['regular'][$roundIndex][$slot]['id'] ?? null;
+                $question = $qid ? Question::find($qid) : null;
+
+                if (!$question) {
+                    $question = Question::where('game_type_id', $gameSession->game_type_id)
+                        ->where('is_active', true)
+                        ->where('round_type', '!=', 'final')
+                        ->whereNotIn('id', $usedIds)
+                        ->inRandomOrder()
+                        ->first();
+                }
+                if (!$question) {
+                    break 2; // Nothing left to assign.
+                }
+
+                $usedIds[] = $question->id;
+                $order++;
+                SessionQuestion::create([
+                    'game_session_id' => $gameSession->id,
+                    'question_id' => $question->id,
+                    'display_order' => $order,
+                    'round_number' => $roundNumber,
+                    'status' => 'pending',
+                    'segment' => 'main',
+                    'points_available' => $round['points_per_answer'],
+                    'bonus_points' => $round['bonus_points'],
+                ]);
+                $question->incrementUsed();
+            }
         }
 
-        // Set the first question as current
-        $firstQuestion = $gameSession->sessionQuestions()->first();
+        // Final round: slot N needs a Final question with exactly N answers. Use
+        // the host's pick, else a random eligible Final question. A slot with no
+        // eligible question is skipped.
+        if ($config['final_round_enabled'] ?? true) {
+            $finalCount = (int) ($config['final_round_questions'] ?? 4);
+
+            for ($n = 1; $n <= $finalCount; $n++) {
+                $qid = $sel['final'][$n - 1]['id'] ?? null;
+                $finalQuestion = $qid ? Question::find($qid) : null;
+
+                if (!$finalQuestion) {
+                    $finalQuestion = Question::where('game_type_id', $gameSession->game_type_id)
+                        ->where('is_active', true)
+                        ->where('round_type', 'final')
+                        ->whereNotIn('id', $usedIds)
+                        ->has('answers', '=', $n)
+                        ->inRandomOrder()
+                        ->first();
+                }
+                if (!$finalQuestion) {
+                    continue; // No eligible Final question for this slot.
+                }
+
+                $usedIds[] = $finalQuestion->id;
+                $order++;
+                SessionQuestion::create([
+                    'game_session_id' => $gameSession->id,
+                    'question_id' => $finalQuestion->id,
+                    'display_order' => $order,
+                    'status' => 'pending',
+                    'segment' => 'final',
+                    'answers_needed' => $n,
+                ]);
+                $finalQuestion->incrementUsed();
+            }
+        }
+
+        // Set the first question as current and sync the round number.
+        $firstQuestion = $gameSession->sessionQuestions()->orderBy('display_order')->first();
         if ($firstQuestion) {
             $gameSession->gameState->update([
                 'current_question_id' => $firstQuestion->id,
+                'round_number' => $firstQuestion->round_number ?? 1,
             ]);
         }
+    }
+
+    /**
+     * Resolve the per-round scoring plan as a list of
+     * ['points_per_answer' => int, 'bonus_points' => int], one entry per round.
+     */
+    protected function resolveRoundScoring(array $config, int $teamCount): array
+    {
+        $configured = $config['round_scoring'] ?? null;
+
+        if (is_array($configured) && count($configured) > 0) {
+            return array_map(function ($round) {
+                return [
+                    'points_per_answer' => (int) ($round['points_per_answer'] ?? 100),
+                    'bonus_points' => (int) ($round['bonus_points'] ?? 0),
+                ];
+            }, array_values($configured));
+        }
+
+        // Fallback: flat scoring spread across rounds derived from legacy settings.
+        $flatPoints = (int) ($config['points_per_answer'] ?? 100);
+        $questionsPerGame = (int) ($config['questions_per_game'] ?? 10);
+        $rounds = max(1, (int) ceil($questionsPerGame / $teamCount));
+
+        return array_fill(0, $rounds, [
+            'points_per_answer' => $flatPoints,
+            'bonus_points' => 0,
+        ]);
     }
 
     protected function calculateRoundMultiplier(int $round, array $config): int

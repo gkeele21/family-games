@@ -1,0 +1,506 @@
+<title>Keeler Games — Question Management Mockup</title>
+<style>
+  :root{
+    --bg:#171717; --ground:#404040; --surface:#1f1f1f; --elevated:#262626; --overlay:#333; --inset:#0f0f0f;
+    --border:#404040; --border-strong:#525252;
+    --body:#f5f5f5; --muted:#a3a3a3; --subtle:#737373;
+    --primary:#57d025; --primary-hover:#4db820;
+    --danger:#ef4444; --info:#3b82f6; --gold:#eab308; --orange:#f47612;
+    --radius:12px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0}
+  .mock{font-family:var(--font);background:#0a0a0a;color:var(--body);min-height:100vh;
+    padding:24px 20px 80px;display:flex;flex-direction:column;gap:14px;align-items:center}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* ---- section captions ---- */
+  .toolbar{width:100%;max-width:1060px;margin-top:22px}
+  .toolbar:first-of-type{margin-top:0}
+  .cap{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--subtle);margin:0}
+  .cap b{color:var(--primary);font-weight:700}
+  .caphint{font-size:13px;color:var(--muted);margin:5px 0 0;max-width:70ch;line-height:1.5}
+
+  /* ---- app frame ---- */
+  .app{width:100%;max-width:1060px;background:var(--ground);border:1px solid #000;
+    border-radius:16px;overflow:hidden;box-shadow:0 24px 60px -30px #000}
+  .topnav{display:flex;align-items:center;gap:26px;padding:13px 22px;background:#141414;border-bottom:1px solid var(--border)}
+  .logo{font-weight:800;letter-spacing:.02em;font-size:19px}
+  .logo .g{color:var(--primary)}
+  .topnav nav{display:flex;gap:20px;font-size:14px}
+  .topnav nav a{color:var(--muted);text-decoration:none}
+  .topnav nav a.active{color:var(--body);font-weight:600}
+  .userchip{margin-left:auto;display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted)}
+  .avatar{width:30px;height:30px;border-radius:999px;background:linear-gradient(135deg,var(--info),var(--primary));
+    display:grid;place-items:center;color:#fff;font-weight:700;font-size:12px}
+
+  .screen{padding:24px clamp(16px,3.5vw,30px) 40px;position:relative}
+  .pagehead{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:18px}
+  .eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--subtle);margin:0 0 7px}
+  h1.title{font-size:25px;margin:0;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:14px;margin:6px 0 0;max-width:62ch;line-height:1.5}
+
+  /* ---- buttons ---- */
+  .btn{display:inline-flex;align-items:center;gap:7px;border-radius:9px;font:inherit;font-size:14px;font-weight:600;
+    padding:9px 15px;cursor:pointer;border:2px solid transparent;white-space:nowrap;transition:box-shadow .15s}
+  .btn:hover{box-shadow:0 0 0 2px #fff,0 0 16px rgba(255,255,255,.5)}
+  .btn.primary{background:var(--primary);color:#0b1f05}
+  .btn.muted{background:var(--inset);color:var(--body);border-color:var(--border)}
+  .btn.outline{background:transparent;color:var(--primary);border-color:var(--primary)}
+  .btn.ghost{background:transparent;color:var(--muted);border-color:transparent;box-shadow:none;padding:6px 8px}
+  .btn.ghost:hover{color:var(--body);box-shadow:none}
+  .btn.danger-ghost{background:transparent;color:var(--danger);border-color:transparent;box-shadow:none;padding:6px 8px}
+  .btn.danger-ghost:hover{box-shadow:none;text-decoration:underline}
+  .btn.sm{font-size:13px;padding:6px 11px}
+  .btn.xs{font-size:12px;padding:4px 9px;border-width:1px}
+
+  /* ---- game-type tabs ---- */
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:18px}
+  .tab{padding:9px 16px;font-size:14px;font-weight:600;color:var(--muted);border:0;border-bottom:2px solid transparent;
+    background:none;cursor:pointer;margin-bottom:-1px;font-family:inherit}
+  .tab .em{margin-right:7px}
+  .tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+  .tab .cnt{margin-left:7px;font-size:12px;color:var(--subtle);font-weight:600}
+
+  /* ---- library toolbar ---- */
+  .libbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  .search{position:relative;flex:1 1 240px;min-width:180px}
+  .search input{width:100%;background:var(--inset);border:1px solid var(--border);color:var(--body);border-radius:9px;
+    padding:9px 12px 9px 32px;font:inherit;font-size:14px}
+  .search .ic{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--subtle);font-size:13px}
+  select.mini{background:var(--inset);border:1px solid var(--border);color:var(--body);border-radius:9px;
+    padding:9px 12px;font:inherit;font-size:13.5px;cursor:pointer}
+  input:focus,select:focus,.search input:focus{outline:0;border-color:var(--primary);box-shadow:0 0 0 3px #57d02533}
+  .togglewrap{display:inline-flex;align-items:center;gap:9px;font-size:13.5px;color:var(--muted);
+    padding:0 4px;cursor:pointer;user-select:none}
+  .switch{width:38px;height:22px;border-radius:999px;background:var(--overlay);position:relative;flex:none;transition:background .15s}
+  .switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:999px;background:#fff;transition:left .15s}
+  .switch.on{background:var(--primary)}
+  .switch.on::after{left:19px}
+
+  .countline{font-size:13px;color:var(--subtle);margin:0 0 14px}
+  .countline b{color:var(--muted);font-weight:600}
+
+  /* ---- question list ---- */
+  .qlist{display:flex;flex-direction:column;gap:10px}
+  .qcard{background:var(--surface);border:1px solid var(--border);border-radius:11px;overflow:hidden}
+  .qcard.open{border-color:var(--border-strong)}
+  .qtop{display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer}
+  .chev{color:var(--subtle);font-size:12px;flex:none;width:14px;transition:transform .15s}
+  .qcard.open .chev{transform:rotate(90deg);color:var(--muted)}
+  .qhead{flex:1;min-width:0;display:flex;align-items:center;gap:10px}
+  .qtext{font-weight:600;font-size:15px;min-width:0}
+  .badge-inactive{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    padding:2px 8px;border-radius:999px;background:var(--overlay);color:var(--muted);border:1px solid var(--border-strong);white-space:nowrap;flex:none}
+  .editlink{color:var(--orange);font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap;flex:none;margin-left:2px}
+  .editlink:hover{text-decoration:underline}
+  .qmeta{display:flex;align-items:center;gap:14px;flex:none}
+  .chip{font-size:12px;padding:3px 10px;border-radius:999px;background:var(--inset);border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+  .chip.easy{color:var(--primary);border-color:#57d02555}
+  .chip.med{color:var(--orange);border-color:#f4761255}
+  .chip.hard{color:var(--danger);border-color:#ef444455}
+  .acount{font-size:12.5px;color:var(--subtle);white-space:nowrap}
+  .used{font-size:12px;color:var(--subtle);white-space:nowrap}
+  .used b{color:var(--muted);font-weight:600}
+  .iconbtn{width:30px;height:30px;border-radius:8px;border:1px solid var(--border);background:var(--elevated);
+    color:var(--muted);cursor:pointer;font-size:13px;display:grid;place-items:center}
+  .iconbtn:hover{color:var(--body);border-color:var(--border-strong)}
+
+  /* answers panel */
+  .apanel{border-top:1px solid var(--border);background:var(--inset);padding:6px 16px 14px}
+  .atable{width:100%;border-collapse:collapse;font-size:13.5px}
+  .atable th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--subtle);
+    font-weight:600;padding:10px 8px 8px}
+  .atable th.r,.atable td.r{text-align:right}
+  .atable td{padding:8px;border-top:1px solid var(--border)}
+  .atable tr:first-child td{border-top:0}
+  .arank{width:24px;color:var(--subtle);font-variant-numeric:tabular-nums}
+  .apts{color:var(--gold);font-weight:600;font-variant-numeric:tabular-nums}
+  .adot{color:var(--subtle);cursor:grab}
+  .afoot{display:flex;align-items:center;justify-content:space-between;margin-top:12px}
+
+  /* ---- modal (add/edit) ---- */
+  .modalframe{position:relative;background:
+      repeating-linear-gradient(45deg,#0d0d0d,#0d0d0d 12px,#101010 12px,#101010 24px);
+    border:1px solid var(--border);border-radius:16px;padding:34px 20px;display:grid;place-items:center}
+  .scrim-tag{position:absolute;top:12px;left:16px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--subtle)}
+  .modal{width:100%;max-width:560px;background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;
+    box-shadow:0 30px 70px -20px #000;overflow:hidden}
+  .mhead{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
+  .mhead h3{margin:0;font-size:16px}
+  .mhead .x{color:var(--subtle);font-size:18px;cursor:pointer;background:none;border:0}
+  .mbody{padding:18px 20px;display:flex;flex-direction:column;gap:15px}
+  label.fl{display:block;font-size:13px;font-weight:600;margin:0 0 6px;color:var(--body)}
+  .field input[type=text],.field select,.rowg input{width:100%;background:var(--inset);border:1px solid var(--border);
+    color:var(--body);border-radius:9px;padding:9px 12px;font:inherit;font-size:14px}
+  input::placeholder{color:var(--subtle)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr auto;gap:14px;align-items:end}
+  .ans-editor{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--inset)}
+  .ans-editor .eh{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--border)}
+  .ans-editor .eh span{font-size:12px;color:var(--subtle);letter-spacing:.06em;text-transform:uppercase}
+  .arow{display:flex;align-items:center;gap:9px;padding:7px 12px;border-top:1px solid #1a1a1a}
+  .arow:first-of-type{border-top:0}
+  .arow .hnd{color:var(--subtle);cursor:grab;font-size:13px}
+  .arow .an{flex:1;background:var(--surface);border:1px solid var(--border);color:var(--body);border-radius:7px;
+    padding:7px 10px;font:inherit;font-size:13.5px}
+  .arow .ap{width:78px;background:var(--surface);border:1px solid var(--border);color:var(--gold);border-radius:7px;
+    padding:7px 8px;font:inherit;font-size:13.5px;text-align:right;font-variant-numeric:tabular-nums}
+  .arow .rm{color:var(--subtle);background:none;border:0;cursor:pointer;font-size:15px}
+  .arow .rm:hover{color:var(--danger)}
+  .addans{padding:9px 12px;border-top:1px solid var(--border)}
+  .mfoot{display:flex;justify-content:flex-end;gap:10px;padding:15px 20px;border-top:1px solid var(--border);background:var(--surface)}
+  .hint-inline{font-size:12px;color:var(--subtle);margin-top:6px}
+
+  /* ---- setup card ---- */
+  .setupcard{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 2px 10px -4px #000;
+    max-width:660px;margin:0 auto;overflow:hidden}
+  .setupcard > .ch{display:flex;align-items:center;gap:9px;padding:15px 20px;border-bottom:1px solid var(--border)}
+  .setupcard > .ch h2{font-size:16px;margin:0}
+  .setupcard > .ch .ic{color:var(--primary)}
+  .setupcard > .ch .hint{margin-left:auto;font-size:12px;color:var(--subtle)}
+  .setupbody{padding:18px 20px}
+
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}
+  .segtile{border:1px solid var(--border);background:var(--inset);border-radius:10px;padding:13px 15px;cursor:pointer}
+  .segtile.on{border-color:var(--primary);background:#57d0250f;box-shadow:inset 0 0 0 1px var(--primary)}
+  .segtile .st{display:flex;align-items:center;gap:9px;font-weight:600;font-size:14.5px}
+  .segtile .sd{font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.45}
+  .radio{width:16px;height:16px;border-radius:999px;border:2px solid var(--border-strong);flex:none}
+  .segtile.on .radio{border-color:var(--primary);background:radial-gradient(circle at center,var(--primary) 0 5px,transparent 5px)}
+
+  .pulllabel{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--subtle);margin:0 0 9px}
+  .pills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .pill{padding:8px 15px;border-radius:999px;border:1px solid var(--border);background:var(--inset);color:var(--muted);
+    font-size:13.5px;font-weight:600;cursor:pointer}
+  .pill.on{border-color:var(--primary);color:var(--primary);background:#57d0250f}
+
+  .catgrid{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+  .cat{padding:7px 13px;border-radius:8px;border:1px solid var(--border);background:var(--inset);color:var(--muted);
+    font-size:13.5px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+  .cat.on{border-color:var(--primary);background:#57d0250f;color:var(--body)}
+  .cat .ck{color:var(--primary);font-size:12px}
+  .cat .n{color:var(--subtle);font-size:12px;font-variant-numeric:tabular-nums}
+  .cat.on .n{color:var(--muted)}
+
+  .matchbar{display:flex;align-items:center;gap:10px;margin-top:16px;padding:11px 14px;border-radius:9px;
+    background:var(--inset);border:1px solid var(--border);font-size:13.5px}
+  .matchbar.ok{border-color:#57d02540}
+  .matchbar.warn{border-color:#f4761250;background:#f476120d}
+  .matchbar .dot{width:8px;height:8px;border-radius:999px;flex:none}
+  .matchbar.ok .dot{background:var(--primary)}
+  .matchbar.warn .dot{background:var(--orange)}
+  .matchbar b{font-variant-numeric:tabular-nums}
+  .matchbar .need{margin-left:auto;color:var(--subtle);font-size:12.5px}
+
+  /* hand-picked checklist */
+  .picksearch{margin-bottom:12px}
+  .picklist{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--inset)}
+  .pk{display:flex;align-items:center;gap:12px;padding:11px 13px;border-top:1px solid #191919;cursor:pointer}
+  .pk:first-child{border-top:0}
+  .pk.sel{background:#57d0250a}
+  .cbox{width:19px;height:19px;border-radius:6px;border:2px solid var(--border-strong);flex:none}
+  .pk.sel .cbox{border-color:var(--primary);background:var(--primary);position:relative}
+  .pk.sel .cbox::after{content:"✓";position:absolute;inset:0;display:grid;place-items:center;color:#0b1f05;font-size:12px;font-weight:800}
+  .pk .pt{flex:1;font-size:14px}
+  .pk .pc{font-size:12px;color:var(--subtle)}
+  .pickfoot{display:flex;align-items:center;gap:12px;margin-top:14px}
+  .prog{flex:1;height:7px;border-radius:999px;background:var(--inset);overflow:hidden;border:1px solid var(--border)}
+  .prog i{display:block;height:100%;background:var(--primary)}
+  .pcount{font-size:13px;font-weight:600;color:var(--primary);font-variant-numeric:tabular-nums}
+
+  /* ---- annotation notes ---- */
+  .notes{width:100%;max-width:1060px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:4px}
+  .note{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--info);border-radius:9px;padding:12px 14px}
+  .note h4{margin:0 0 5px;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--info)}
+  .note p{margin:0;font-size:13px;color:var(--muted);line-height:1.5}
+  .note.g{border-left-color:var(--primary)}
+  .note.g h4{color:var(--primary)}
+  .note.o{border-left-color:var(--orange)}
+  .note.o h4{color:var(--orange)}
+
+  .legend{width:100%;max-width:1060px;text-align:center;color:var(--subtle);font-size:12.5px;margin-top:26px;line-height:1.6}
+  .legend b{color:var(--muted)}
+</style>
+
+<div class="mock">
+
+  <!-- ============ SECTION 1: QUESTION LIBRARY (CRUD) ============ -->
+  <div class="toolbar">
+    <p class="cap"><b>Mockup 1</b> · Question Library — admin CRUD</p>
+    <p class="caphint">A new admin area to browse, add, edit, and retire questions per game type. Filters up top; each row expands to reveal its answers. The dashed screen below shows the Add / Edit dialog.</p>
+  </div>
+
+  <div class="app">
+    <div class="topnav">
+      <div class="logo">Keeler<span class="g">Games</span></div>
+      <nav><a href="#">Dashboard</a><a href="#">Host a Game</a><a href="#" class="active">Question Library</a><a href="#">Scorekeeper</a></nav>
+      <div class="userchip">Bert K. <span class="avatar">BK</span></div>
+    </div>
+
+    <div class="screen">
+      <div class="pagehead">
+        <div>
+          <p class="eyebrow">Admin</p>
+          <h1 class="title">Question Library</h1>
+          <p class="sub">Manage the question bank each game draws from. Retire a question with the toggle and it stops appearing in new games — no delete needed.</p>
+        </div>
+        <button class="btn primary">＋ Add question</button>
+      </div>
+
+      <!-- game type tabs -->
+      <div class="tabs">
+        <button class="tab active"><span class="em">📺</span>America Says<span class="cnt">100</span></button>
+        <button class="tab"><span class="em">🔤</span>Oodles<span class="cnt">646</span></button>
+        <button class="tab"><span class="em">💬</span>Family Feud<span class="cnt">0</span></button>
+      </div>
+
+      <!-- filter toolbar -->
+      <div class="libbar">
+        <div class="search"><span class="ic">🔍</span><input type="text" placeholder="Search questions…"></div>
+        <select class="mini"><option>All categories</option><option>Food &amp; Drink</option><option>Entertainment</option><option>Sports</option><option>Holidays</option></select>
+        <select class="mini"><option>Any difficulty</option><option>Easy</option><option>Medium</option><option>Hard</option></select>
+        <span class="togglewrap"><span class="switch"></span> Active only</span>
+      </div>
+
+      <p class="countline"><b>100</b> questions · showing 4</p>
+
+      <!-- question list -->
+      <div class="qlist">
+
+        <!-- expanded -->
+        <div class="qcard open">
+          <div class="qtop">
+            <span class="chev">▶</span>
+            <span class="qhead"><span class="qtext">Name a popular type of coffee drink</span><span class="acount">7 answers</span></span>
+            <span class="qmeta">
+              <span class="chip">Food &amp; Drink</span>
+              <span class="chip easy">Easy</span>
+              <span class="used">used <b>12×</b></span>
+              <span class="editlink">Edit</span>
+            </span>
+          </div>
+          <div class="apanel">
+            <table class="atable">
+              <thead><tr><th class="arank">#</th><th>Answer</th></tr></thead>
+              <tbody>
+                <tr><td class="arank num">1</td><td>Latte</td></tr>
+                <tr><td class="arank num">2</td><td>Cappuccino</td></tr>
+                <tr><td class="arank num">3</td><td>Espresso</td></tr>
+                <tr><td class="arank num">4</td><td>Americano</td></tr>
+                <tr><td class="arank num">5</td><td>Mocha</td></tr>
+                <tr><td class="arank num">6</td><td>Iced Coffee</td></tr>
+                <tr><td class="arank num">7</td><td>Black Coffee</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- collapsed rows -->
+        <div class="qcard">
+          <div class="qtop">
+            <span class="chev">▶</span>
+            <span class="qhead"><span class="qtext">Name a superhero everybody knows</span><span class="acount">7 answers</span></span>
+            <span class="qmeta">
+              <span class="chip">Entertainment</span>
+              <span class="chip med">Medium</span>
+              <span class="used">used <b>8×</b></span>
+              <span class="editlink">Edit</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="qcard">
+          <div class="qtop">
+            <span class="chev">▶</span>
+            <span class="qhead"><span class="qtext">Name a kind of cheese</span><span class="acount">7 answers</span></span>
+            <span class="qmeta">
+              <span class="chip">Food &amp; Drink</span>
+              <span class="chip easy">Easy</span>
+              <span class="used">used <b>5×</b></span>
+              <span class="editlink">Edit</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="qcard">
+          <div class="qtop">
+            <span class="chev">▶</span>
+            <span class="qhead"><span class="qtext" style="color:var(--muted)">Name a ski resort in Utah</span><span class="acount">7 answers</span><span class="badge-inactive">Inactive</span></span>
+            <span class="qmeta">
+              <span class="chip">Sports</span>
+              <span class="chip hard">Hard</span>
+              <span class="used">used <b>0×</b></span>
+              <span class="editlink">Edit</span>
+            </span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Add / Edit modal on its own frame -->
+  <div class="toolbar">
+    <p class="cap"><b>Mockup 1b</b> · Add / Edit question dialog</p>
+    <p class="caphint">Opens from “Add question” or the pencil icon. One question, its category &amp; difficulty, and an inline answers editor — drag to reorder, points on the right. America Says pre-fills 7 answer rows to match the setup default.</p>
+  </div>
+
+  <div class="app">
+    <div class="modalframe">
+      <span class="scrim-tag">Question Library (dimmed behind)</span>
+      <div class="modal">
+        <div class="mhead"><h3>Add question — America Says</h3><button class="x">✕</button></div>
+        <div class="mbody">
+          <div class="field">
+            <label class="fl">Question</label>
+            <input type="text" value="Name a fruit you'd put in a smoothie">
+          </div>
+          <div class="grid2">
+            <div class="field"><label class="fl">Category</label>
+              <select><option>Food &amp; Drink</option><option>Entertainment</option><option>Sports</option><option>Holidays</option><option>General</option></select></div>
+            <div class="field"><label class="fl">Difficulty</label>
+              <select><option>Easy</option><option selected>Medium</option><option>Hard</option></select></div>
+            <span class="togglewrap" style="padding-bottom:9px"><span class="switch on"></span> Active</span>
+          </div>
+          <div class="field">
+            <label class="fl">Answers</label>
+            <div class="ans-editor">
+              <div class="eh"><span>Answers</span><button class="btn primary xs">＋ Add</button></div>
+              <div class="arow"><span class="hnd">⠿</span><input class="an" value="Banana"><button class="rm">✕</button></div>
+              <div class="arow"><span class="hnd">⠿</span><input class="an" value="Strawberry"><button class="rm">✕</button></div>
+              <div class="arow"><span class="hnd">⠿</span><input class="an" value="Blueberry"><button class="rm">✕</button></div>
+              <div class="arow"><span class="hnd">⠿</span><input class="an" value="Mango"><button class="rm">✕</button></div>
+              <div class="arow"><span class="hnd">⠿</span><input class="an" value="Pineapple"><button class="rm">✕</button></div>
+              <div class="arow"><span class="hnd">⠿</span><input class="an" value="Spinach"><button class="rm">✕</button></div>
+              <div class="arow"><span class="hnd">⠿</span><input class="an" value="Orange"><button class="rm">✕</button></div>
+            </div>
+            <p class="hint-inline">America Says reveals 7 answers per question — no per-answer points; round points come from the Rounds &amp; scoring card in setup. (Family Feud is where answers carry individual point values.)</p>
+          </div>
+        </div>
+        <div class="mfoot">
+          <button class="btn outline">Cancel</button>
+          <button class="btn primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SECTION 2: SETUP — QUESTION SELECTION ============ -->
+  <div class="toolbar">
+    <p class="cap"><b>Mockup 2</b> · Game Setup — choosing questions</p>
+    <p class="caphint">A new “Questions” card in the game setup flow (sits with Teams &amp; Rounds). Pick Random or Hand-Picked. Random branches to Any / By Category / By Difficulty. Both states shown below.</p>
+  </div>
+
+  <!-- State A: Random -> By Category -->
+  <div class="app">
+    <div class="screen" style="padding-top:26px">
+      <div class="setupcard">
+        <div class="ch"><span class="ic">🎲</span><h2>Questions</h2><span class="hint">6 needed · 3 rounds × 2 teams</span></div>
+        <div class="setupbody">
+
+          <div class="seg">
+            <div class="segtile on">
+              <div class="st"><span class="radio"></span> 🎲 Random</div>
+              <div class="sd">Pull questions automatically when the game starts.</div>
+            </div>
+            <div class="segtile">
+              <div class="st"><span class="radio"></span> ✋ Hand-Picked</div>
+              <div class="sd">Choose exactly which questions play, in order.</div>
+            </div>
+          </div>
+
+          <p class="pulllabel">Pull from</p>
+          <div class="pills">
+            <span class="pill">Any</span>
+            <span class="pill on">By Category</span>
+            <span class="pill">By Difficulty</span>
+          </div>
+
+          <div class="catgrid">
+            <span class="cat on"><span class="ck">✓</span> Food &amp; Drink <span class="n">31</span></span>
+            <span class="cat on"><span class="ck">✓</span> Holidays <span class="n">11</span></span>
+            <span class="cat">Entertainment <span class="n">24</span></span>
+            <span class="cat">Sports <span class="n">18</span></span>
+            <span class="cat">Around the House <span class="n">9</span></span>
+            <span class="cat">General <span class="n">7</span></span>
+          </div>
+
+          <div class="matchbar ok">
+            <span class="dot"></span>
+            <span><b>42</b> questions match — plenty for a 6-question game.</span>
+            <span class="need">picks 6 at random each game</span>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- State B: Hand-Picked -->
+  <div class="app">
+    <div class="screen" style="padding-top:26px">
+      <div class="setupcard">
+        <div class="ch"><span class="ic">✋</span><h2>Questions</h2><span class="hint">6 needed · 3 rounds × 2 teams</span></div>
+        <div class="setupbody">
+
+          <div class="seg">
+            <div class="segtile">
+              <div class="st"><span class="radio"></span> 🎲 Random</div>
+              <div class="sd">Pull questions automatically when the game starts.</div>
+            </div>
+            <div class="segtile on">
+              <div class="st"><span class="radio"></span> ✋ Hand-Picked</div>
+              <div class="sd">Choose exactly which questions play, in order.</div>
+            </div>
+          </div>
+
+          <div class="picksearch search"><span class="ic">🔍</span><input type="text" placeholder="Search the bank…" style="padding-left:32px"></div>
+
+          <div class="picklist">
+            <div class="pk sel"><span class="cbox"></span><span class="pt">Name a popular type of coffee drink</span><span class="pc">Food &amp; Drink · 7</span></div>
+            <div class="pk sel"><span class="cbox"></span><span class="pt">Name a kind of cheese</span><span class="pc">Food &amp; Drink · 7</span></div>
+            <div class="pk sel"><span class="cbox"></span><span class="pt">Name a superhero everybody knows</span><span class="pc">Entertainment · 7</span></div>
+            <div class="pk sel"><span class="cbox"></span><span class="pt">Name a holiday movie</span><span class="pc">Holidays · 7</span></div>
+            <div class="pk sel"><span class="cbox"></span><span class="pt">Name something you bring to a picnic</span><span class="pc">Around the House · 7</span></div>
+            <div class="pk sel"><span class="cbox"></span><span class="pt">Name an Olympic sport</span><span class="pc">Sports · 7</span></div>
+            <div class="pk"><span class="cbox"></span><span class="pt">Name a breakfast cereal</span><span class="pc">Food &amp; Drink · 7</span></div>
+            <div class="pk"><span class="cbox"></span><span class="pt">Name a US national park</span><span class="pc">General · 7</span></div>
+          </div>
+
+          <div class="pickfoot">
+            <div class="prog"><i style="width:100%"></i></div>
+            <span class="pcount">6 / 6 selected</span>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- annotation notes -->
+  <div class="notes">
+    <div class="note g">
+      <h4>Retire, don't delete</h4>
+      <p>Active is toggled <b>inside the editor</b> only. Retired questions show an <b>Inactive</b> badge, keep their play history, and drop out of every new game. Active is the assumed default — no badge.</p>
+    </div>
+    <div class="note">
+      <h4>Needed count is live</h4>
+      <p>“6 needed” = rounds × teams. Change rounds or team count and the target updates in the same setup flow.</p>
+    </div>
+    <div class="note o">
+      <h4>Not enough to fill?</h4>
+      <p>If a filter (or hand-picked list) yields fewer than needed, the match bar turns amber and <b>Start Game</b> is blocked with a hint.</p>
+    </div>
+    <div class="note">
+      <h4>Reuses existing data</h4>
+      <p>Category &amp; difficulty already live on every question row — no schema changes for selection. Only the library UI is net-new.</p>
+    </div>
+  </div>
+
+  <p class="legend">
+    Colors, chips, toggles, tabs and buttons all use the Keeler semantic tokens (<b>surface / inset / primary green / warning orange / danger</b>). ·
+    Everything here is a static visual mock — no interactions wired.
+  </p>
+
+</div>

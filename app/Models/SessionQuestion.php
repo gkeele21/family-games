@@ -16,17 +16,23 @@ class SessionQuestion extends Model
         'session_card_id',
         'question_id',
         'display_order',
+        'round_number',
         'status',
+        'segment',
+        'answers_needed',
         'controlling_team_id',
         'controlling_team_ids',
         'control_status',
         'points_available',
+        'bonus_points',
         'played_at',
     ];
 
     protected $casts = [
         'display_order' => 'integer',
+        'round_number' => 'integer',
         'points_available' => 'integer',
+        'bonus_points' => 'integer',
         'played_at' => 'datetime',
         'controlling_team_ids' => 'array',
     ];

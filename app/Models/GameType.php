@@ -16,6 +16,7 @@ class GameType extends Model
     protected $fillable = [
         'name',
         'slug',
+        'display_order',
         'description',
         'default_config',
         'kind',
@@ -36,7 +37,7 @@ class GameType extends Model
 
     public function scopeOnline(Builder $query): Builder
     {
-        return $query->where('kind', 'online');
+        return $query->where('kind', 'online')->orderBy('display_order')->orderBy('id');
     }
 
     public function scopeScorekeeper(Builder $query): Builder

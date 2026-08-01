@@ -40,7 +40,45 @@ class HostController extends Controller
             'config' => $config,
             'friends' => $friends,
             'waitingPlayers' => $waitingPlayers,
+            'gameTypes' => \App\Models\GameType::online()->get(['id', 'name', 'slug']),
+            'questionData' => $this->questionSelectionData($gameSession),
         ]);
+    }
+
+    /**
+     * Data backing the "Questions" setup card: the active question bank plus
+     * per-category / per-difficulty counts so the host can filter (Random) or
+     * hand-pick. Only built for games that pull from the shared bank.
+     */
+    protected function questionSelectionData(GameSession $gameSession): ?array
+    {
+        // The per-slot picker backs America Says and Family Feud. Oodles stays
+        // random (no picker), so it gets no bank.
+        if (!in_array($gameSession->gameType->slug, ['america-says', 'family-feud'], true)) {
+            return null;
+        }
+
+        // One bank of every active question (Standard + Final). The picker
+        // filters it client-side by source / round type; final slots pull the
+        // Final questions matching their answer count.
+        $bank = \App\Models\Question::where('game_type_id', $gameSession->game_type_id)
+            ->where('is_active', true)
+            ->withCount('answers')
+            ->with('category:id,name')
+            ->orderBy('question_text')
+            ->get()
+            ->map(fn ($q) => [
+                'id' => $q->id,
+                'question_text' => $q->question_text,
+                'round_type' => $q->round_type,
+                'is_official' => $q->is_official,
+                'answers_count' => $q->answers_count,
+                'category' => $q->category?->name,
+                'category_id' => $q->category_id,
+                'difficulty' => $q->difficulty,
+            ]);
+
+        return ['bank' => $bank];
     }
 
     public function game(GameSession $gameSession): Response
@@ -92,14 +130,31 @@ class HostController extends Controller
         $currentQuestion = $state?->currentQuestion;
         $currentCard = $state?->currentCard;
 
-        // Get question progress for America Says
+        // Question progress for America Says / Family Feud — counted within the
+        // current round (regular play) or the whole final / fast-money segment,
+        // so it reads "Question 1 of 2" per round rather than lumping the whole
+        // game together next to the "Round 1" label. Also flag whether this is
+        // the last question of the session (used to reveal "End Game").
         $currentQuestionNumber = null;
         $totalQuestions = null;
-        if ($gameSession->gameType->slug === 'america-says') {
+        $hasPreviousQuestion = false;
+        $isLastQuestion = false;
+        if (in_array($gameSession->gameType->slug, ['america-says', 'family-feud'], true)) {
             $allQuestions = $gameSession->sessionQuestions()->orderBy('display_order')->get();
-            $totalQuestions = $allQuestions->count();
             if ($currentQuestion) {
-                $currentQuestionNumber = $allQuestions->search(fn ($q) => $q->id === $currentQuestion->id) + 1;
+                $segment = $currentQuestion->segment ?? 'main';
+                $group = $segment === 'main'
+                    ? $allQuestions->filter(fn ($q) => ($q->segment ?? 'main') === 'main' && $q->round_number === $currentQuestion->round_number)->values()
+                    : $allQuestions->filter(fn ($q) => ($q->segment ?? 'main') === $segment)->values();
+                $totalQuestions = $group->count();
+                $pos = $group->search(fn ($q) => $q->id === $currentQuestion->id);
+                $currentQuestionNumber = $pos === false ? null : $pos + 1;
+                $hasPreviousQuestion = $allQuestions
+                    ->contains(fn ($q) => $q->display_order < $currentQuestion->display_order);
+                $isLastQuestion = !$allQuestions
+                    ->contains(fn ($q) => $q->display_order > $currentQuestion->display_order);
+            } else {
+                $totalQuestions = $allQuestions->count();
             }
         }
 
@@ -130,16 +185,19 @@ class HostController extends Controller
                 'timer_duration' => $state?->timer_duration,
                 'remaining_seconds' => $state?->getRemainingSeconds(),
                 'state_data' => $state?->state_data,
-                'is_steal_round' => $state?->getStateValue('is_steal_round', false),
-                'steal_points_percentage' => $gameSession->getConfig('steal_points_percentage', 50),
             ],
             'currentQuestion' => $currentQuestion ? [
                 'id' => $currentQuestion->id,
                 'question_text' => $currentQuestion->question->question_text,
                 'status' => $currentQuestion->status,
+                'round_number' => $currentQuestion->round_number,
+                'segment' => $currentQuestion->segment,
+                'points_available' => (int) $currentQuestion->points_available,
                 'control_status' => $currentQuestion->control_status,
                 'controlling_team_id' => $currentQuestion->controlling_team_id,
                 'controlling_team_ids' => $currentQuestion->getControllingTeamIdsArray(),
+                'bonus_points' => (int) $currentQuestion->bonus_points,
+                'bonus_awarded_team_id' => data_get($state?->getStateValue("bonus_q{$currentQuestion->id}"), 'team_id'),
                 'answers' => $currentQuestion->question->answers->map(fn ($answer) => [
                     'id' => $answer->id,
                     'answer_text' => $answer->answer_text,
@@ -159,6 +217,8 @@ class HostController extends Controller
             'totalCards' => $gameSession->sessionCards->count(),
             'currentQuestionNumber' => $currentQuestionNumber,
             'totalQuestions' => $totalQuestions,
+            'hasPreviousQuestion' => $hasPreviousQuestion,
+            'isLastQuestion' => $isLastQuestion,
         ]);
     }
 
@@ -198,6 +258,124 @@ class HostController extends Controller
         return response()->json(['success' => true]);
     }
 
+    /**
+     * Reset the current question's board: un-reveal every answer, reverse the
+     * points each reveal awarded, and reverse a manually-awarded sweep bonus,
+     * leaving scores as if the question had never been played.
+     */
+    public function resetBoard(GameSession $gameSession)
+    {
+        $state = $gameSession->gameState;
+        $currentQuestion = $state?->currentQuestion;
+
+        if (!$currentQuestion) {
+            return response()->json(['success' => true]);
+        }
+
+        // Reverse the points from every reveal, then remove the reveals.
+        $reveals = $currentQuestion->answerReveals()->get();
+        foreach ($reveals->whereNotNull('team_id')->groupBy('team_id') as $teamId => $teamReveals) {
+            $team = Team::find($teamId);
+            if (!$team) {
+                continue;
+            }
+            $team->update([
+                'total_score' => max(0, $team->total_score - (int) $teamReveals->sum('points_awarded')),
+            ]);
+        }
+        $currentQuestion->answerReveals()->delete();
+
+        // Reverse a manually-awarded sweep bonus for this question, if any.
+        $bonusKey = "bonus_q{$currentQuestion->id}";
+        $bonus = $state->getStateValue($bonusKey, null);
+        if (is_array($bonus) && !empty($bonus['team_id'])) {
+            $bonusTeam = Team::find($bonus['team_id']);
+            if ($bonusTeam) {
+                $bonusTeam->update([
+                    'total_score' => max(0, $bonusTeam->total_score - (int) ($bonus['amount'] ?? 0)),
+                ]);
+            }
+            $state->setStateValue($bonusKey, null);
+        }
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Reset the entire current round: un-reveal every answer and reverse the
+     * points (and any sweep bonus) for every question in the round, set them all
+     * back to pending, and reactivate the round's first question — restoring the
+     * scoreboard to exactly where it stood at the end of the previous round.
+     *
+     * A "round" is every session question sharing the current question's
+     * round_number for regular play, or the whole final / fast-money segment.
+     */
+    public function resetRound(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $currentQuestion = $state?->currentQuestion;
+
+        if (!$currentQuestion) {
+            return response()->json(['success' => true]);
+        }
+
+        $segment = $currentQuestion->segment ?? 'main';
+        $query = $gameSession->sessionQuestions();
+        if (in_array($segment, ['final', 'fast_money'], true)) {
+            $query->where('segment', $segment);
+        } else {
+            $query->where('round_number', $currentQuestion->round_number);
+        }
+        $roundQuestions = $query->orderBy('display_order')->get();
+
+        foreach ($roundQuestions as $sq) {
+            // Reverse the points from every reveal on this question, then remove them.
+            $reveals = $sq->answerReveals()->get();
+            foreach ($reveals->whereNotNull('team_id')->groupBy('team_id') as $teamId => $teamReveals) {
+                $team = Team::find($teamId);
+                if (!$team) {
+                    continue;
+                }
+                $team->update([
+                    'total_score' => max(0, $team->total_score - (int) $teamReveals->sum('points_awarded')),
+                ]);
+            }
+            $sq->answerReveals()->delete();
+
+            // Reverse a manually-awarded sweep bonus for this question, if any.
+            $bonusKey = "bonus_q{$sq->id}";
+            $bonus = $state->getStateValue($bonusKey, null);
+            if (is_array($bonus) && !empty($bonus['team_id'])) {
+                $bonusTeam = Team::find($bonus['team_id']);
+                if ($bonusTeam) {
+                    $bonusTeam->update([
+                        'total_score' => max(0, $bonusTeam->total_score - (int) ($bonus['amount'] ?? 0)),
+                    ]);
+                }
+                $state->setStateValue($bonusKey, null);
+            }
+
+            $sq->update(['status' => 'pending']);
+        }
+
+        // Reactivate the round's first question so the round replays from the top.
+        $first = $roundQuestions->first();
+        if ($first) {
+            $first->update(['status' => 'active']);
+            $state->update([
+                'current_question_id' => $first->id,
+                'round_number' => $first->round_number ?? $state->round_number,
+                'active_team_id' => $first->controlling_team_id ?? $state->active_team_id,
+            ]);
+        }
+
+        return response()->json(['success' => true]);
+    }
+
     public function revealAnswer(Request $request, GameSession $gameSession)
     {
         $validated = $request->validate([
@@ -217,20 +395,14 @@ class HostController extends Controller
             return response()->json(['error' => 'Answer already revealed'], 400);
         }
 
-        // Get the answer to find points
+        // Per-answer value comes from the round (points_available). Fall back to
+        // the stored answer points for older sessions initialized before rounds.
         $answer = $currentQuestion->question->answers()->find($validated['answer_id']);
-        $basePoints = $answer->points ?? 0;
+        $points = $currentQuestion->points_available > 0
+            ? $currentQuestion->points_available
+            : ($answer->points ?? 0);
 
-        // Check if we're in steal round - reduce points if so
-        $isStealRound = $state->getStateValue('is_steal_round', false);
-        if ($isStealRound) {
-            $stealPercentage = $gameSession->getConfig('steal_points_percentage', 50);
-            $points = (int) floor($basePoints * $stealPercentage / 100);
-        } else {
-            $points = $basePoints;
-        }
-
-        // Determine which team gets points (use controlling team if not specified)
+        // The team in control earns the points for a revealed answer.
         $teamId = $validated['team_id'] ?? $currentQuestion->controlling_team_id ?? $state->active_team_id;
 
         // Create the reveal
@@ -245,24 +417,26 @@ class HostController extends Controller
         $answer->recordReveal();
 
         // Award points to team
-        if ($teamId) {
-            $team = Team::find($teamId);
-            $team?->addScore($points);
+        $team = $teamId ? Team::find($teamId) : null;
+        if ($team) {
+            $team->addScore($points);
         }
 
         return response()->json([
             'success' => true,
             'points' => $points,
-            'base_points' => $basePoints,
-            'is_steal_round' => $isStealRound,
         ]);
     }
 
-    public function startStealRound(GameSession $gameSession)
+    /**
+     * Undo a revealed answer: remove the reveal and reverse the points it
+     * awarded to its team.
+     */
+    public function unrevealAnswer(Request $request, GameSession $gameSession)
     {
-        if ($gameSession->host_user_id !== auth()->id()) {
-            abort(403);
-        }
+        $validated = $request->validate([
+            'answer_id' => 'required|exists:answers,id',
+        ]);
 
         $state = $gameSession->gameState;
         $currentQuestion = $state->currentQuestion;
@@ -271,58 +445,89 @@ class HostController extends Controller
             return response()->json(['error' => 'No active question'], 400);
         }
 
-        // Get all teams and find the next team
-        $teams = $gameSession->teams()->orderBy('display_order')->get();
-        $currentTeamId = $currentQuestion->controlling_team_id ?? $state->active_team_id;
+        $reveal = $currentQuestion->answerReveals()->where('answer_id', $validated['answer_id'])->first();
+        if (!$reveal) {
+            return response()->json(['error' => 'Answer is not revealed'], 400);
+        }
 
-        // Find the next team in rotation
-        $currentIndex = $teams->search(fn($t) => $t->id === $currentTeamId);
-        $nextIndex = ($currentIndex + 1) % $teams->count();
-        $nextTeam = $teams[$nextIndex];
+        $team = $reveal->team_id ? Team::find($reveal->team_id) : null;
+        if ($team) {
+            $team->update(['total_score' => max(0, $team->total_score - (int) $reveal->points_awarded)]);
+        }
 
-        // Update controlling team for the steal round
-        // Keep control_status as 'team_control' since a team does have control
-        // The is_steal_round flag in state_data indicates it's a steal round
+        $reveal->delete();
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Set which team currently has control of the question. Driven by clicking
+     * a team on the host scoreboard; this is what used to be "start steal" — it
+     * simply hands the turn to another team, with no timer or point changes.
+     */
+    public function setControllingTeam(Request $request, GameSession $gameSession)
+    {
+        $validated = $request->validate([
+            'team_id' => 'required|exists:teams,id',
+        ]);
+
+        $state = $gameSession->gameState;
+        $currentQuestion = $state?->currentQuestion;
+
+        if (!$currentQuestion) {
+            return response()->json(['error' => 'No active question'], 400);
+        }
+
+        if (!$gameSession->teams()->whereKey($validated['team_id'])->exists()) {
+            return response()->json(['error' => 'Invalid team'], 400);
+        }
+
         $currentQuestion->update([
-            'controlling_team_id' => $nextTeam->id,
+            'controlling_team_id' => $validated['team_id'],
             'controlling_team_ids' => null,
             'control_status' => 'team_control',
         ]);
-
-        // Update game state
-        $state->update(['active_team_id' => $nextTeam->id]);
-
-        // Set steal round flag and reset timer
-        $stealTimerSeconds = $gameSession->getConfig('steal_timer_seconds', 10);
-        $state->setStateValue('is_steal_round', true);
-        $state->update([
-            'timer_duration' => $stealTimerSeconds,
-            'timer_started_at' => now(),
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'steal_team_id' => $nextTeam->id,
-            'steal_team_name' => $nextTeam->name,
-            'steal_timer_seconds' => $stealTimerSeconds,
-        ]);
-    }
-
-    public function endStealRound(GameSession $gameSession)
-    {
-        if ($gameSession->host_user_id !== auth()->id()) {
-            abort(403);
-        }
-
-        $state = $gameSession->gameState;
-
-        // Clear steal round flag
-        $state->setStateValue('is_steal_round', false);
-
-        // Stop the timer
-        $state->update(['timer_started_at' => null]);
+        $state->update(['active_team_id' => $validated['team_id']]);
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * Award the current question's sweep bonus to a team (manual, admin-driven).
+     * Recorded per-question in state_data so a Reset Round can reverse it.
+     */
+    public function awardBonus(Request $request, GameSession $gameSession)
+    {
+        $validated = $request->validate([
+            'team_id' => 'required|exists:teams,id',
+        ]);
+
+        $state = $gameSession->gameState;
+        $currentQuestion = $state?->currentQuestion;
+
+        if (!$currentQuestion) {
+            return response()->json(['error' => 'No active question'], 400);
+        }
+
+        $bonus = (int) $currentQuestion->bonus_points;
+        if ($bonus <= 0) {
+            return response()->json(['error' => 'This question has no bonus'], 400);
+        }
+
+        $key = "bonus_q{$currentQuestion->id}";
+        if ($state->getStateValue($key, null) !== null) {
+            return response()->json(['error' => 'Bonus already awarded for this question'], 400);
+        }
+
+        $team = Team::find($validated['team_id']);
+        if (!$team) {
+            return response()->json(['error' => 'Invalid team'], 400);
+        }
+
+        $team->addScore($bonus);
+        $state->setStateValue($key, ['team_id' => $team->id, 'amount' => $bonus]);
+
+        return response()->json(['success' => true, 'bonus' => $bonus]);
     }
 
     public function endGame(GameSession $gameSession)
@@ -540,9 +745,6 @@ class HostController extends Controller
             $team->addScore($pointsPerTeam);
         }
 
-        // Track question statistics - question was answered correctly
-        $currentQuestion->question->recordCorrect();
-
         // Mark question as completed
         $currentQuestion->update(['status' => 'completed']);
 
@@ -606,9 +808,6 @@ class HostController extends Controller
         if (!$currentQuestion) {
             return response()->json(['error' => 'No active question'], 400);
         }
-
-        // Track question statistics - question was answered incorrectly (went to All Play)
-        $currentQuestion->question->recordWrong();
 
         // Switch to All Play mode - clear controlling team
         $currentQuestion->update([
@@ -717,7 +916,10 @@ class HostController extends Controller
             ->first();
 
         if ($nextQuestion) {
-            $state->update(['current_question_id' => $nextQuestion->id]);
+            $state->update([
+                'current_question_id' => $nextQuestion->id,
+                'round_number' => $nextQuestion->round_number ?? $state->round_number,
+            ]);
             $nextQuestion->update(['status' => 'active']);
             return response()->json(['success' => true, 'game_complete' => false]);
         }
@@ -729,5 +931,48 @@ class HostController extends Controller
         ]);
 
         return response()->json(['success' => true, 'game_complete' => true]);
+    }
+
+    /**
+     * Step back to the previous question. Non-destructive: the question we leave
+     * keeps its reveals/points and is set back to 'pending' so "Next Question"
+     * resumes it, and the previous question is reactivated with its board intact.
+     */
+    public function previousQuestion(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $currentQuestion = $state->currentQuestion;
+
+        if (!$currentQuestion) {
+            return response()->json(['error' => 'No active question'], 400);
+        }
+
+        // Previous question by display order, scoped to the current card for
+        // card-based games (Oodles).
+        $query = $state->current_card_id
+            ? $state->currentCard->sessionQuestions()
+            : $gameSession->sessionQuestions();
+        $previous = $query
+            ->where('display_order', '<', $currentQuestion->display_order)
+            ->orderByDesc('display_order')
+            ->first();
+
+        if (!$previous) {
+            return response()->json(['error' => 'Already at the first question'], 400);
+        }
+
+        $currentQuestion->update(['status' => 'pending']);
+        $previous->update(['status' => 'active']);
+        $state->update([
+            'current_question_id' => $previous->id,
+            'round_number' => $previous->round_number ?? $state->round_number,
+            'active_team_id' => $previous->controlling_team_id ?? $state->active_team_id,
+        ]);
+
+        return response()->json(['success' => true]);
     }
 }

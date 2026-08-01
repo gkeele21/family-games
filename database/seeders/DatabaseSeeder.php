@@ -26,7 +26,9 @@ class DatabaseSeeder extends Seeder
         $this->call([
             GameTypeSeeder::class,
             OodlesQuestionSeeder::class,
+            OodlesScannedCardSeeder::class,
             AmericaSaysQuestionSeeder::class,
+            CategorySeeder::class,
         ]);
     }
 }

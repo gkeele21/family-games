@@ -252,7 +252,7 @@ const handleClose = () => {
                                         :min="0"
                                         :step="1"
                                         placeholder="0"
-                                        class="w-16"
+                                        size="sm"
                                     />
                                 </div>
                             </div>

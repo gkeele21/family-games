@@ -16,20 +16,19 @@ class Question extends Model
         'category_id',
         'question_text',
         'difficulty',
+        'round_type',
         'answer_letter',
-        'is_fast_money',
         'metadata',
         'created_by',
         'is_active',
+        'is_official',
         'times_used',
-        'times_correct',
-        'times_wrong',
     ];
 
     protected $casts = [
         'metadata' => 'array',
-        'is_fast_money' => 'boolean',
         'is_active' => 'boolean',
+        'is_official' => 'boolean',
     ];
 
     public function gameType(): BelongsTo
@@ -63,33 +62,5 @@ class Question extends Model
     public function incrementUsed(): void
     {
         $this->increment('times_used');
-    }
-
-    /**
-     * Record a correct answer
-     */
-    public function recordCorrect(): void
-    {
-        $this->increment('times_correct');
-    }
-
-    /**
-     * Record a wrong answer (went to All Play)
-     */
-    public function recordWrong(): void
-    {
-        $this->increment('times_wrong');
-    }
-
-    /**
-     * Get the correct answer percentage
-     */
-    public function getCorrectPercentageAttribute(): ?float
-    {
-        $total = $this->times_correct + $this->times_wrong;
-        if ($total === 0) {
-            return null;
-        }
-        return round(($this->times_correct / $total) * 100, 1);
     }
 }
