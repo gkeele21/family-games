@@ -62,7 +62,9 @@ class ScoredGameController extends Controller
                         'name'        => $g->template_name_snapshot,
                         'game_type'   => $g->base_game_type,
                         'is_complete' => $g->is_complete,
-                        'started_at'  => $g->started_at,
+                        // Date-only, so the browser can't timezone-shift it
+                        // back a day (matches show()).
+                        'started_at'  => $g->started_at?->toDateString(),
                         'players'     => $players
                             ->map(fn ($p) => $display[$p->id] ?? $p->name)
                             ->values(),

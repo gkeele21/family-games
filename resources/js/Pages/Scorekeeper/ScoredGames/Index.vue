@@ -9,7 +9,7 @@ defineProps<{
         name: string;
         game_type: string | null;
         is_complete: boolean;
-        started_at: string;
+        started_at: string | null;
         players: string[];
         winners: string[];
     }>;
@@ -40,15 +40,18 @@ const page = usePage();
                             >
                                 <span class="flex items-center justify-between">
                                     <span class="flex items-baseline gap-3">
-                                        <span class="text-sm text-gray-500">{{
-                                            new Date(
-                                                g.started_at,
-                                            ).toLocaleDateString(undefined, {
-                                                year: 'numeric',
-                                                month: 'short',
-                                                day: 'numeric',
-                                            })
-                                        }}</span>
+                                        <span
+                                            v-if="g.started_at"
+                                            class="text-sm text-gray-500"
+                                            >{{
+                                                new Date(
+                                                    `${g.started_at}T00:00:00`,
+                                                ).toLocaleDateString(undefined, {
+                                                    year: 'numeric',
+                                                    month: 'short',
+                                                    day: 'numeric',
+                                                })
+                                            }}</span>
                                         <span class="font-medium text-gray-900">{{
                                             g.name
                                         }}</span>
