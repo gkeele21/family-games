@@ -72,4 +72,49 @@ class Household extends Model
     {
         return $this->hasMany(ScoredGame::class);
     }
+
+    /**
+     * Add-player suggestions: people from the requesting user's OTHER
+     * households, then their friends — never a system-wide user search.
+     * Deduped against this household's roster (by linked account, else name).
+     */
+    public function playerSuggestionsFor(User $user): array
+    {
+        $rosterNames = $this->players()->pluck('name')
+            ->map(fn ($n) => mb_strtolower($n));
+        $rosterUserIds = $this->players()->whereNotNull('user_id')->pluck('user_id');
+
+        $suggestions = [];
+        $seen = [];
+        $add = function (string $name, ?int $userId, string $source) use (
+            &$suggestions, &$seen, $rosterNames, $rosterUserIds
+        ) {
+            $key = $userId ? "u{$userId}" : 'n' . mb_strtolower($name);
+            if (isset($seen[$key]) || isset($seen['n' . mb_strtolower($name)])) {
+                return;
+            }
+            if ($rosterNames->contains(mb_strtolower($name))) {
+                return;
+            }
+            if ($userId && $rosterUserIds->contains($userId)) {
+                return;
+            }
+            $seen[$key] = true;
+            $suggestions[] = ['name' => $name, 'user_id' => $userId, 'source' => $source];
+        };
+
+        Player::query()
+            ->whereIn('household_id', $user->households()->pluck('households.id'))
+            ->where('household_id', '!=', $this->id)
+            ->where('is_guest', false)
+            ->with('household:id,name')
+            ->orderBy('name')
+            ->get(['id', 'name', 'user_id', 'household_id'])
+            ->each(fn ($p) => $add($p->name, $p->user_id, $p->household->name));
+
+        $user->friends()->orderBy('first_name')->get()
+            ->each(fn ($f) => $add($f->name, $f->id, 'Friend'));
+
+        return $suggestions;
+    }
 }

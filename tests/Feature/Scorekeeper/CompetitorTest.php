@@ -209,6 +209,60 @@ class CompetitorTest extends TestCase
     /**
      * @return array{0: User, 1: Household, 2: \Illuminate\Support\Collection}
      */
+    public function test_mid_game_suggestion_add_carries_the_account_link(): void
+    {
+        [$user, $household, $players] = $this->gameContext(2, false);
+        $game = $this->start($household, false, [
+            ['name' => $players[0]->name, 'player_ids' => [$players[0]->id]],
+            ['name' => $players[1]->name, 'player_ids' => [$players[1]->id]],
+        ], $user);
+
+        // "Aunt Jo" is a linked player in the user's other household.
+        $linked = User::factory()->create();
+        $lake = Household::create(['name' => 'Lake', 'owner_user_id' => $user->id]);
+        $lake->members()->attach($user->id, ['role' => 'owner']);
+        $lake->players()->create(['name' => 'Aunt Jo', 'user_id' => $linked->id]);
+
+        $this->actingAs($user)
+            ->post(route('scorekeeper.games.competitors.store', $game), [
+                'new_player_name'  => 'Aunt Jo',
+                'user_id'          => $linked->id,
+                'add_to_household' => true,
+            ])
+            ->assertRedirect();
+
+        $this->assertDatabaseHas('players', [
+            'household_id' => $household->id,
+            'name'         => 'Aunt Jo',
+            'user_id'      => $linked->id,
+            'is_guest'     => false,
+        ]);
+        $this->assertSame(3, $game->competitors()->count());
+    }
+
+    public function test_mid_game_add_cannot_link_an_arbitrary_account(): void
+    {
+        [$user, $household, $players] = $this->gameContext(2, false);
+        $game = $this->start($household, false, [
+            ['name' => $players[0]->name, 'player_ids' => [$players[0]->id]],
+            ['name' => $players[1]->name, 'player_ids' => [$players[1]->id]],
+        ], $user);
+
+        $stranger = User::factory()->create();
+
+        $this->actingAs($user)
+            ->post(route('scorekeeper.games.competitors.store', $game), [
+                'new_player_name' => 'Stranger',
+                'user_id'         => $stranger->id,
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('players', [
+            'household_id' => $household->id,
+            'user_id'      => $stranger->id,
+        ]);
+    }
+
     private function gameContext(int $playerCount, bool $teamBased): array
     {
         $user = User::factory()->create();

@@ -18,11 +18,13 @@ class GameTypeCatalogTest extends TestCase
         GameType::create(['name' => 'Family Feud', 'slug' => 'family-feud', 'kind' => 'online']);
         GameType::create(['name' => 'Rummy 500', 'slug' => 'rummy-500', 'kind' => 'scorekeeper']);
 
-        // The trivia "create game" screen must not surface scorekeeper games.
+        // The trivia "new game" flow (now the host lobby's game picker) must
+        // not surface scorekeeper games.
         $this->actingAs($user)
+            ->followingRedirects()
             ->get(route('games.create'))
             ->assertInertia(fn (Assert $page) => $page
-                ->component('GameSessions/Create')
+                ->component('Host/Lobby')
                 ->has('gameTypes', 1));
     }
 }

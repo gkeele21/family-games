@@ -27,6 +27,14 @@ class HouseholdController extends Controller
 
         $user->ensureDefaultHousehold();
 
+        // Return to the household they last worked in, when it's still theirs.
+        $last = $user->last_household_id
+            ? $user->households()->whereKey($user->last_household_id)->first()
+            : null;
+        if ($last) {
+            return redirect()->route('scorekeeper.households.games.index', $last);
+        }
+
         if ($user->households()->count() === 1) {
             return redirect()->route(
                 'scorekeeper.households.games.index',
@@ -87,42 +95,62 @@ class HouseholdController extends Controller
     }
 
     /**
-     * Legacy household hub URL — the page split into Players and Sharing tabs.
+     * Legacy household hub URL — now the People tab.
      */
     public function show(Request $request, Household $household)
     {
         $this->ensureMember($request, $household);
 
-        return redirect()->route('scorekeeper.households.players.index', $household);
+        return redirect()->route('scorekeeper.households.people', $household);
     }
 
-    public function players(Request $request, Household $household): Response
+    /**
+     * One page for everyone in the household: roster players (who may not
+     * have accounts) merged with account-holding members and their roles.
+     */
+    public function people(Request $request, Household $household): Response
     {
         $this->ensureMember($request, $household);
 
-        return Inertia::render('Scorekeeper/Households/Players', [
-            'household' => $household->only(['id', 'name']),
-            'players'   => $household->players()
-                ->where('is_guest', false)
-                ->orderBy('name')
-                ->get(['id', 'name', 'user_id'])
-                ->map(fn ($p) => [
-                    'id'         => $p->id,
-                    'name'       => $p->name,
+        $members = $household->members()->get()->keyBy('id');
+
+        // One row per person. Roster players first — linked ones carry their
+        // account's email and role.
+        $people = $household->players()
+            ->where('is_guest', false)
+            ->orderBy('name')
+            ->get(['id', 'name', 'user_id'])
+            ->map(function ($p) use ($members) {
+                $user = $p->user_id ? $members->get($p->user_id) : null;
+
+                return [
+                    'player_id'   => $p->id,
+                    'name'        => $p->name,
                     'has_account' => $p->user_id !== null,
-                ]),
-        ]);
-    }
+                    'email'       => $user?->email,
+                    'role'        => $user?->pivot->role,
+                ];
+            });
 
-    public function sharing(Request $request, Household $household): Response
-    {
-        $this->ensureMember($request, $household);
+        // Then members with no roster entry here (e.g. someone invited just
+        // to follow along who never plays).
+        $rosterUserIds = $household->players()->whereNotNull('user_id')->pluck('user_id');
+        $membersOnly = $members
+            ->reject(fn ($u) => $rosterUserIds->contains($u->id))
+            ->map(fn ($u) => [
+                'player_id'   => null,
+                'name'        => $u->name,
+                'has_account' => true,
+                'email'       => $u->email,
+                'role'        => $u->pivot->role,
+            ])
+            ->values();
 
-        $household->load(['owner', 'members']);
-
-        return Inertia::render('Scorekeeper/Households/Sharing', [
-            'household' => $household,
-            'isOwner'   => $household->owner_user_id === $request->user()->id,
+        return Inertia::render('Scorekeeper/Households/People', [
+            'household'   => $household->only(['id', 'name']),
+            'people'      => $people->concat($membersOnly)->values(),
+            'isOwner'     => $household->owner_user_id === $request->user()->id,
+            'suggestions' => $household->playerSuggestionsFor($request->user()),
         ]);
     }
 

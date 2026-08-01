@@ -48,6 +48,47 @@ class HouseholdTest extends TestCase
         ]);
     }
 
+    public function test_scorekeeper_home_returns_to_last_visited_household(): void
+    {
+        $user = User::factory()->create();
+        $this->householdOwnedBy($user);
+        $lake = $this->householdOwnedBy($user);
+
+        // Working in a household stamps it as the latest.
+        $this->actingAs($user)
+            ->get(route('scorekeeper.households.games.index', $lake))
+            ->assertOk();
+
+        $this->actingAs($user)
+            ->get(route('scorekeeper.home'))
+            ->assertRedirect(route('scorekeeper.households.games.index', $lake));
+    }
+
+    public function test_scorekeeper_home_falls_back_to_picker_when_nothing_remembered(): void
+    {
+        $user = User::factory()->create();
+        $this->householdOwnedBy($user);
+        $this->householdOwnedBy($user);
+
+        $this->actingAs($user)
+            ->get(route('scorekeeper.home'))
+            ->assertRedirect(route('scorekeeper.households.index'));
+    }
+
+    public function test_scorekeeper_home_ignores_a_household_the_user_no_longer_belongs_to(): void
+    {
+        $user = User::factory()->create();
+        $this->householdOwnedBy($user);
+        $this->householdOwnedBy($user);
+        $other = $this->householdOwnedBy(User::factory()->create());
+
+        $user->forceFill(['last_household_id' => $other->id])->save();
+
+        $this->actingAs($user)
+            ->get(route('scorekeeper.home'))
+            ->assertRedirect(route('scorekeeper.households.index'));
+    }
+
     public function test_non_member_cannot_view_household(): void
     {
         $household = $this->householdOwnedBy(User::factory()->create());
@@ -63,18 +104,23 @@ class HouseholdTest extends TestCase
         $owner = User::factory()->create();
         $household = $this->householdOwnedBy($owner);
 
-        // The old hub URL now lands on the Players tab.
+        // The old hub URL now lands on the People tab.
         $this->actingAs($owner)
             ->get(route('scorekeeper.households.show', $household))
-            ->assertRedirect(route('scorekeeper.households.players.index', $household));
+            ->assertRedirect(route('scorekeeper.households.people', $household));
 
         $this->actingAs($owner)
-            ->get(route('scorekeeper.households.players.index', $household))
+            ->get(route('scorekeeper.households.people', $household))
             ->assertOk();
 
+        // Pre-merge URLs (Players and Sharing tabs) redirect to People.
         $this->actingAs($owner)
-            ->get(route('scorekeeper.households.sharing', $household))
-            ->assertOk();
+            ->get("/scorekeeper/households/{$household->id}/players")
+            ->assertRedirect(route('scorekeeper.households.people', $household));
+
+        $this->actingAs($owner)
+            ->get("/scorekeeper/households/{$household->id}/sharing")
+            ->assertRedirect(route('scorekeeper.households.people', $household));
     }
 
     public function test_only_owner_can_rename(): void

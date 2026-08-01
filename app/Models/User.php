@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Models\Scorekeeper\Household;
+use App\Models\Scorekeeper\Player;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -40,6 +41,22 @@ class User extends Authenticatable
         return $this->belongsToMany(Household::class, 'household_user')
             ->withPivot('role')
             ->withTimestamps();
+    }
+
+    /**
+     * Whether this user may attach the given account to a roster player:
+     * only accounts they can already see — a linked player in one of their
+     * households, or a friend. Never an arbitrary account.
+     */
+    public function canLinkRosterAccount(int $userId): bool
+    {
+        return $this->friends()->where('users.id', $userId)->exists()
+            || Player::whereIn(
+                'household_id',
+                $this->households()->pluck('households.id'),
+            )
+                ->where('user_id', $userId)
+                ->exists();
     }
 
     /**

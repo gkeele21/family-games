@@ -1,7 +1,9 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -11,11 +13,28 @@ return new class extends Migration
      */
     public function up(): void
     {
-        DB::statement("ALTER TABLE questions MODIFY difficulty ENUM('easy','medium','hard') NULL DEFAULT NULL");
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'])) {
+            DB::statement("ALTER TABLE questions MODIFY difficulty ENUM('easy','medium','hard') NULL DEFAULT NULL");
+
+            return;
+        }
+
+        // sqlite (tests) has no MODIFY/ENUM — it stores the enum as a string.
+        Schema::table('questions', function (Blueprint $table) {
+            $table->string('difficulty')->nullable()->default(null)->change();
+        });
     }
 
     public function down(): void
     {
-        DB::statement("ALTER TABLE questions MODIFY difficulty ENUM('easy','medium','hard') NOT NULL DEFAULT 'medium'");
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'])) {
+            DB::statement("ALTER TABLE questions MODIFY difficulty ENUM('easy','medium','hard') NOT NULL DEFAULT 'medium'");
+
+            return;
+        }
+
+        Schema::table('questions', function (Blueprint $table) {
+            $table->string('difficulty')->nullable(false)->default('medium')->change();
+        });
     }
 };

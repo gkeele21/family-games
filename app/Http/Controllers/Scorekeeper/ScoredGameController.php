@@ -257,6 +257,11 @@ class ScoredGameController extends Controller
             'household'      => $scoredGame->household->only(['id', 'name']),
             'competitors'    => $competitors,
             'availablePlayers' => $availablePlayers,
+            // Mid-game add-player suggestions (other households + friends),
+            // for scorers on in-progress games only.
+            'suggestions' => $scoredGame->is_complete || ! $scoredGame->household->isScorer($request->user())
+                ? []
+                : $scoredGame->household->playerSuggestionsFor($request->user()),
             'rounds'         => $rounds,
             'totals'         => $this->service->totals($scoredGame),
             'fieldSubtotals' => $this->service->fieldSubtotals($scoredGame),

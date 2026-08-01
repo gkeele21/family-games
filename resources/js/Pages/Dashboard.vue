@@ -41,6 +41,17 @@ defineProps<{
     recentGames: RecentGame[];
 }>();
 
+// Top-menu links to the three game modules (same set as /games).
+const navItems = [
+    { label: 'Trivia', route: 'games.index', activeMatch: ['games.*'] },
+    {
+        label: 'Scorekeeper',
+        route: 'scorekeeper.home',
+        activeMatch: ['scorekeeper.*'],
+    },
+    { label: 'PropOff', route: 'propoff.home', activeMatch: ['propoff.*'] },
+];
+
 // ---- join by code ----
 const joinCode = ref('');
 const join = () => {
@@ -97,7 +108,7 @@ const getActiveGameLink = (game: ActiveGame) => {
 <template>
     <Head title="Dashboard" />
 
-    <StandardLayout>
+    <StandardLayout :nav-items="navItems">
         <div class="mx-auto max-w-[1440px] space-y-8 px-4 py-8 sm:px-6 lg:px-8">
             <!-- ===== Hub — what do you want to do ===== -->
             <div>
