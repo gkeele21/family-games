@@ -418,6 +418,10 @@ class GameSessionController extends Controller
             'state_data' => [
                 'team_order' => $teams->pluck('id')->toArray(),
                 'team_rotation_index' => 0,
+                // America Says guided flow: game opens on the round intro. The first
+                // question is loaded but stays hidden until the host hits "Show
+                // Question", then "Start Timer" (see HostController phase actions).
+                'phase' => 'intro',
             ],
         ]);
 

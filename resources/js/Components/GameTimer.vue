@@ -7,9 +7,11 @@ interface Props {
     timerDuration: number;
     isHost?: boolean;
     size?: 'md' | 'sm';
+    // Hide the Start button (e.g. America Says starts the timer from its steps).
+    hideStart?: boolean;
 }
 
-const props = withDefaults(defineProps<Props>(), { size: 'md' });
+const props = withDefaults(defineProps<Props>(), { size: 'md', hideStart: false });
 
 const displayClass = computed(() =>
     props.size === 'sm' ? 'text-4xl py-2 px-6' : 'text-6xl py-4 px-8'
@@ -86,7 +88,7 @@ watch(() => props.timerStartedAt, () => {
         </div>
 
         <div v-if="isHost" class="flex gap-2 justify-center" :class="controlsClass">
-            <Button v-if="!isRunning" variant="success" :size="size" @click="emit('start')">Start</Button>
+            <Button v-if="!isRunning && !hideStart" variant="success" :size="size" @click="emit('start')">Start</Button>
             <Button v-if="isRunning" variant="accent" :size="size" @click="emit('pause')">Pause</Button>
             <Button variant="muted" :size="size" @click="emit('reset')">Reset</Button>
         </div>

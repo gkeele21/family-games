@@ -69,6 +69,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/control/team', [HostController::class, 'setControllingTeam'])->name('host.control.team');
     Route::post('/host/{gameSession}/bonus', [HostController::class, 'awardBonus'])->name('host.bonus');
     Route::post('/host/{gameSession}/question/select', [HostController::class, 'selectQuestion'])->name('host.question.select');
+    Route::post('/host/{gameSession}/question/show', [HostController::class, 'showQuestion'])->name('host.question.show');
+    Route::post('/host/{gameSession}/round/end', [HostController::class, 'endRound'])->name('host.round.end');
     Route::post('/host/{gameSession}/question/next', [HostController::class, 'nextQuestion'])->name('host.question.next');
     Route::post('/host/{gameSession}/question/previous', [HostController::class, 'previousQuestion'])->name('host.question.previous');
     Route::post('/host/{gameSession}/question/correct', [HostController::class, 'markCorrect'])->name('host.question.correct');

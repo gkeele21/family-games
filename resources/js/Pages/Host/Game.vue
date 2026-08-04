@@ -378,6 +378,47 @@ const selectControllingTeam = async (teamId: number) => {
     }
 };
 
+// ---- America Says guided flow -------------------------------------------------
+// Phase drives the single "next step" button: intro → question → (play) → recap.
+const phase = computed<string>(() => gameState.value?.state_data?.phase ?? 'question');
+const timerRunning = computed(() => !!gameState.value?.timer_started_at);
+// The team that does NOT currently hold the turn — offered as a one-click "steal".
+const otherTeam = computed<Team | null>(() =>
+    teams.value.find(t => t.id !== gameState.value?.active_team_id) ?? null
+);
+
+
+// The four phases of a round, shown as a checklist so the host sees the whole
+// progression (not just the next action). Index of the current phase:
+const roundStepIndex = computed(() => {
+    if (phase.value === 'intro') return 0;
+    if (phase.value === 'recap') return 3;
+    return timerRunning.value ? 2 : 1; // question phase: idle vs running
+});
+const roundSteps = computed(() => {
+    const rn = gameState.value?.round_number ?? 1;
+    return [
+        { title: 'Round Intro', hint: `Round ${rn} is on the board. Show the question when you’re ready to read it.` },
+        { title: 'Question Shown', hint: 'Just the question is on the board — answers still hidden, no clock. Read it aloud, then start the timer.' },
+        { title: 'Timer & Guessing', hint: 'The answer board and clock are up. Reveal answers as they’re guessed. Hand control to the other team to steal. When you’re done, show the scores.' },
+        { title: 'Scores', hint: 'The scoreboard is on the board. Move on to the next question, or end the game if that was the last one.' },
+    ];
+});
+
+const showQuestion = async () => {
+    await axios.post(route('host.question.show', props.gameSession.id));
+    fetchState();
+};
+
+const endRound = async () => {
+    await axios.post(route('host.round.end', props.gameSession.id));
+    fetchState();
+};
+
+const giveControlToOther = () => {
+    if (otherTeam.value) selectControllingTeam(otherTeam.value.id);
+};
+
 // Dismiss the "All Answers Revealed" bonus prompt for this question (no sweep).
 const dismissBonus = () => {
     if (currentQuestion.value) bonusDismissedQuestionId.value = currentQuestion.value.id;
@@ -432,8 +473,8 @@ onUnmounted(() => {
                     <Button variant="outline" size="md" @click="showBackToSetupConfirm = true">Back to Setup</Button>
                     <Button v-if="currentQuestion" variant="danger" size="md" @click="showResetRoundConfirm = true">Reset Round</Button>
                     <Button v-if="currentQuestion && hasPreviousQuestion" variant="primary" size="md" @click="previousQuestion">&larr; Previous</Button>
-                    <Button v-if="currentQuestion && !isLastQuestion" variant="primary" size="md" @click="advanceQuestion">Next Question &rarr;</Button>
-                    <Button v-if="currentQuestion && isLastQuestion" variant="secondary" size="md" @click="endGame">End Game</Button>
+                    <Button v-if="!isAmericaSays && currentQuestion && !isLastQuestion" variant="primary" size="md" @click="advanceQuestion">Next Question &rarr;</Button>
+                    <Button v-if="!isAmericaSays && currentQuestion && isLastQuestion" variant="secondary" size="md" @click="endGame">End Game</Button>
                 </div>
             </div>
         </template>
@@ -454,6 +495,50 @@ onUnmounted(() => {
                     <p v-if="!isOodles && currentQuestion" class="mt-2 text-center text-xs text-muted">
                         Click a team to give them the turn
                     </p>
+
+                    <!-- Round steps (America Says): the whole phase progression with
+                         hints; the current phase is highlighted and carries its action. -->
+                    <Card v-if="isAmericaSays && currentQuestion" title="Round Steps" class="mt-4">
+                        <ol class="space-y-2">
+                            <li
+                                v-for="(step, i) in roundSteps"
+                                :key="i"
+                                class="rounded-lg border p-3 transition-colors"
+                                :class="i === roundStepIndex ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset'"
+                            >
+                                <div class="flex items-center gap-2">
+                                    <span
+                                        class="flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs font-bold"
+                                        :class="i < roundStepIndex ? 'bg-success text-white' : i === roundStepIndex ? 'bg-primary text-white' : 'bg-surface-overlay text-muted'"
+                                    >
+                                        <span v-if="i < roundStepIndex">&check;</span><span v-else>{{ i + 1 }}</span>
+                                    </span>
+                                    <span class="font-semibold" :class="i === roundStepIndex ? 'text-body' : 'text-muted'">{{ step.title }}</span>
+                                    <span
+                                        v-if="i === 2 && roundStepIndex === 2 && currentQuestionNumber && (totalQuestions ?? 0) > 1"
+                                        class="ml-auto text-xs text-subtle"
+                                    >Q {{ currentQuestionNumber }}/{{ totalQuestions }}</span>
+                                </div>
+                                <p class="mt-1 pl-8 text-xs" :class="i === roundStepIndex ? 'text-body' : 'text-subtle'">{{ step.hint }}</p>
+
+                                <!-- The action lives on the current step -->
+                                <div v-if="i === roundStepIndex" class="mt-3 flex flex-wrap gap-2 pl-8">
+                                    <Button v-if="phase === 'intro'" variant="primary" size="sm" @click="showQuestion">Show Question</Button>
+                                    <template v-else-if="phase === 'recap'">
+                                        <Button v-if="isLastQuestion" variant="secondary" size="sm" @click="endGame">End Game</Button>
+                                        <Button v-else variant="primary" size="sm" @click="advanceQuestion">Next Question &rarr;</Button>
+                                    </template>
+                                    <template v-else-if="!timerRunning">
+                                        <Button variant="primary" size="sm" @click="startTimer">Start Timer</Button>
+                                    </template>
+                                    <template v-else>
+                                        <Button variant="primary" size="sm" @click="endRound">Show Scores &rarr;</Button>
+                                        <Button v-if="otherTeam" variant="secondary" size="sm" @click="giveControlToOther">Give control to {{ otherTeam.name }}</Button>
+                                    </template>
+                                </div>
+                            </li>
+                        </ol>
+                    </Card>
 
                     <div v-if="isOodles && currentQuestion" class="mt-4">
                         <Button variant="accent" size="md" class="w-full" @click="openControlModal">Set Team Control</Button>
@@ -518,6 +603,7 @@ onUnmounted(() => {
                                     :timer-started-at="gameState.timer_started_at"
                                     :timer-duration="gameState.timer_duration"
                                     :is-host="true"
+                                    :hide-start="isAmericaSays"
                                     @start="startTimer"
                                     @pause="pauseTimer"
                                     @reset="resetTimer"

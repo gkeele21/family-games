@@ -371,6 +371,8 @@ class HostController extends Controller
                 'round_number' => $first->round_number ?? $state->round_number,
                 'active_team_id' => $first->controlling_team_id ?? $state->active_team_id,
             ]);
+            // Replay from the round intro (question hidden until "Show Question").
+            $state->setStateValue('phase', 'intro');
         }
 
         return response()->json(['success' => true]);
@@ -916,9 +918,17 @@ class HostController extends Controller
             ->first();
 
         if ($nextQuestion) {
+            $oldRound = $currentQuestion?->round_number ?? $state->round_number;
+            $newRound = $nextQuestion->round_number ?? $state->round_number;
+            // Crossing into a new round lands on the "intro" beat (question stays
+            // hidden until the host shows it); within a round the next question is
+            // shown straight away, timer idle. (The client resets the clock.)
+            $stateData['phase'] = $newRound !== $oldRound ? 'intro' : 'question';
+
             $state->update([
                 'current_question_id' => $nextQuestion->id,
-                'round_number' => $nextQuestion->round_number ?? $state->round_number,
+                'round_number' => $newRound,
+                'state_data' => $stateData,
             ]);
             $nextQuestion->update(['status' => 'active']);
             return response()->json(['success' => true, 'game_complete' => false]);
@@ -972,6 +982,40 @@ class HostController extends Controller
             'round_number' => $previous->round_number ?? $state->round_number,
             'active_team_id' => $previous->controlling_team_id ?? $state->active_team_id,
         ]);
+        // Stepping back shows that question again (guided America Says flow).
+        $state->setStateValue('phase', 'question');
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * America Says guided flow — reveal the loaded question on the board.
+     * Moves the phase from "intro" (Round N — Get Ready) to "question" so the
+     * plaque + blank board appear; the timer stays idle until startTimer.
+     */
+    public function showQuestion(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $gameSession->gameState?->setStateValue('phase', 'question');
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * America Says guided flow — end the current round and show the scoreboard.
+     * Sets the phase to "recap"; the host then advances with nextQuestion
+     * ("Start Round N+1"), which moves to the next round's intro.
+     */
+    public function endRound(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $gameSession->gameState?->setStateValue('phase', 'recap');
 
         return response()->json(['success' => true]);
     }

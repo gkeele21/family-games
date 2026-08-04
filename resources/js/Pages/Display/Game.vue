@@ -118,6 +118,19 @@ const isAllPlay = computed(() => currentQuestion.value?.control_status === 'all_
 <template>
     <Head :title="`${gameSession.game_type.name} - Display`" />
 
+    <!-- America Says: one map-backed board handles every state (lobby / playing /
+         paused / completed) so the neon map is a constant backdrop. -->
+    <AmericaSaysDisplay
+        v-if="isAmericaSays"
+        :status="status"
+        :teams="teams"
+        :game-state="gameState"
+        :current-question="currentQuestion"
+        :invite-code="gameSession.invite_code"
+    />
+
+    <!-- Other games: original per-status screens -->
+    <template v-else>
     <!-- Lobby State - Same for all games -->
     <div v-if="status === 'lobby'" class="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 text-white">
         <div class="min-h-screen flex flex-col">
@@ -313,4 +326,5 @@ const isAllPlay = computed(() => currentQuestion.value?.control_status === 'all_
             </div>
         </div>
     </div>
+    </template>
 </template>

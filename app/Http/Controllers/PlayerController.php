@@ -425,21 +425,26 @@ class PlayerController extends Controller
 
     /**
      * Obfuscate answer text for unrevealed answers.
-     * Shows first letter + underscores, joined with NO space so the
-     * result reads as one continuous solid line that hides the word count.
+     * First letter + ~1.5x underscores per hyphen-part; hyphens are kept and
+     * words are separated by spaces (e.g. "SHOW-ME" -> "S____-M_"). The board
+     * squishes the underscores into a continuous line, so the exact character
+     * count stays hidden while hyphens still read correctly.
      */
     private function obfuscateAnswer(string $text): string
     {
-        $words = explode(' ', $text);
-        $obfuscated = array_map(function ($word) {
-            if (strlen($word) <= 1) {
-                return $word;
-            }
-            $firstLetter = mb_substr($word, 0, 1);
-            $underscoreCount = (int) floor((mb_strlen($word) - 1) * 1.5);
-            return $firstLetter . str_repeat('_', $underscoreCount);
-        }, $words);
+        $words = array_map(function ($word) {
+            $parts = array_map(function ($part) {
+                if (mb_strlen($part) <= 1) {
+                    return $part;
+                }
+                $firstLetter = mb_substr($part, 0, 1);
+                $underscoreCount = (int) floor((mb_strlen($part) - 1) * 1.5);
+                return $firstLetter . str_repeat('_', $underscoreCount);
+            }, explode('-', $word));
 
-        return implode('', $obfuscated);
+            return implode('-', $parts);
+        }, explode(' ', $text));
+
+        return implode(' ', $words);
     }
 }
