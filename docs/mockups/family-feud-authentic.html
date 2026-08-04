@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Family Feud — Authentic Board Mockup</title>
+<link rel="preconnect" href="https://fonts.bunny.net">
+<link href="https://fonts.bunny.net/css?family=space-grotesk:500,600,700&display=swap" rel="stylesheet" />
+<style>
+    /* =====================================================================
+       Family Feud projector board — standalone mockup. Mirrors the CSS in
+       resources/js/Pages/Display/FamilyFeudDisplay.vue so you can preview the
+       look + flip-to-reveal in a browser without the app. Modeled on the
+       modern (Steve Harvey era) set: one column of full-width blue strips,
+       centered number that flips to answer-left / white points-card-right.
+       Colors are intentionally OFF the Keeler palette (sanctioned replica).
+       ===================================================================== */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --ff-font: "Space Grotesk", "Arial Narrow", Arial, sans-serif; }
+    body { font-family: var(--ff-font); background: #01060f; }
+
+    .ff-board {
+        position: relative;
+        width: 100%;
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 2vh 2vw 2.4vh;
+        gap: 1.2vh;
+        font-family: var(--ff-font);
+        background:
+            radial-gradient(130% 100% at 50% -8%, #123a86 0%, #0a2258 34%, #061a42 66%, #020c22 100%),
+            #020c22;
+        color: #eaf3ff;
+    }
+
+    /* ---------- top bar: team pods + round total ---------- */
+    .ff-topbar {
+        width: 100%; max-width: 1600px;
+        display: grid; grid-template-columns: 1fr auto 1fr;
+        align-items: center; gap: 2vw;
+    }
+    .ff-pod {
+        --pod-color: #4aa3ff;
+        display: flex; flex-direction: column; align-items: center; gap: 0.2vh;
+        padding: 0.9vh 1.4vw; border-radius: 14px;
+        background: linear-gradient(180deg, #123f92, #0a2352);
+        border: 2px solid color-mix(in srgb, var(--pod-color) 55%, #0a2258);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 0 0 18px rgba(0, 0, 0, 0.45);
+        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+    }
+    .ff-pod-left { justify-self: start; }
+    .ff-pod-right { justify-self: end; }
+    .ff-pod-active {
+        border-color: var(--pod-color);
+        box-shadow: 0 0 26px color-mix(in srgb, var(--pod-color) 60%, transparent), inset 0 1px 0 rgba(255,255,255,0.2);
+        transform: scale(1.05);
+    }
+    .ff-pod-name {
+        font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+        font-size: clamp(13px, 1.4vw, 24px);
+        color: color-mix(in srgb, var(--pod-color) 78%, #fff);
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+    }
+    .ff-pod-score {
+        font-weight: 700; font-variant-numeric: tabular-nums;
+        font-size: clamp(26px, 3.2vw, 56px); color: #fff;
+        text-shadow: 0 0 14px rgba(120, 180, 255, 0.5); line-height: 1;
+    }
+
+    .ff-total-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.7vh; }
+    .ff-logo {
+        display: flex; flex-direction: column; align-items: center; line-height: 0.82;
+        letter-spacing: 0.01em; transform: skewX(-6deg);
+    }
+    .ff-logo-line {
+        font-weight: 700; text-transform: uppercase; font-size: clamp(18px, 2vw, 34px);
+        background: linear-gradient(180deg, #eaf3ff 0%, #8fc0ff 48%, #2f7fe6 100%);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+        -webkit-text-stroke: 1.5px #0a2352; paint-order: stroke fill;
+        filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5));
+    }
+    .ff-logo-feud { font-size: clamp(22px, 2.5vw, 44px); }
+
+    /* Round total — beveled dark display with a blue rim, white digits. */
+    .ff-total {
+        min-width: clamp(110px, 11vw, 200px); padding: 0.3vh 1.4vw; border-radius: 10px;
+        background: linear-gradient(180deg, #0a1c44, #04102c);
+        border: 2px solid #4f93ee;
+        box-shadow: 0 0 20px rgba(79, 147, 238, 0.45), inset 0 0 20px rgba(0, 0, 0, 0.75);
+        text-align: center; transition: transform 0.2s ease;
+    }
+    .ff-total-bump { animation: ff-bump 0.45s ease; }
+    @keyframes ff-bump { 0% { transform: scale(1);} 40% { transform: scale(1.16);} 100% { transform: scale(1);} }
+    .ff-total-num {
+        font-weight: 700; font-variant-numeric: tabular-nums;
+        font-size: clamp(28px, 3.6vw, 62px); color: #fff;
+        text-shadow: 0 0 16px rgba(150, 200, 255, 0.8); line-height: 1;
+    }
+
+    /* ---------- control banner ---------- */
+    .ff-control { min-height: 1.1em; display: flex; justify-content: center; }
+    .ff-control-pill {
+        --pod-color: #4aa3ff;
+        font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+        font-size: clamp(13px, 1.5vw, 24px); padding: 0.3em 1.3em; border-radius: 999px;
+        color: #fff;
+        background: linear-gradient(180deg, color-mix(in srgb, var(--pod-color) 82%, #000), color-mix(in srgb, var(--pod-color) 52%, #000));
+        border: 1px solid color-mix(in srgb, var(--pod-color) 60%, #fff);
+        box-shadow: 0 0 18px color-mix(in srgb, var(--pod-color) 55%, transparent);
+    }
+
+    /* ---------- question strip ---------- */
+    .ff-question {
+        max-width: 1400px; text-align: center; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.02em; line-height: 1.1; font-size: clamp(16px, 1.9vw, 34px);
+        color: #cfe2ff; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6); padding: 0 2vw;
+    }
+
+    /* ---------- answer board ---------- */
+    .ff-panel {
+        flex: 1 1 auto; min-height: 0; width: 100%; max-width: 1180px;
+        display: flex; align-items: stretch; justify-content: center;
+        padding: clamp(12px, 1.8vh, 26px) clamp(14px, 1.8vw, 30px);
+        border-radius: 34px 34px 26px 26px;
+        background: linear-gradient(180deg, #1e5abd 0%, #123f92 48%, #0a2a66 100%);
+        border: 5px solid #5b9bff;
+        box-shadow:
+            0 0 60px rgba(70, 140, 240, 0.5),
+            0 10px 40px rgba(0, 0, 0, 0.6),
+            inset 0 0 0 2px rgba(255, 255, 255, 0.12),
+            inset 0 0 70px rgba(0, 8, 32, 0.6);
+    }
+    .ff-panel-inner {
+        width: 100%; display: flex; flex-direction: column;
+        gap: clamp(6px, 1vh, 14px); justify-content: center;
+    }
+
+    /* Each strip flips on its horizontal axis (rotateX) to reveal the answer. */
+    .ff-slot {
+        position: relative; flex: 1 1 0; min-height: 42px; max-height: 104px;
+        perspective: 1600px;
+    }
+    .ff-slot-inner {
+        position: absolute; inset: 0; transform-style: preserve-3d;
+        transition: transform 0.7s cubic-bezier(0.45, 0.05, 0.2, 1);
+    }
+    .ff-slot.revealed .ff-slot-inner { transform: rotateX(180deg); }
+    .ff-face {
+        position: absolute; inset: 0; display: flex; align-items: center;
+        border-radius: 12px; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+        overflow: hidden;
+        background: linear-gradient(180deg, #3f7ad8 0%, #245bb0 46%, #163f8c 100%);
+        border: 1px solid rgba(150, 190, 255, 0.55);
+        box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.35), inset 0 -12px 26px rgba(0, 10, 40, 0.55);
+    }
+    /* Hidden face: big centered rank number seated in a soft recessed oval. */
+    .ff-front { justify-content: center; }
+    .ff-front::before {
+        content: ""; position: absolute; left: 50%; top: 50%;
+        width: clamp(52px, 8vh, 96px); height: clamp(34px, 5.2vh, 62px);
+        transform: translate(-50%, -50%); border-radius: 50%;
+        background: radial-gradient(ellipse at 50% 35%, rgba(10, 26, 66, 0.55), rgba(10, 26, 66, 0) 70%);
+    }
+    .ff-num {
+        position: relative; font-weight: 700; font-size: clamp(24px, 4.6vh, 52px); color: #fff;
+        text-shadow: 0 2px 3px rgba(0, 0, 0, 0.6), 0 0 18px rgba(150, 200, 255, 0.7);
+    }
+    /* Revealed face: answer text left, white points card on the right. */
+    .ff-back {
+        transform: rotateX(180deg); justify-content: space-between; gap: 0.6vw;
+        padding: 0 clamp(6px, 0.7vw, 12px) 0 clamp(16px, 2vw, 34px);
+    }
+    .ff-atext {
+        flex: 1 1 auto; min-width: 0; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.01em; font-size: clamp(15px, 3vh, 34px); color: #fff;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left;
+    }
+    .ff-pts {
+        flex: 0 0 auto; align-self: stretch;
+        display: flex; align-items: center; justify-content: center;
+        min-width: clamp(52px, 5vw, 92px); margin: clamp(5px, 0.9vh, 12px) 0;
+        border-radius: 8px;
+        font-weight: 700; font-variant-numeric: tabular-nums; font-size: clamp(20px, 3.6vh, 44px);
+        color: #103a86; background: linear-gradient(180deg, #ffffff, #d6e4fb);
+        box-shadow: inset 0 2px 2px rgba(255, 255, 255, 0.9), inset 0 -3px 6px rgba(80, 120, 190, 0.45), 0 2px 4px rgba(0,0,0,0.4);
+    }
+    .ff-slot.revealed .ff-back { animation: ff-reveal-glow 0.8s ease; }
+    @keyframes ff-reveal-glow {
+        0% { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.9), 0 0 34px rgba(140, 190, 255, 0.9); }
+        100% { box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.35), inset 0 -12px 26px rgba(0, 10, 40, 0.55); }
+    }
+
+    /* ---------- strikes overlay ---------- */
+    .ff-strikes {
+        position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        gap: 3vw; z-index: 30; pointer-events: none;
+    }
+    .ff-strike {
+        font-weight: 700; font-size: clamp(90px, 17vw, 240px); color: #ff2323;
+        text-shadow: 0 0 30px rgba(255, 40, 40, 0.9), 0 6px 12px rgba(0, 0, 0, 0.7);
+        -webkit-text-stroke: 5px #fff; animation: ff-strike-pop 0.35s ease;
+    }
+    @keyframes ff-strike-pop { 0% { transform: scale(0.2); opacity: 0; } 60% { transform: scale(1.25);} 100% { transform: scale(1); opacity: 1; } }
+
+    /* ---------- demo controls (mockup only) ---------- */
+    .demo-bar {
+        position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+        display: flex; gap: 10px; z-index: 100; background: rgba(4, 16, 44, 0.9);
+        padding: 10px 14px; border-radius: 14px; border: 1px solid #4f93ee;
+        box-shadow: 0 0 24px rgba(79, 147, 238, 0.4); font-family: var(--ff-font);
+    }
+    .demo-bar button {
+        font: inherit; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+        font-size: 13px; color: #eaf3ff; background: #123f92; border: 1px solid #5b9bff;
+        padding: 8px 14px; border-radius: 8px; cursor: pointer;
+    }
+    .demo-bar button:hover { background: #1a52b0; }
+    .demo-bar button.secondary { background: #3a1220; border-color: #ff5a3c; }
+    .demo-bar .demo-hint { color: #7fa8dd; font-size: 12px; align-self: center; margin-right: 6px; }
+</style>
+</head>
+<body>
+<div class="ff-board">
+    <div class="ff-topbar">
+        <div class="ff-pod ff-pod-left ff-pod-active" style="--pod-color:#e23b3b">
+            <span class="ff-pod-name">Red Team</span>
+            <span class="ff-pod-score" id="leftScore">120</span>
+        </div>
+        <div class="ff-total-wrap">
+            <div class="ff-logo">
+                <span class="ff-logo-line">FAMILY</span>
+                <span class="ff-logo-line ff-logo-feud">FEUD</span>
+            </div>
+            <div class="ff-total" id="total"><span class="ff-total-num" id="totalNum">0</span></div>
+        </div>
+        <div class="ff-pod ff-pod-right" style="--pod-color:#2f8fe0">
+            <span class="ff-pod-name">Blue Team</span>
+            <span class="ff-pod-score" id="rightScore">85</span>
+        </div>
+    </div>
+
+    <div class="ff-control">
+        <span class="ff-control-pill" style="--pod-color:#e23b3b">Red Team In Control</span>
+    </div>
+
+    <div class="ff-question">Name something people do when they can't sleep</div>
+
+    <div class="ff-panel">
+        <div class="ff-panel-inner" id="board"></div>
+        <div class="ff-strikes" id="strikes"></div>
+    </div>
+</div>
+
+<div class="demo-bar">
+    <span class="demo-hint">Demo:</span>
+    <button onclick="revealNext()">Reveal next answer</button>
+    <button onclick="addStrike()">Strike ✗</button>
+    <button class="secondary" onclick="reset()">Reset</button>
+</div>
+
+<script>
+    // Sample survey data (answer, points), highest first.
+    const ANSWERS = [
+        { text: 'Watch TV',        points: 38 },
+        { text: 'Read a book',     points: 22 },
+        { text: 'Count sheep',     points: 14 },
+        { text: 'Get a snack',     points: 11 },
+        { text: 'Toss and turn',   points: 8 },
+        { text: 'Scroll on phone', points: 5 },
+        { text: 'Drink warm milk', points: 2 },
+    ];
+
+    const board = document.getElementById('board');
+    const totalNum = document.getElementById('totalNum');
+    const totalBox = document.getElementById('total');
+    const strikesEl = document.getElementById('strikes');
+    let revealed = 0;
+    let strikes = 0;
+
+    function buildBoard() {
+        board.innerHTML = '';
+        ANSWERS.forEach((a, i) => {
+            const slot = document.createElement('div');
+            slot.className = 'ff-slot';
+            slot.dataset.points = a.points;
+            slot.innerHTML =
+                '<div class="ff-slot-inner">' +
+                    '<div class="ff-face ff-front"><span class="ff-num">' + (i + 1) + '</span></div>' +
+                    '<div class="ff-face ff-back">' +
+                        '<span class="ff-atext">' + a.text + '</span>' +
+                        '<span class="ff-pts">' + a.points + '</span>' +
+                    '</div>' +
+                '</div>';
+            board.appendChild(slot);
+        });
+    }
+
+    // ---- reveal "ding" (Web Audio), same recipe as the Vue component ----
+    let audioCtx = null;
+    function playDing() {
+        try {
+            audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const now = audioCtx.currentTime;
+            [1046.5, 1567.98].forEach((freq, i) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.type = 'sine'; osc.frequency.setValueAtTime(freq, now);
+                const peak = i === 0 ? 0.32 : 0.14;
+                gain.gain.setValueAtTime(0.0001, now);
+                gain.gain.exponentialRampToValueAtTime(peak, now + 0.012);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
+                osc.start(now); osc.stop(now + 0.95);
+            });
+        } catch (e) {}
+    }
+
+    function bumpTotal(value) {
+        totalNum.textContent = value;
+        totalBox.classList.remove('ff-total-bump');
+        void totalBox.offsetWidth; // reflow to restart animation
+        totalBox.classList.add('ff-total-bump');
+    }
+
+    function revealNext() {
+        const slots = board.querySelectorAll('.ff-slot');
+        if (revealed >= slots.length) return;
+        slots[revealed].classList.add('revealed');
+        revealed += 1;
+        playDing();
+        let total = 0;
+        board.querySelectorAll('.ff-slot.revealed').forEach(s => total += Number(s.dataset.points));
+        bumpTotal(total);
+    }
+
+    function addStrike() {
+        if (strikes >= 3) return;
+        strikes += 1;
+        strikesEl.innerHTML = '';
+        for (let i = 0; i < strikes; i++) {
+            const x = document.createElement('span');
+            x.className = 'ff-strike';
+            x.textContent = '✗';
+            strikesEl.appendChild(x);
+        }
+        setTimeout(() => { strikesEl.innerHTML = ''; }, 1100);
+    }
+
+    function reset() {
+        revealed = 0; strikes = 0;
+        strikesEl.innerHTML = '';
+        buildBoard();
+        totalNum.textContent = '0';
+    }
+
+    buildBoard();
+</script>
+</body>
+</html>

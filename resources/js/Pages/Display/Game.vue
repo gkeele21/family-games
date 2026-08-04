@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AmericaSaysDisplay from './AmericaSaysDisplay.vue';
+import FamilyFeudDisplay from './FamilyFeudDisplay.vue';
 import OodlesDisplay from './OodlesDisplay.vue';
 import GameTimer from '@/Components/GameTimer.vue';
 import { Head } from '@inertiajs/vue3';
@@ -118,6 +119,19 @@ const isAllPlay = computed(() => currentQuestion.value?.control_status === 'all_
 <template>
     <Head :title="`${gameSession.game_type.name} - Display`" />
 
+    <!-- Family Feud: one replica answer-board handles every state (lobby /
+         playing / paused / completed), with flip-to-reveal answer panels. -->
+    <FamilyFeudDisplay
+        v-if="isFamilyFeud"
+        :status="status"
+        :teams="teams"
+        :game-state="gameState"
+        :current-question="currentQuestion"
+        :invite-code="gameSession.invite_code"
+    />
+
+    <!-- Other games: original per-status screens -->
+    <template v-else>
     <!-- Lobby State - Same for all games -->
     <div v-if="status === 'lobby'" class="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 text-white">
         <div class="min-h-screen flex flex-col">
@@ -313,4 +327,5 @@ const isAllPlay = computed(() => currentQuestion.value?.control_status === 'all_
             </div>
         </div>
     </div>
+    </template>
 </template>
