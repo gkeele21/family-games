@@ -65,6 +65,10 @@ interface CurrentCard {
     letter: string;
     status: string;
     questions: CardQuestion[];
+    bonus_question: {
+        question_text: string;
+        answer_text: string | null;
+    } | null;
 }
 
 interface FinalQuestion {
@@ -240,7 +244,7 @@ const endGame = () => {
 const confirmEndGame = async () => {
     showEndConfirm.value = false;
     await axios.post(route('host.end', props.gameSession.id));
-    window.location.href = route('games.index');
+    window.location.href = route('dashboard');
 };
 
 const showBackToSetupConfirm = ref(false);
@@ -263,7 +267,7 @@ const nextQuestion = async () => {
         alert('All questions on this card are complete! Click "Next Card" to continue.');
     }
     if (response.data.game_complete) {
-        window.location.href = route('games.index');
+        window.location.href = route('dashboard');
     }
     await axios.post(route('host.timer.reset', props.gameSession.id));
     fetchState();
@@ -272,7 +276,7 @@ const nextQuestion = async () => {
 const nextCard = async () => {
     const response = await axios.post(route('host.card.next', props.gameSession.id));
     if (response.data.game_complete) {
-        window.location.href = route('games.index');
+        window.location.href = route('dashboard');
     }
     fetchState();
 };
@@ -539,8 +543,10 @@ onUnmounted(() => {
                     <Button variant="outline" size="md" @click="showBackToSetupConfirm = true">Back to Setup</Button>
                     <Button v-if="currentQuestion" variant="danger" size="md" @click="showResetRoundConfirm = true">Reset Round</Button>
                     <Button v-if="currentQuestion && hasPreviousQuestion && !isFinal" variant="primary" size="md" @click="previousQuestion">&larr; Previous</Button>
+                    <!-- America Says advances via its guided Round Steps / Final cards. -->
                     <Button v-if="!isAmericaSays && currentQuestion && !isLastQuestion" variant="primary" size="md" @click="advanceQuestion">Next Question &rarr;</Button>
-                    <Button v-if="!isAmericaSays && currentQuestion && isLastQuestion" variant="secondary" size="md" @click="endGame">End Game</Button>
+                    <!-- Always available so a stalled or abandoned game can be completed. -->
+                    <Button :variant="isLastQuestion ? 'secondary' : 'outline'" size="md" @click="endGame">End Game</Button>
                 </div>
             </div>
         </template>
@@ -700,6 +706,17 @@ onUnmounted(() => {
                                 </div>
                             </div>
                             <Button variant="secondary" size="md" @click="nextCard">Next Card &rarr;</Button>
+                        </div>
+                        <!-- Just-for-fun opener: read it out, no points, no control -->
+                        <div
+                            v-if="currentCard.bonus_question"
+                            class="mt-4 rounded-lg border border-border bg-surface-inset px-4 py-3"
+                        >
+                            <span class="text-xs font-bold uppercase tracking-widest text-muted">Just for fun</span>
+                            <p class="mt-1 text-body">{{ currentCard.bonus_question.question_text }}</p>
+                            <p class="mt-1 text-sm text-success">
+                                Answer: {{ currentCard.bonus_question.answer_text ?? '—' }}
+                            </p>
                         </div>
                     </Card>
 

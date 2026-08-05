@@ -441,6 +441,6 @@ class GameSessionController extends Controller
 
         $gameSession->delete();
 
-        return redirect()->route('games.index')->with('success', 'Game cancelled successfully.');
+        return redirect()->route('dashboard')->with('success', 'Game cancelled successfully.');
     }
 }

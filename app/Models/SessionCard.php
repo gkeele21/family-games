@@ -15,6 +15,7 @@ class SessionCard extends Model
         'game_session_id',
         'card_number',
         'letter',
+        'bonus_question_id',
         'status',
     ];
 
@@ -30,5 +31,13 @@ class SessionCard extends Model
     public function sessionQuestions(): HasMany
     {
         return $this->hasMany(SessionQuestion::class)->orderBy('display_order');
+    }
+
+    /**
+     * The card's "just for fun" bonus question — no points, no control.
+     */
+    public function bonusQuestion(): BelongsTo
+    {
+        return $this->belongsTo(Question::class, 'bonus_question_id');
     }
 }

@@ -67,7 +67,7 @@ class DisplayController extends Controller
             'teams',
             'gameState.currentQuestion.question.answers',
             'gameState.currentQuestion.answerReveals',
-            'gameState.currentCard',
+            'gameState.currentCard.bonusQuestion',
             'gameState.activeTeam',
         ]);
 
@@ -152,6 +152,12 @@ class DisplayController extends Controller
                 'id' => $state->currentCard->id,
                 'card_number' => $state->currentCard->card_number,
                 'letter' => $state->currentCard->letter,
+                // "Just for fun" opener — question only; the host reads the
+                // answer from their own screen.
+                'bonus_question' => $state->currentCard->bonusQuestion ? [
+                    'question_text' => $state->currentCard->bonusQuestion->question_text,
+                    'answer_text' => null,
+                ] : null,
             ] : null,
         ]);
     }

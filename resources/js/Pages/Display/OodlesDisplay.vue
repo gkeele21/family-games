@@ -26,6 +26,10 @@ interface CurrentCard {
     id: number;
     card_number: number;
     letter: string;
+    bonus_question: {
+        question_text: string;
+        answer_text: string | null;
+    } | null;
 }
 
 interface Props {
@@ -179,6 +183,14 @@ const hasMultipleTeamControl = computed(() => {
                 <div class="inline-block bg-white/10 backdrop-blur rounded-2xl px-8 py-4">
                     <span class="text-xl text-gray-300">Card {{ currentCard.card_number }}</span>
                     <span class="text-8xl font-bold ml-6 text-yellow-400">{{ currentCard.letter }}</span>
+                </div>
+                <!-- Just-for-fun opener: no points, no control -->
+                <div
+                    v-if="currentCard.bonus_question"
+                    class="mx-auto mt-4 max-w-4xl rounded-xl bg-purple-500/30 px-6 py-3"
+                >
+                    <span class="text-sm font-bold uppercase tracking-widest text-purple-200">Just for fun</span>
+                    <p class="mt-1 text-2xl text-white">{{ currentCard.bonus_question.question_text }}</p>
                 </div>
             </div>
 

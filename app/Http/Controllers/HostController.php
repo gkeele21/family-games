@@ -124,6 +124,7 @@ class HostController extends Controller
             'gameState.currentQuestion.question.answers',
             'gameState.currentQuestion.answerReveals',
             'gameState.currentCard.sessionQuestions.question',
+            'gameState.currentCard.bonusQuestion.answers',
             'gameState.activeTeam',
             'sessionCards',
         ]);
@@ -246,6 +247,11 @@ class HostController extends Controller
                 'letter' => $currentCard->letter,
                 'status' => $currentCard->status,
                 'questions' => $cardQuestions,
+                // "Just for fun" opener — no points, no control.
+                'bonus_question' => $currentCard->bonusQuestion ? [
+                    'question_text' => $currentCard->bonusQuestion->question_text,
+                    'answer_text' => $currentCard->bonusQuestion->answers->first()?->answer_text,
+                ] : null,
             ] : null,
             'totalCards' => $gameSession->sessionCards->count(),
             'currentQuestionNumber' => $currentQuestionNumber,
