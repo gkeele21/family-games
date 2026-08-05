@@ -9,9 +9,12 @@ interface Props {
     size?: 'md' | 'sm';
     // Hide the Start button (e.g. America Says starts the timer from its steps).
     hideStart?: boolean;
+    // Hide all controls — display only (e.g. the America Says final round, whose
+    // single time budget is driven entirely from the Final Round steps).
+    hideControls?: boolean;
 }
 
-const props = withDefaults(defineProps<Props>(), { size: 'md', hideStart: false });
+const props = withDefaults(defineProps<Props>(), { size: 'md', hideStart: false, hideControls: false });
 
 const displayClass = computed(() =>
     props.size === 'sm' ? 'text-4xl py-2 px-6' : 'text-6xl py-4 px-8'
@@ -87,7 +90,7 @@ watch(() => props.timerStartedAt, () => {
             {{ formattedTime }}
         </div>
 
-        <div v-if="isHost" class="flex gap-2 justify-center" :class="controlsClass">
+        <div v-if="isHost && !hideControls" class="flex gap-2 justify-center" :class="controlsClass">
             <Button v-if="!isRunning && !hideStart" variant="success" :size="size" @click="emit('start')">Start</Button>
             <Button v-if="isRunning" variant="accent" :size="size" @click="emit('pause')">Pause</Button>
             <Button variant="muted" :size="size" @click="emit('reset')">Reset</Button>

@@ -9,6 +9,7 @@ import Select from '@/Components/Form/Select.vue';
 import NumberInput from '@/Components/Form/NumberInput.vue';
 import Toggle from '@/Components/Form/Toggle.vue';
 import Confirm from '@/Components/Feedback/Confirm.vue';
+import BlankText from '@/Components/BlankText.vue';
 import { Head, Link, useForm, router } from '@inertiajs/vue3';
 import { ref, computed, watch, onMounted } from 'vue';
 
@@ -662,7 +663,7 @@ const copyDisplayUrl = () => {
                                 :class="['flex w-full items-center gap-3 border-t border-border/60 px-3 py-2.5 text-left first:border-t-0', q.id === activeCurrentId ? 'bg-primary/10' : 'hover:bg-surface-inset']"
                                 @click="assignToActive(q.id)"
                             >
-                                <span class="flex-1 text-sm text-body">{{ q.question_text }}</span>
+                                <span class="flex-1 text-sm text-body"><BlankText :text="q.question_text" /></span>
                                 <span v-if="q.round_type === 'final'" class="flex-none rounded border border-info/40 px-1.5 py-0.5 text-[10px] font-bold uppercase text-info">Final</span>
                                 <span v-if="q.id === activeCurrentId" class="flex-none rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Current</span>
                                 <span v-else-if="assignedLabels.has(q.id)" class="flex-none whitespace-nowrap rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-semibold text-primary">{{ assignedLabels.get(q.id) }}</span>
@@ -691,7 +692,7 @@ const copyDisplayUrl = () => {
                                     >
                                         <span v-if="regularCols > 1" class="h-2.5 w-2.5 flex-none rounded-full" :style="{ backgroundColor: teamColor(j) }"></span>
                                         <span class="min-w-0 flex-1">
-                                            <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']">{{ slotText(slot.id) || '— pick a question —' }}</span>
+                                            <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>— pick a question —</template></span>
                                             <span class="block text-xs text-subtle">
                                                 <template v-if="regularCols > 1">{{ teamName(j) }}<template v-if="slot.id"> · {{ slotMeta(slot.id) }}</template></template>
                                                 <template v-else>{{ slot.id ? slotMeta(slot.id) : 'Face-off — both teams play' }}</template>
@@ -723,7 +724,7 @@ const copyDisplayUrl = () => {
                                 >
                                     <span class="flex-none rounded-md bg-surface-elevated px-2 py-1 text-[10px] font-bold text-info">{{ finalSlotBadge(i) }}</span>
                                     <span class="min-w-0 flex-1">
-                                        <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']">{{ slotText(slot.id) || finalEmptyText(i) }}</span>
+                                        <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>{{ finalEmptyText(i) }}</template></span>
                                         <span v-if="finalTiered" class="block text-xs text-subtle">Needs {{ i + 1 }} answer{{ i === 0 ? '' : 's' }}</span>
                                         <span v-else-if="slot.id" class="block text-xs text-subtle">{{ slotMeta(slot.id) }}</span>
                                     </span>

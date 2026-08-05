@@ -90,6 +90,16 @@ class DisplayController extends Controller
             });
         }
 
+        // Whether the last regular round just ended and an America Says final is
+        // next — the recap board celebrates the leading team before the final.
+        $finalQueued = false;
+        if (in_array($gameSession->gameType->slug, ['america-says', 'family-feud'], true)
+            && ($currentQuestion?->segment ?? 'main') !== 'final') {
+            $pending = $gameSession->sessionQuestions()->where('status', 'pending');
+            $finalQueued = (clone $pending)->where('segment', 'final')->exists()
+                && !(clone $pending)->where('segment', '!=', 'final')->exists();
+        }
+
         // Get controlling team IDs from state_data if multiple teams
         $controllingTeamIds = [];
         if ($currentQuestion) {
@@ -118,13 +128,21 @@ class DisplayController extends Controller
                 'timer_started_at' => $state?->timer_started_at?->toIso8601String(),
                 'timer_duration' => $state?->timer_duration,
                 'remaining_seconds' => $state?->getRemainingSeconds(),
-                // Guided America Says flow: 'intro' | 'question' | 'recap'.
+                // Guided America Says flow. Regular: 'intro' | 'question' | 'recap'.
+                // Final round: 'final_intro' | 'final_play' | 'final_between' | 'final_result'.
                 'phase' => $state?->getStateValue('phase'),
+                // Final round: the lone team playing, and the pass/fail outcome.
+                'final_team_id' => $state?->getStateValue('final_team_id'),
+                'final_result' => $state?->getStateValue('final_result'),
+                // True on the last regular round's recap, before the final begins.
+                'final_queued' => $finalQueued,
             ],
             'currentQuestion' => $currentQuestion ? [
                 'id' => $currentQuestion->id,
                 'question_text' => $currentQuestion->question->question_text,
                 'status' => $currentQuestion->status,
+                'segment' => $currentQuestion->segment,
+                'answers_needed' => $currentQuestion->answers_needed,
                 'control_status' => $currentQuestion->control_status,
                 'controlling_team_id' => $currentQuestion->controlling_team_id,
                 'controlling_team_ids' => $controllingTeamIds,
