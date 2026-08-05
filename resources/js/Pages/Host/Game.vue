@@ -8,7 +8,7 @@ import Modal from '@/Components/Base/Modal.vue';
 import Confirm from '@/Components/Feedback/Confirm.vue';
 import BlankText from '@/Components/BlankText.vue';
 import { Head } from '@inertiajs/vue3';
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import axios from 'axios';
 
 interface Team {
@@ -209,19 +209,32 @@ const showResetRoundConfirm = ref(false);
 const resetRound = async () => {
     showResetRoundConfirm.value = false;
     timerExpiredHandled.value = false;
+    finalTimeoutFired.value = false;
     bonusDismissedQuestionId.value = null;
-    await Promise.all([
-        axios.post(route('host.round.reset', props.gameSession.id)),
-        axios.post(route('host.timer.reset', props.gameSession.id)),
-    ]);
+    // Reset the round on the server. It sets the clock itself — the full final
+    // budget (e.g. 60s) for the final round, or leaving the regular per-question
+    // clock alone — so only nudge the regular timer back to full here. Resetting
+    // it in the final would knock the minute back down to the 30s regular timer.
+    const calls = [axios.post(route('host.round.reset', props.gameSession.id))];
+    if (!isFinal.value) {
+        calls.push(axios.post(route('host.timer.reset', props.gameSession.id)));
+    }
+    await Promise.all(calls);
     fetchState();
 };
+
+// When on, revealing an answer just shows it on the board — no team, no points.
+// Used to reveal answers that neither team ever said once a round is over. It's a
+// per-question mode: moving to another question drops back to normal scoring.
+const revealWithoutPoints = ref(false);
+watch(() => currentQuestion.value?.id, () => { revealWithoutPoints.value = false; });
 
 const revealAnswer = async (answerId: number) => {
     const activeTeamId = gameState.value?.active_team_id;
     await axios.post(route('host.reveal', props.gameSession.id), {
         answer_id: answerId,
-        team_id: activeTeamId,
+        team_id: revealWithoutPoints.value ? null : activeTeamId,
+        award_points: !revealWithoutPoints.value,
     });
     fetchState();
 };
@@ -269,7 +282,12 @@ const nextQuestion = async () => {
     if (response.data.game_complete) {
         window.location.href = route('dashboard');
     }
-    await axios.post(route('host.timer.reset', props.gameSession.id));
+    // Reset the per-question clock for the next regular question. Skip it when
+    // crossing into the final round — that already set the full final budget
+    // (e.g. 60s), and resetting would knock it back to the regular timer.
+    if (!response.data.entering_final) {
+        await axios.post(route('host.timer.reset', props.gameSession.id));
+    }
     fetchState();
 };
 
@@ -392,6 +410,9 @@ const previousQuestion = async () => {
 
 // Clicking a team on the scoreboard hands control (the turn) to that team.
 const selectControllingTeam = async (teamId: number) => {
+    // Handing control to a team means you're about to score them — leave
+    // reveal-only mode so their reveals count again.
+    revealWithoutPoints.value = false;
     try {
         await axios.post(route('host.control.team', props.gameSession.id), { team_id: teamId });
         fetchState();
@@ -405,6 +426,14 @@ const selectControllingTeam = async (teamId: number) => {
 // Phase drives the single "next step" button: intro → question → (play) → recap.
 const phase = computed<string>(() => gameState.value?.state_data?.phase ?? 'question');
 const timerRunning = computed(() => !!gameState.value?.timer_started_at);
+// The clock's full duration (config). When it's paused mid-question the banked
+// duration is less than this, so the start button reads "Resume Timer" instead.
+const fullTimerDuration = computed(() => Number(props.config?.control_timer_seconds ?? 30));
+const timerPaused = computed(() => {
+    const d = gameState.value?.timer_duration ?? 0;
+    return !timerRunning.value && d > 0 && d < fullTimerDuration.value;
+});
+const startTimerLabel = computed(() => (timerPaused.value ? 'Resume Timer' : 'Start Timer'));
 // The team that does NOT currently hold the turn — offered as a one-click "steal".
 const otherTeam = computed<Team | null>(() =>
     teams.value.find(t => t.id !== gameState.value?.active_team_id) ?? null
@@ -452,16 +481,21 @@ const finalTeam = computed<Team | null>(() => {
 // Guards the one-shot auto-timeout so it fires once when the final clock expires.
 const finalTimeoutFired = ref(false);
 
+// Show the current final question's plaque (answers hidden) so the host reads it.
+const finalShowQuestion = async () => {
+    await axios.post(route('host.final.show', props.gameSession.id));
+    fetchState();
+};
+// Reveal the answer board and (re)start the clock for the shown question.
 const finalStart = async () => {
     timerExpiredHandled.value = false;
     finalTimeoutFired.value = false;
     await axios.post(route('host.final.start', props.gameSession.id));
     fetchState();
 };
-const finalResume = async () => {
-    timerExpiredHandled.value = false;
-    finalTimeoutFired.value = false;
-    await axios.post(route('host.final.resume', props.gameSession.id));
+// After a question is cleared, move to the next one (plaque only) when ready.
+const finalNext = async () => {
+    await axios.post(route('host.final.next', props.gameSession.id));
     fetchState();
 };
 const finalSkip = async () => {
@@ -476,9 +510,12 @@ const finalTimeout = async () => {
     await axios.post(route('host.final.timeout', props.gameSession.id));
     fetchState();
 };
-// Review mode (after the clock runs out): the host can jump between the final
-// questions to reveal the answers the team missed.
-const canNavigateFinal = computed(() => phase.value === 'final_review');
+// The host can jump between the final questions whenever the clock isn't running
+// — to reveal misses after time is up, or to look back at an earlier (cleared or
+// skipped) question, whose revealed answers are still on record.
+const canNavigateFinal = computed(() =>
+    ['final_question', 'final_cleared', 'final_review'].includes(phase.value)
+);
 const finalSelect = async (sessionQuestionId: number) => {
     if (!canNavigateFinal.value) return;
     await axios.post(route('host.final.select', props.gameSession.id), { session_question_id: sessionQuestionId });
@@ -553,9 +590,11 @@ onUnmounted(() => {
 
         <div class="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
             <div class="grid grid-cols-1 gap-6 lg:grid-cols-4">
-                <!-- Scoreboard (left) -->
+                <!-- Scoreboard (left). Hidden in the America Says final round — it's
+                     pass/fail with no scoring, so the Final Round card stands alone. -->
                 <div class="lg:col-span-1">
                     <Scoreboard
+                        v-if="!(isAmericaSays && isFinal)"
                         :teams="teams"
                         :active-team-id="gameState?.active_team_id"
                         :controlling-team-ids="boardControllingTeamIds"
@@ -564,9 +603,31 @@ onUnmounted(() => {
                         @select-team="selectControllingTeam"
                         @edit-scores="openScoreModal"
                     />
-                    <p v-if="!isOodles && currentQuestion" class="mt-2 text-center text-xs text-muted">
+                    <p v-if="!isOodles && currentQuestion && !isFinal" class="mt-2 text-center text-xs text-muted">
                         Click a team to give them the turn
                     </p>
+
+                    <!-- Reveal-only mode (America Says regular rounds): a selectable
+                         sibling to the team turn — points go to a team, or to nobody.
+                         Lives here so control and reveal-only sit together. -->
+                    <button
+                        v-if="isAmericaSays && currentQuestion && !isFinal"
+                        type="button"
+                        class="mt-3 flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors"
+                        :class="revealWithoutPoints ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset hover:border-border-strong'"
+                        @click="revealWithoutPoints = !revealWithoutPoints"
+                    >
+                        <span
+                            class="flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs font-bold"
+                            :class="revealWithoutPoints ? 'bg-primary text-white' : 'bg-surface-overlay text-muted'"
+                        >
+                            <span v-if="revealWithoutPoints">&check;</span>
+                        </span>
+                        <span>
+                            <span class="block text-sm font-semibold" :class="revealWithoutPoints ? 'text-body' : 'text-muted'">Reveal only — no points</span>
+                            <span class="block text-xs text-subtle">For answers neither team said. Reveals show on the board without scoring.</span>
+                        </span>
+                    </button>
 
                     <!-- Round steps (America Says): the whole phase progression with
                          hints; the current phase is highlighted and carries its action. -->
@@ -575,13 +636,13 @@ onUnmounted(() => {
                             <li
                                 v-for="(step, i) in roundSteps"
                                 :key="i"
-                                class="rounded-lg border p-3 transition-colors"
-                                :class="i === roundStepIndex ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset'"
+                                class="rounded-lg border p-3 transition-all"
+                                :class="i === roundStepIndex ? 'border-border bg-surface-inset ring-2 ring-white shadow-[0_0_18px_2px_rgba(255,255,255,0.45)]' : 'border-border bg-surface-inset'"
                             >
                                 <div class="flex items-center gap-2">
                                     <span
                                         class="flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs font-bold"
-                                        :class="i < roundStepIndex ? 'bg-success text-white' : i === roundStepIndex ? 'bg-primary text-white' : 'bg-surface-overlay text-muted'"
+                                        :class="i < roundStepIndex ? 'bg-success text-white' : 'bg-warning text-white'"
                                     >
                                         <span v-if="i < roundStepIndex">&check;</span><span v-else>{{ i + 1 }}</span>
                                     </span>
@@ -602,7 +663,7 @@ onUnmounted(() => {
                                         <Button v-else variant="primary" size="sm" @click="advanceQuestion">Next Question &rarr;</Button>
                                     </template>
                                     <template v-else-if="!timerRunning">
-                                        <Button variant="primary" size="sm" @click="startTimer">Start Timer</Button>
+                                        <Button variant="primary" size="sm" @click="startTimer">{{ startTimerLabel }}</Button>
                                     </template>
                                     <template v-else>
                                         <Button variant="primary" size="sm" @click="endRound">Show Scores &rarr;</Button>
@@ -616,20 +677,15 @@ onUnmounted(() => {
                     <!-- Final round (America Says): who's playing, the 4-question
                          guide/navigator, and the guided action for the current phase. -->
                     <Card v-if="isAmericaSays && isFinal" title="Final Round" class="mt-4">
-                        <div class="mb-3 rounded-lg border border-primary/40 bg-primary/10 p-3 text-center">
-                            <p class="text-xs uppercase tracking-wide text-muted">Playing the Final</p>
-                            <p class="text-lg font-bold" :style="{ color: finalTeam?.color }">{{ finalTeam?.name ?? '—' }}</p>
-                        </div>
-
                         <!-- The four final questions as steps. In review mode (after the
                              clock runs out) each is clickable to jump and reveal misses. -->
                         <ol class="space-y-2">
                             <li
                                 v-for="(fq, i) in finalQuestions"
                                 :key="fq.id"
-                                class="rounded-lg border p-3 transition-colors"
+                                class="rounded-lg border p-3 transition-all"
                                 :class="[
-                                    fq.is_current ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset',
+                                    fq.is_current ? 'border-border bg-surface-inset ring-2 ring-white shadow-[0_0_18px_2px_rgba(255,255,255,0.45)]' : 'border-border bg-surface-inset',
                                     canNavigateFinal && !fq.is_current ? 'cursor-pointer hover:border-border-strong' : '',
                                 ]"
                                 @click="canNavigateFinal && !fq.is_current ? finalSelect(fq.id) : null"
@@ -637,7 +693,7 @@ onUnmounted(() => {
                                 <div class="flex items-center gap-2">
                                     <span
                                         class="flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs font-bold"
-                                        :class="fq.status === 'completed' ? 'bg-success text-white' : fq.is_current ? 'bg-primary text-white' : 'bg-surface-overlay text-muted'"
+                                        :class="fq.status === 'completed' ? 'bg-success text-white' : 'bg-warning text-white'"
                                     >
                                         <span v-if="fq.status === 'completed'">&check;</span><span v-else>{{ i + 1 }}</span>
                                     </span>
@@ -650,8 +706,13 @@ onUnmounted(() => {
                         <!-- Phase action -->
                         <div class="mt-3">
                             <div v-if="phase === 'final_intro'" class="space-y-2">
-                                <p class="text-sm text-muted">Read the first question aloud, then start the {{ gameState?.timer_duration ?? 60 }}s clock.</p>
-                                <Button variant="primary" size="md" class="w-full" @click="finalStart">Start Final &rarr;</Button>
+                                <p class="text-sm text-muted">{{ finalTeam?.name ?? 'The team' }} is up. Show the first question on the board when they’re ready.</p>
+                                <Button variant="primary" size="md" class="w-full" @click="finalShowQuestion">Show Question &rarr;</Button>
+                            </div>
+
+                            <div v-else-if="phase === 'final_question'" class="space-y-2">
+                                <p class="text-sm text-muted">The question is on the board — answers hidden, {{ gameState?.timer_duration ?? 60 }}s banked. Read it aloud, then reveal the answers to start the clock.</p>
+                                <Button variant="primary" size="md" class="w-full" @click="finalStart">Reveal Answers &amp; Start &rarr;</Button>
                             </div>
 
                             <template v-else-if="phase === 'final_play'">
@@ -660,9 +721,9 @@ onUnmounted(() => {
                                 <p v-else class="mt-2 text-center text-xs text-subtle">Skip already used</p>
                             </template>
 
-                            <div v-else-if="phase === 'final_between'" class="space-y-2">
-                                <p class="text-sm text-muted">Clock paused. Read the next question, then resume — it reveals on the board and the clock continues.</p>
-                                <Button variant="primary" size="md" class="w-full" @click="finalResume">Resume &rarr;</Button>
+                            <div v-else-if="phase === 'final_cleared'" class="space-y-2">
+                                <p class="text-sm text-muted">Question cleared — its answers stay on the board. Show the next question when you’re ready to read it.</p>
+                                <Button variant="primary" size="md" class="w-full" @click="finalNext">Next Question &rarr;</Button>
                             </div>
 
                             <div v-else-if="phase === 'final_review'" class="space-y-2">
@@ -852,7 +913,7 @@ onUnmounted(() => {
 
                             <!-- America Says: all revealed + optional sweep bonus -->
                             <div
-                                v-if="isAmericaSays && !isFinal && allAnswersRevealed && bonusDismissedQuestionId !== currentQuestion.id"
+                                v-if="isAmericaSays && !isFinal && allAnswersRevealed && !revealWithoutPoints && bonusDismissedQuestionId !== currentQuestion.id"
                                 class="mb-4 rounded-lg border border-success/40 bg-success/10 p-4 text-center"
                             >
                                 <span class="text-xl font-bold text-success">All Answers Revealed!</span>

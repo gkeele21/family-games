@@ -437,6 +437,10 @@ class HostController extends Controller
         $validated = $request->validate([
             'answer_id' => 'required|exists:answers,id',
             'team_id' => 'nullable|exists:teams,id',
+            // When false, reveal the answer on the board but award no points and
+            // attach it to no team — used to show answers that were never guessed
+            // once a round is over.
+            'award_points' => 'nullable|boolean',
         ]);
 
         $state = $gameSession->gameState;
@@ -457,9 +461,25 @@ class HostController extends Controller
             return response()->json(['error' => 'Answer already revealed'], 400);
         }
 
+        $answer = $currentQuestion->question->answers()->find($validated['answer_id']);
+
+        // Reveal-only (no points): show the answer but credit no team. The host
+        // uses this to reveal answers neither team ever said.
+        $awardPoints = $validated['award_points'] ?? true;
+        if (!$awardPoints) {
+            $currentQuestion->answerReveals()->create([
+                'answer_id' => $validated['answer_id'],
+                'team_id' => null,
+                'revealed_at' => now(),
+                'points_awarded' => 0,
+            ]);
+            $answer->recordReveal();
+
+            return response()->json(['success' => true, 'points' => 0]);
+        }
+
         // Per-answer value comes from the round (points_available). Fall back to
         // the stored answer points for older sessions initialized before rounds.
-        $answer = $currentQuestion->question->answers()->find($validated['answer_id']);
         $points = $currentQuestion->points_available > 0
             ? $currentQuestion->points_available
             : ($answer->points ?? 0);
@@ -518,6 +538,15 @@ class HostController extends Controller
         }
 
         $reveal->delete();
+
+        // Un-revealing an answer on a question that was marked complete (the final
+        // round marks a question done once every answer is shown) drops it back
+        // below "all revealed", so it's no longer complete — clear the status so
+        // its checkmark goes away.
+        if ($currentQuestion->status === 'completed'
+            && $currentQuestion->answerReveals()->count() < $currentQuestion->question->answers()->count()) {
+            $currentQuestion->update(['status' => 'active']);
+        }
 
         return response()->json(['success' => true]);
     }
@@ -1005,15 +1034,15 @@ class HostController extends Controller
                 ]);
                 $nextQuestion->update(['status' => 'active']);
 
-                return response()->json(['success' => true, 'game_complete' => false]);
+                return response()->json(['success' => true, 'game_complete' => false, 'entering_final' => true]);
             }
 
-            $oldRound = $currentQuestion?->round_number ?? $state->round_number;
             $newRound = $nextQuestion->round_number ?? $state->round_number;
-            // Crossing into a new round lands on the "intro" beat (question stays
-            // hidden until the host shows it); within a round the next question is
-            // shown straight away, timer idle. (The client resets the clock.)
-            $stateData['phase'] = $newRound !== $oldRound ? 'intro' : 'question';
+            // Every question opens on its "Get Ready" intro beat — the question and
+            // answers stay hidden until the host hits "Show Question", then "Start
+            // Timer". This keeps the intro on the 2nd+ question of a round too, and
+            // avoids the brief answer-board flash on a same-round transition.
+            $stateData['phase'] = 'intro';
 
             $state->update([
                 'current_question_id' => $nextQuestion->id,
@@ -1021,7 +1050,7 @@ class HostController extends Controller
                 'state_data' => $stateData,
             ]);
             $nextQuestion->update(['status' => 'active']);
-            return response()->json(['success' => true, 'game_complete' => false]);
+            return response()->json(['success' => true, 'game_complete' => false, 'entering_final' => false]);
         }
 
         // No more questions - game is complete
@@ -1111,37 +1140,41 @@ class HostController extends Controller
     }
 
     // ---- America Says final round ---------------------------------------------
-    // A single time budget (default 60s) covers all final questions. The clock
-    // banks its remaining time between questions: it auto-pauses when a question
-    // is cleared (see revealFinalAnswer), the host reads the next one, then
-    // resumes. The leading team plays for a pass/fail win — no points change.
+    // A single time budget (default 60s) covers all final questions. Each question
+    // mirrors a regular round: the plaque is shown first (host reads it) with the
+    // clock idle, then the host reveals the answers and the clock runs. The clock
+    // banks its remaining time between questions — it auto-pauses when a question
+    // is cleared (see revealFinalAnswer), the board keeps the revealed answers up,
+    // and the host moves on when ready. The leading team plays for a pass/fail win.
+    //
+    // Phases: final_intro (Get Ready) → final_question (plaque only, clock idle) →
+    // final_play (answers + clock) → final_cleared (revealed board stays, clock
+    // banked) → back to final_question for the next one; final_review on timeout;
+    // final_result at the end.
 
     /**
-     * Begin the final: reveal the first final question on the board and start the
-     * clock. Moves the phase from "final_intro" to "final_play".
+     * Show the current final question's plaque on the board (answers still hidden,
+     * clock idle) so the host can read it aloud. Moves "final_intro" (or a jumped
+     * state) to "final_question"; the host then hits Start to reveal + run the clock.
      */
-    public function finalStart(GameSession $gameSession)
+    public function finalShowQuestion(GameSession $gameSession)
     {
         if ($gameSession->host_user_id !== auth()->id()) {
             abort(403);
         }
 
-        $state = $gameSession->gameState;
-        // Start of the final: the full time budget begins now.
-        $state->update([
-            'timer_started_at' => now(),
-            'timer_duration' => (int) $gameSession->getConfig('final_round_seconds', 60),
-        ]);
-        $state->setStateValue('phase', 'final_play');
+        $gameSession->gameState?->setStateValue('phase', 'final_question');
 
         return response()->json(['success' => true]);
     }
 
     /**
-     * Resume after an auto-pause: reveal the next final question and continue the
-     * clock on its banked remaining time. Moves "final_between" → "final_play".
+     * Reveal the answer board and (re)start the clock for the shown final question.
+     * Moves "final_question" → "final_play". The time budget was set when the final
+     * began (or banked between questions), so this just resumes it from where it
+     * stands — full budget on the first question, banked remainder thereafter.
      */
-    public function finalResume(GameSession $gameSession)
+    public function finalStart(GameSession $gameSession)
     {
         if ($gameSession->host_user_id !== auth()->id()) {
             abort(403);
@@ -1155,8 +1188,39 @@ class HostController extends Controller
     }
 
     /**
+     * Advance to the next final question after one is cleared: point at it and show
+     * its plaque only (clock stays banked). Moves "final_cleared" → "final_question".
+     */
+    public function finalNext(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $next = $this->nextFinalQuestion($gameSession, $state);
+
+        if (!$next) {
+            // Nothing left — every question was cleared in time, so it's a win.
+            $stateData = $state->state_data ?? [];
+            $stateData['phase'] = 'final_result';
+            $stateData['final_result'] = 'win';
+            $state->update(['state_data' => $stateData]);
+
+            return response()->json(['success' => true, 'complete' => true]);
+        }
+
+        $stateData = $state->state_data ?? [];
+        $stateData['phase'] = 'final_question';
+        $state->update(['current_question_id' => $next->id, 'state_data' => $stateData]);
+
+        return response()->json(['success' => true, 'complete' => false]);
+    }
+
+    /**
      * Use the one allowed skip: bank the clock, park the current question for a
-     * later revisit, and jump to the next unanswered question ("final_between").
+     * later revisit, and jump to the next unanswered question, showing its plaque
+     * only so the host reads it before revealing ("final_question").
      */
     public function finalSkip(GameSession $gameSession)
     {
@@ -1194,7 +1258,7 @@ class HostController extends Controller
         $stateData = $state->state_data ?? [];
         $stateData['final_skip_used'] = true;
         $stateData['final_skipped_question_id'] = $currentQuestion->id;
-        $stateData['phase'] = 'final_between';
+        $stateData['phase'] = 'final_question';
         $state->update(['state_data' => $stateData]);
 
         return response()->json(['success' => true]);
@@ -1291,18 +1355,35 @@ class HostController extends Controller
             return response()->json(['success' => true, 'points' => 0]);
         }
 
-        // Question cleared: bank the clock and mark it done.
-        $state->update([
-            'timer_started_at' => null,
-            'timer_duration' => $state->getRemainingSeconds(),
-        ]);
+        // Question cleared: mark it done, then decide where to go next.
         $currentQuestion->update(['status' => 'completed']);
 
         $next = $this->nextFinalQuestion($state->gameSession, $state);
         $stateData = $state->state_data ?? [];
-        if ($next) {
-            $stateData['phase'] = 'final_between';
+
+        if ($next && $next->display_order < $currentQuestion->display_order) {
+            // Looping back to an earlier question the team already saw (one they
+            // skipped and parked). They've now been shown every question, so don't
+            // stop to re-read it — keep the clock running and drop straight into
+            // revealing it. The same applies to any further incomplete question.
+            $stateData['phase'] = 'final_play';
             $state->update(['current_question_id' => $next->id, 'state_data' => $stateData]);
+
+            return response()->json(['success' => true, 'points' => 0]);
+        }
+
+        // Otherwise the clock pauses here, banking its remaining time.
+        $state->update([
+            'timer_started_at' => null,
+            'timer_duration' => $state->getRemainingSeconds(),
+        ]);
+
+        if ($next) {
+            // Moving forward to a not-yet-seen question: stay on the just-cleared
+            // question so its revealed answers remain on the board (no "Get Ready"
+            // flash). The host advances with finalNext when ready to read the next.
+            $stateData['phase'] = 'final_cleared';
+            $state->update(['state_data' => $stateData]);
         } else {
             // Every final question cleared before time ran out — the team wins.
             $stateData['phase'] = 'final_result';

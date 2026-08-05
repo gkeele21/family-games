@@ -71,8 +71,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/question/select', [HostController::class, 'selectQuestion'])->name('host.question.select');
     Route::post('/host/{gameSession}/question/show', [HostController::class, 'showQuestion'])->name('host.question.show');
     Route::post('/host/{gameSession}/round/end', [HostController::class, 'endRound'])->name('host.round.end');
+    Route::post('/host/{gameSession}/final/show', [HostController::class, 'finalShowQuestion'])->name('host.final.show');
     Route::post('/host/{gameSession}/final/start', [HostController::class, 'finalStart'])->name('host.final.start');
-    Route::post('/host/{gameSession}/final/resume', [HostController::class, 'finalResume'])->name('host.final.resume');
+    Route::post('/host/{gameSession}/final/next', [HostController::class, 'finalNext'])->name('host.final.next');
     Route::post('/host/{gameSession}/final/skip', [HostController::class, 'finalSkip'])->name('host.final.skip');
     Route::post('/host/{gameSession}/final/timeout', [HostController::class, 'finalTimeout'])->name('host.final.timeout');
     Route::post('/host/{gameSession}/final/select', [HostController::class, 'finalSelect'])->name('host.final.select');

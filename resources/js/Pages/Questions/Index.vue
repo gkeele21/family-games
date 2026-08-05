@@ -156,6 +156,32 @@ const openEdit = (q: Question) => {
 const addAnswer = () => form.answers.push(blankAnswer());
 const removeAnswer = (i: number) => form.answers.splice(i, 1);
 
+// Final questions hold a specific number of answers (America Says slots them by
+// answer count, 1–4). Rather than start at the 7-row regular default and make the
+// host delete rows, a Final question starts at 1 and this resizes the list.
+const setAnswerCount = (n: number | string) => {
+    if (n === '' || n === null || n === undefined) return;
+    let target = Math.floor(Number(n));
+    if (isNaN(target)) return;
+    // Final questions are a set standard of 1–4 answers.
+    target = Math.max(1, Math.min(4, target));
+    const cur = form.answers.length;
+    if (target > cur) {
+        for (let k = cur; k < target; k++) form.answers.push(blankAnswer());
+    } else if (target < cur) {
+        form.answers.splice(target);
+    }
+};
+
+// User-driven Round change (not the programmatic set during open): switching to
+// the final round drops to a single answer row; switching back restores the
+// regular default so the host doesn't have to rebuild the list by hand.
+const onRoundChange = (val: 'regular' | 'final') => {
+    if (val === form.round_type) return;
+    form.round_type = val;
+    setAnswerCount(val === 'final' ? 1 : defaultAnswerCount.value);
+};
+
 const save = () => {
     const opts = { preserveScroll: true, onSuccess: () => (showEditor.value = false) };
     if (editorMode.value === 'add') form.post(route('questions.store'), opts);
@@ -304,8 +330,23 @@ const inputClass = 'w-full rounded-lg border-border bg-surface-inset text-body p
                         <TextField v-if="isOodles" v-model="form.answer_letter" label="Letter (A–Z)" placeholder="A" />
                     </div>
 
-                    <div v-if="hasFinalRound" class="max-w-[220px]">
-                        <Select v-model="form.round_type" :options="roundTypeOptions" label="Round" />
+                    <div v-if="hasFinalRound" class="flex items-end gap-4">
+                        <div class="max-w-[220px] flex-1">
+                            <Select :model-value="form.round_type" :options="roundTypeOptions" label="Round" @update:model-value="onRoundChange" />
+                        </div>
+                        <!-- Final questions carry a set number of answers; this sizes
+                             the list below (America Says slots them by answer count). -->
+                        <div v-if="!isOodles && form.round_type === 'final'" class="w-24">
+                            <label class="mb-1.5 block text-sm font-medium text-body">Answers</label>
+                            <input
+                                :value="form.answers.length"
+                                type="number"
+                                min="1"
+                                max="4"
+                                :class="inputClass"
+                                @input="setAnswerCount(($event.target as HTMLInputElement).value)"
+                            />
+                        </div>
                     </div>
 
                     <!-- Oodles: one answer, no points (scored by cards won) -->

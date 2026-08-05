@@ -22,15 +22,21 @@ interface GameState {
     timer_started_at: string | null;
     timer_duration: number;
     round_number?: number;
+    // The team currently holding the turn — named on the round intro.
+    active_team_id?: number | null;
     // Guided flow phase. Regular: 'intro' | 'question' | 'recap'. Final round:
-    // 'final_intro' | 'final_play' | 'final_between' | 'final_result'. Absent on
-    // older sessions (treated as 'question' so the board still renders).
+    // 'final_intro' | 'final_question' | 'final_play' | 'final_cleared' |
+    // 'final_review' | 'final_result'. Absent on older sessions (treated as
+    // 'question' so the board still renders).
     phase?: string;
     // Final round: the lone team playing, and the pass/fail outcome.
     final_team_id?: number | null;
     final_result?: string | null;
     // True on the last regular round's recap, before the final begins.
     final_queued?: boolean;
+    // True when the recap follows the last question of the round (every team has
+    // had their turn) — the scores slide then reads "End of Round N".
+    end_of_round?: boolean;
 }
 
 interface CurrentQuestion {
@@ -143,12 +149,45 @@ const timerExpired = computed(() => remainingTime.value <= 0);
 const phase = computed(() => props.gameState?.phase ?? 'question');
 const roundNumber = computed(() => props.gameState?.round_number ?? 1);
 
+// The team up next on the round intro. The controlling team is the effective
+// holder of the turn; fall back to the active team from state.
+const activeTeam = computed<Team | null>(() => {
+    const id = props.currentQuestion?.controlling_team_id ?? props.gameState?.active_team_id;
+    return id ? props.teams.find((t) => t.id === id) ?? null : null;
+});
+
 // Final round: the single team playing for a pass/fail win.
 const finalTeam = computed<Team | null>(() => {
     const id = props.gameState?.final_team_id;
     return id ? props.teams.find((t) => t.id === id) ?? null : null;
 });
 const finalResult = computed(() => props.gameState?.final_result ?? null);
+
+// A final question's answer board is shown once the host reveals it (phase
+// final_play), while reviewing misses after time is up (final_review), or any
+// time the current question already has revealed answers — so jumping back to a
+// cleared/skipped question shows its answers, while a freshly-shown question
+// (final_question with nothing revealed yet) stays plaque-only for the read.
+const finalHasReveals = computed(() =>
+    !!props.currentQuestion?.answers?.some((a) => a.revealed)
+);
+const finalBoardVisible = computed(
+    () => phase.value === 'final_play' || phase.value === 'final_review' || finalHasReveals.value
+);
+
+// Confetti for the winner slide: a fixed set of pieces (position / delay /
+// duration / color / size) that fall continuously. Built once so the pieces
+// don't reshuffle on every poll.
+const CONFETTI_COLORS = ['#f4b433', '#ef4636', '#2438e6', '#eaf1ff', '#5f7bff'];
+const confettiPieces = Array.from({ length: 60 }, (_, i) => ({
+    left: (i * 37) % 100,
+    delay: -((i * 0.37) % 6),
+    duration: 4.5 + ((i * 13) % 40) / 10,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    size: 8 + (i % 4) * 3,
+    drift: (i % 2 === 0 ? 1 : -1) * (6 + (i % 5) * 3),
+    round: i % 3 === 0,
+}));
 
 // When the final clock runs out, flash a full-screen "Out of Time" over the map
 // for ~3s, then let the board fall through to the reveal (review) beneath it.
@@ -266,30 +305,35 @@ onUnmounted(() => {
         <!-- ===================== PLAYING ===================== -->
         <template v-if="status === 'playing'">
             <!-- Final round: the single time budget stays on the board through every
-                 beat (intro / play / paused-between / review) — like the regular
-                 round clock, always visible. It shows the banked time while paused
-                 and counts down during play. -->
+                 beat (intro / question / play / cleared) — like the regular round
+                 clock. It shows the banked time while idle and counts down during
+                 play. Once time is up (final_review) the clock is gone; the host is
+                 just revealing the answers they missed. -->
             <div
-                v-if="['final_intro', 'final_play', 'final_between', 'final_review'].includes(phase)"
+                v-if="['final_intro', 'final_question', 'final_play', 'final_cleared'].includes(phase)"
                 class="as-timer"
                 :class="{ 'as-timer-warn': timerWarning, 'as-timer-expired': timerExpired }"
             >{{ timerDisplay }}</div>
 
-            <!-- INTRO: a round is about to start; the question stays hidden -->
+            <!-- INTRO: a round is about to start; the question stays hidden. Names
+                 the team whose turn is up so they know to get ready. -->
             <div v-if="phase === 'intro'" class="as-center">
                 <p class="as-eyebrow font-logo">Round {{ roundNumber }}</p>
-                <p class="as-headline font-logo">Get Ready</p>
+                <template v-if="activeTeam">
+                    <p class="as-headline as-headline-sm font-logo" :style="{ color: activeTeam.color }">{{ activeTeam.name }}</p>
+                    <p class="as-subhead font-logo">Get Ready</p>
+                </template>
+                <p v-else class="as-headline font-logo">Get Ready</p>
             </div>
 
             <!-- RECAP: round scoreboard. After the last regular round, crown the
                  leading team before the final round begins. -->
             <div v-else-if="phase === 'recap'" class="as-center">
                 <template v-if="finalQueued && leadingTeam">
-                    <p class="as-eyebrow font-logo">Regular Rounds Complete</p>
                     <p class="as-headline font-logo" :style="{ color: leadingTeam.color }">{{ leadingTeam.name }} Wins!</p>
                     <p class="as-subhead font-logo">On to the Final Round</p>
                 </template>
-                <p v-else class="as-eyebrow font-logo">Round {{ roundNumber }} · Scores</p>
+                <p v-else class="as-eyebrow font-logo">{{ gameState?.end_of_round ? 'End of Round' : 'Round' }} {{ roundNumber }} · Scores</p>
                 <div class="as-finalscores">
                     <div v-for="team in orderedTeams" :key="team.id" class="as-scorechip">
                         <span class="as-scorechip-name" :style="{ color: team.color }">{{ team.name }}</span>
@@ -305,25 +349,40 @@ onUnmounted(() => {
                 <p class="as-subhead font-logo">Get Ready</p>
             </div>
 
-            <!-- FINAL — between questions: next one stays hidden until the host resumes -->
-            <div v-else-if="phase === 'final_between'" class="as-center">
-                <p class="as-eyebrow font-logo">Final Round</p>
-                <p class="as-headline font-logo">Get Ready</p>
-            </div>
-
-            <!-- FINAL — pass/fail result -->
+            <!-- FINAL — pass/fail result. A win gets a celebratory "You Won!!!!"
+                 with confetti raining continuously; a loss keeps "Out of Time". -->
             <div v-else-if="phase === 'final_result'" class="as-center">
+                <div v-if="finalResult === 'win'" class="as-confetti" aria-hidden="true">
+                    <span
+                        v-for="(p, pi) in confettiPieces"
+                        :key="pi"
+                        class="as-confetti-piece"
+                        :class="{ 'as-confetti-round': p.round }"
+                        :style="{
+                            left: p.left + '%',
+                            backgroundColor: p.color,
+                            width: p.size + 'px',
+                            height: p.size + 'px',
+                            animationDelay: p.delay + 's',
+                            animationDuration: p.duration + 's',
+                            '--as-drift': p.drift + 'vw',
+                        }"
+                    ></span>
+                </div>
                 <p class="as-eyebrow font-logo">Final Round</p>
-                <p class="as-headline font-logo">{{ finalResult === 'win' ? 'Winner!' : 'Out of Time' }}</p>
+                <p class="as-headline font-logo" :class="{ 'as-win-headline': finalResult === 'win' }">{{ finalResult === 'win' ? 'You Won!!!!' : 'Out of Time' }}</p>
                 <p v-if="finalTeam" class="as-subhead font-logo" :style="{ color: finalTeam.color }">{{ finalTeam.name }}</p>
             </div>
 
             <!-- FINAL — a question board: plaque + a top-anchored, left-aligned answer
                  list (the block is centered on the map; answer #1 holds its spot and
-                 each new answer stacks beneath it, all sharing a left edge). Shown
-                 while a question is live (with the clock) and in review after time
-                 runs out (no clock, "Out of Time" heading) as the host reveals misses. -->
-            <template v-else-if="phase === 'final_play' || phase === 'final_review'">
+                 each new answer stacks beneath it, all sharing a left edge). The
+                 plaque shows first on its own (final_question) so the host can read
+                 the question before revealing; the answer board appears once the host
+                 reveals (final_play), stays up after the question is cleared
+                 (final_cleared), and is shown when reviewing misses (final_review) or
+                 whenever the current question already has revealed answers. -->
+            <template v-else-if="['final_question', 'final_play', 'final_cleared', 'final_review'].includes(phase)">
                 <div class="as-overlay">
                     <div class="as-plaque">
                         <div class="as-face">
@@ -333,7 +392,7 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <div v-if="currentQuestion" class="as-answers as-answers-final">
+                    <div v-if="currentQuestion && finalBoardVisible" class="as-answers as-answers-final">
                         <div class="as-final-col">
                             <div v-for="ans in sortedAnswers" :key="ans.id" class="as-row-final">
                                 <div class="as-ans as-ans-final font-logo">
@@ -395,6 +454,14 @@ onUnmounted(() => {
             <div class="as-logo" aria-label="America Says">
                 <span class="as-logo-word as-logo-america">America</span>
                 <span class="as-logo-word as-logo-says">Says</span>
+            </div>
+            <!-- The matchup, each team in its own color, so players see the lineup
+                 before the game starts. -->
+            <div v-if="orderedTeams.length" class="as-matchup">
+                <template v-for="(team, ti) in orderedTeams" :key="team.id">
+                    <span v-if="ti > 0" class="as-vs font-logo">vs</span>
+                    <span class="as-team font-logo" :style="{ color: team.color }">{{ team.name }}</span>
+                </template>
             </div>
             <p class="as-subhead font-logo">Waiting to Start</p>
         </div>
@@ -515,11 +582,11 @@ onUnmounted(() => {
     padding-top: 2.2vh;
 }
 .as-row { display: flex; justify-content: center; align-items: center; width: 100%; }
-/* Final round: a top-anchored, left-aligned list. The column is a single centered
-   block (so it sits in the middle of the map), and every answer shares its left
-   edge — answer #1 keeps its spot just below the plaque and each new one stacks
-   beneath it. */
-.as-answers-final { justify-content: flex-start; padding-top: 3vh; }
+/* Final round: a left-aligned list, vertically centered in the space below the
+   plaque (rather than pinned to the top) so it sits in the middle of the map. The
+   column is a single centered block and every answer shares its left edge; all
+   rows are present from the start, so nothing shifts as answers are revealed. */
+.as-answers-final { justify-content: center; padding-top: 0; }
 .as-final-col {
     display: flex;
     flex-direction: column;
@@ -539,6 +606,40 @@ onUnmounted(() => {
     from { opacity: 0; }
     to { opacity: 1; }
 }
+/* Winner celebration: confetti raining continuously behind the "You Won!!!!"
+   headline, and a pop-in on the headline itself. */
+.as-confetti {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: -1;
+}
+.as-confetti-piece {
+    position: absolute;
+    top: 0;
+    border-radius: 2px;
+    opacity: 0.92;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.35);
+    animation-name: as-confetti-fall;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    will-change: transform;
+}
+.as-confetti-round { border-radius: 50%; }
+@keyframes as-confetti-fall {
+    0% { transform: translate3d(0, -12vh, 0) rotate(0deg); }
+    100% { transform: translate3d(var(--as-drift, 0), 112vh, 0) rotate(720deg); }
+}
+.as-win-headline {
+    color: #f4b433;
+    font-size: clamp(48px, 8.4vw, 150px);
+    animation: as-win-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes as-win-pop {
+    0% { transform: scale(0.5); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+}
 /* pair rows kept narrower and centered so edge words stay inside the coastline */
 .as-pair { justify-content: space-between; width: 80%; margin: 0 auto; }
 .as-ans {
@@ -553,13 +654,17 @@ onUnmounted(() => {
 }
 /* Unrevealed blank: negative tracking squishes the underscores into one
    continuous line so the exact character count can't be read off. Hyphens sit
-   in their own span with margin so they aren't scrunched against the line. */
-.as-blank-wrap { display: inline-block; }
+   in their own span with margin so they aren't scrunched against the line.
+   vertical-align:middle keeps the row height identical whether the answer is a
+   blank or a revealed (overflow:hidden) span — otherwise the baseline shifts as
+   answers reveal and the whole board creeps down into the map border. */
+.as-blank-wrap { display: inline-block; vertical-align: middle; }
 .as-blank { letter-spacing: -0.15em; }
 .as-hyphen { margin: 0 0.10em; letter-spacing: normal; }
 /* Revealed: typewriter reveal of the real answer (ported from the old board). */
 .as-typing {
     display: inline-block;
+    vertical-align: middle;
     overflow: hidden;
     white-space: nowrap;
     max-width: 0;
@@ -662,6 +767,30 @@ onUnmounted(() => {
     font-size: clamp(20px, 2.6vw, 46px);
     text-shadow: 0 0 16px rgba(150, 190, 255, 0.5), 0 2px 6px rgba(0, 0, 0, 0.55);
 }
+/* Lobby matchup: "Team A vs Team B" in each team's color. */
+.as-matchup {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(12px, 2vw, 32px);
+}
+.as-team {
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: clamp(24px, 3.4vw, 60px);
+    text-shadow: 0 0 16px rgba(150, 190, 255, 0.4), 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+.as-vs {
+    color: #eaf1ff;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: clamp(16px, 2vw, 32px);
+    opacity: 0.75;
+}
+
 .as-finalscores { display: flex; flex-wrap: wrap; gap: clamp(16px, 3vw, 48px); justify-content: center; }
 .as-scorechip {
     display: flex;
@@ -721,5 +850,7 @@ onUnmounted(() => {
 @media (prefers-reduced-motion: reduce) {
     .as-typing { animation: none; max-width: 100%; }
     .as-timer-warn { animation: none; }
+    .as-confetti-piece { animation: none; display: none; }
+    .as-win-headline { animation: none; }
 }
 </style>

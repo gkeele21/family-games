@@ -90,6 +90,17 @@ class DisplayController extends Controller
             });
         }
 
+        // Whether the just-played question is the last one in its round (every team
+        // has now had their turn) — so the scores recap reads "End of Round N"
+        // rather than mid-round running scores after only the first team's turn.
+        $endOfRound = false;
+        if ($currentQuestion && ($currentQuestion->segment ?? 'main') === 'main') {
+            $endOfRound = !$gameSession->sessionQuestions()
+                ->where('round_number', $currentQuestion->round_number)
+                ->where('display_order', '>', $currentQuestion->display_order)
+                ->exists();
+        }
+
         // Whether the last regular round just ended and an America Says final is
         // next — the recap board celebrates the leading team before the final.
         $finalQueued = false;
@@ -129,13 +140,16 @@ class DisplayController extends Controller
                 'timer_duration' => $state?->timer_duration,
                 'remaining_seconds' => $state?->getRemainingSeconds(),
                 // Guided America Says flow. Regular: 'intro' | 'question' | 'recap'.
-                // Final round: 'final_intro' | 'final_play' | 'final_between' | 'final_result'.
+                // Final: 'final_intro' | 'final_question' | 'final_play' |
+                // 'final_cleared' | 'final_review' | 'final_result'.
                 'phase' => $state?->getStateValue('phase'),
                 // Final round: the lone team playing, and the pass/fail outcome.
                 'final_team_id' => $state?->getStateValue('final_team_id'),
                 'final_result' => $state?->getStateValue('final_result'),
                 // True on the last regular round's recap, before the final begins.
                 'final_queued' => $finalQueued,
+                // True when the recap follows the last question of the round.
+                'end_of_round' => $endOfRound,
             ],
             'currentQuestion' => $currentQuestion ? [
                 'id' => $currentQuestion->id,
