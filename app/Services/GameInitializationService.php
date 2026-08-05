@@ -53,6 +53,16 @@ class GameInitializationService
             throw new \RuntimeException('No questions available for Oodles');
         }
 
+        // "Just for fun" bonus questions shown at the top of each card — no
+        // points, no control. Shuffled once; repeats only if the pool runs dry.
+        $bonusIds = Question::where('game_type_id', $gameSession->game_type_id)
+            ->where('is_active', true)
+            ->where('round_type', 'bonus')
+            ->inRandomOrder()
+            ->pluck('id')
+            ->all();
+        $bonusIndex = 0;
+
         $usedLetters = [];
         $usedQuestionIds = [];
 
@@ -74,6 +84,9 @@ class GameInitializationService
                 'game_session_id' => $gameSession->id,
                 'card_number' => $cardNumber,
                 'letter' => $letter,
+                'bonus_question_id' => $bonusIds === []
+                    ? null
+                    : $bonusIds[$bonusIndex++ % count($bonusIds)],
                 'status' => 'pending',
             ]);
 

@@ -64,6 +64,10 @@ interface CurrentCard {
     letter: string;
     status: string;
     questions: CardQuestion[];
+    bonus_question: {
+        question_text: string;
+        answer_text: string | null;
+    } | null;
 }
 
 interface Props {
@@ -474,6 +478,17 @@ onUnmounted(() => {
                                 </div>
                             </div>
                             <Button variant="secondary" size="md" @click="nextCard">Next Card &rarr;</Button>
+                        </div>
+                        <!-- Just-for-fun opener: read it out, no points, no control -->
+                        <div
+                            v-if="currentCard.bonus_question"
+                            class="mt-4 rounded-lg border border-border bg-surface-inset px-4 py-3"
+                        >
+                            <span class="text-xs font-bold uppercase tracking-widest text-muted">Just for fun</span>
+                            <p class="mt-1 text-body">{{ currentCard.bonus_question.question_text }}</p>
+                            <p class="mt-1 text-sm text-success">
+                                Answer: {{ currentCard.bonus_question.answer_text ?? '—' }}
+                            </p>
                         </div>
                     </Card>
 

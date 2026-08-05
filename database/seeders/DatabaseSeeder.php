@@ -27,6 +27,7 @@ class DatabaseSeeder extends Seeder
             GameTypeSeeder::class,
             OodlesQuestionSeeder::class,
             OodlesScannedCardSeeder::class,
+            OodlesCardLibrarySeeder::class,
             AmericaSaysQuestionSeeder::class,
             CategorySeeder::class,
         ]);
