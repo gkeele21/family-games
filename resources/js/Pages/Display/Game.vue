@@ -44,6 +44,10 @@ interface CurrentCard {
     id: number;
     card_number: number;
     letter: string;
+    bonus_question: {
+        question_text: string;
+        answer_text: string | null;
+    } | null;
 }
 
 interface Props {
