@@ -672,8 +672,8 @@ onUnmounted(() => {
                                         <Button variant="primary" size="sm" @click="startTimer">{{ startTimerLabel }}</Button>
                                     </template>
                                     <template v-else>
-                                        <Button variant="primary" size="sm" @click="endRound">Show Scores &rarr;</Button>
-                                        <Button v-if="otherTeam" variant="secondary" size="sm" @click="giveControlToOther">Give control to {{ otherTeam.name }}</Button>
+                                        <Button v-if="otherTeam" variant="primary" size="sm" @click="giveControlToOther">Give control to {{ otherTeam.name }}</Button>
+                                        <Button :variant="otherTeam ? 'secondary' : 'primary'" size="sm" @click="endRound">Show Scores &rarr;</Button>
                                     </template>
                                 </div>
                             </li>
