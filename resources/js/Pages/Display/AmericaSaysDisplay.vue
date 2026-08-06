@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { US_MAP_PATH } from './usMapPath';
+import { useSoundEffects } from '@/composables/useSoundEffects';
+import Button from '@/Components/Base/Button.vue';
 
 interface Team {
     id: number;
@@ -37,6 +39,9 @@ interface GameState {
     // True when the recap follows the last question of the round (every team has
     // had their turn) — the scores slide then reads "End of Round N".
     end_of_round?: boolean;
+    // Monotonic counter bumped by the host's "Wrong" buzzer; each advance plays
+    // the incorrect sound on the display.
+    wrong_buzz?: number;
 }
 
 interface CurrentQuestion {
@@ -69,17 +74,113 @@ const orderedTeams = computed(() =>
 
 const usMapPath = US_MAP_PATH;
 
+// Sound effects: uploaded clips in public/sounds/ (correct / incorrect / timeout).
+const sounds = useSoundEffects();
+
+// Background round music — its own channel at a lower volume so the one-shot
+// effects cut through it. Plays while the timer runs and pauses with it (see the
+// watchers below).
+let bgm: HTMLAudioElement | null = null;
+const getBgm = (): HTMLAudioElement => {
+    if (!bgm) {
+        bgm = new Audio('/sounds/GameplayMusic.m4a');
+        bgm.preload = 'auto';
+        bgm.volume = 0.4;
+    }
+    return bgm;
+};
+
+// Theme music — the intro sting played over the map + team names once the game
+// has started AND the display's audio has been unlocked (see the flow below).
+let theme: HTMLAudioElement | null = null;
+const getTheme = (): HTMLAudioElement => {
+    if (!theme) {
+        theme = new Audio('/sounds/ThemeMusic.m4a');
+        theme.preload = 'auto';
+        theme.volume = 0.6;
+    }
+    return theme;
+};
+
+// "Bless" an audio element inside a user gesture so it can be played
+// programmatically later, even though that later play isn't a gesture itself.
+const blessAudio = (m: HTMLAudioElement) => {
+    m.muted = true;
+    const p = m.play();
+    if (p) {
+        p.then(() => { m.pause(); m.currentTime = 0; m.muted = false; })
+         .catch(() => { m.muted = false; });
+    }
+};
+
+// Theme slide: map + team names shown while the theme music plays, then it
+// dismisses itself (revealing gameplay) when the music ends. It fires ONCE, the
+// moment BOTH the sound check is done (audio unlocked) AND the admin has started
+// the game — whichever happens second triggers it.
+const soundCheckDone = ref(false);
+const themeSlideOpen = ref(false);
+let themeStarted = false;
+
+const startTheme = () => {
+    if (themeStarted) return;
+    themeStarted = true;
+    const t = getTheme();
+    themeSlideOpen.value = true;
+    const finish = () => { themeSlideOpen.value = false; };
+    // Close on natural end, or immediately if the file is missing/blocked so the
+    // board never gets stuck behind the slide.
+    t.addEventListener('ended', finish, { once: true });
+    t.addEventListener('error', finish, { once: true });
+    t.currentTime = 0;
+    const p = t.play();
+    if (p) p.catch(() => finish());
+};
+
+const maybeStartTheme = () => {
+    if (soundCheckDone.value && props.status === 'playing') startTheme();
+};
+
+// The sound-check panel shows on load. It doubles as the browser autoplay unlock
+// (TVs block sound until a user gesture) and lets whoever's running the display
+// preview the correct/incorrect cues so the room knows them. "Done" unlocks all
+// audio, then rolls straight into the theme if the admin has already started.
+const soundPanelOpen = ref(true);
+const startShow = () => {
+    sounds.unlock();
+    soundCheckDone.value = true;
+    blessAudio(getBgm());
+    blessAudio(getTheme());
+    soundPanelOpen.value = false;
+    if (props.status === 'playing') {
+        maybeStartTheme();
+    } else if (props.gameState?.timer_started_at) {
+        // Display opened mid-round (no theme) — just resume the round music.
+        getBgm().play().catch(() => {});
+    }
+};
+
 // Timer state
 const remainingTime = ref(props.gameState?.timer_duration || 30);
 const buzzerPlayed = ref(false);
 let timerInterval: number | null = null;
 let audioContext: AudioContext | null = null;
 
-// Play buzzer sound using Web Audio API
-const playBuzzer = () => {
+// Timer expiry: play the uploaded EndTimer.m4a if present; otherwise fall back to
+// the built-in synth buzzer so there's always *some* time's-up cue. Guarded so
+// it fires once per run (reset when the timer restarts).
+const playTimeout = () => {
     if (buzzerPlayed.value) return;
     buzzerPlayed.value = true;
 
+    if (sounds.isAvailable('timeout') === false) {
+        playBuzzerTone();
+    } else {
+        sounds.play('timeout');
+    }
+};
+
+// Fallback time's-up tone via the Web Audio API (used when no EndTimer.m4a exists).
+const playBuzzerTone = () => {
     try {
         audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
 
@@ -121,9 +222,10 @@ const calculateRemainingTime = () => {
     const prevTime = remainingTime.value;
     remainingTime.value = Math.max(0, (props.gameState?.timer_duration || 30) - elapsed);
 
-    // Play buzzer when timer crosses from >0 to 0
+    // Play timeout sound when timer crosses from >0 to 0
     if (prevTime > 0 && remainingTime.value === 0) {
-        playBuzzer();
+        getBgm().pause();
+        playTimeout();
     }
 };
 
@@ -132,6 +234,36 @@ watch(() => props.gameState?.timer_started_at, (newVal, oldVal) => {
     if (newVal && !oldVal) {
         // Timer just started, reset buzzer flag
         buzzerPlayed.value = false;
+    }
+});
+
+// --- Background music --------------------------------------------------------
+// Play round music while the timer runs; pause it when the timer pauses; rewind
+// on a new question or when play stops. Music and timer both advance in real time
+// and pause together, so the climax lands near the timer's end with no manual
+// position syncing. (On resume we DON'T rewind, so it continues where it paused.)
+watch(() => props.gameState?.timer_started_at != null, (running, wasRunning) => {
+    const m = getBgm();
+    if (running) m.play().catch(() => {});
+    else if (wasRunning) m.pause();
+});
+
+// New question → music back to the top (the timer isn't running yet here).
+watch(() => props.currentQuestion?.id, () => {
+    const m = getBgm();
+    m.pause();
+    m.currentTime = 0;
+});
+
+// Status changes: leaving active play stops the round music; entering it (admin
+// pressed Start Game) rolls the theme if the sound check was already done.
+watch(() => props.status, (s) => {
+    if (s !== 'playing') {
+        const m = getBgm();
+        m.pause();
+        m.currentTime = 0;
+    } else {
+        maybeStartTheme();
     }
 });
 
@@ -162,6 +294,62 @@ const finalTeam = computed<Team | null>(() => {
     return id ? props.teams.find((t) => t.id === id) ?? null : null;
 });
 const finalResult = computed(() => props.gameState?.final_result ?? null);
+
+// --- Correct-answer sound -------------------------------------------------
+// Play CorrectAnswer.m4a whenever a new answer flips to revealed on the SAME question.
+// A question switch (or the board first loading a question that already has
+// reveals) syncs silently so we don't blast the sound on load.
+const revealedIds = computed(() =>
+    (props.currentQuestion?.answers ?? []).filter((a) => a.revealed).map((a) => a.id)
+);
+const revealedKey = computed(() => [...revealedIds.value].sort((a, b) => a - b).join(','));
+let prevRevealed = new Set<number>(revealedIds.value);
+let prevQuestionId: number | null = props.currentQuestion?.id ?? null;
+
+watch(revealedKey, () => {
+    const qid = props.currentQuestion?.id ?? null;
+    const now = new Set(revealedIds.value);
+    // Question changed → adopt its revealed set without a sound.
+    if (qid !== prevQuestionId) {
+        prevQuestionId = qid;
+        prevRevealed = now;
+        return;
+    }
+    let hasNewReveal = false;
+    now.forEach((id) => { if (!prevRevealed.has(id)) hasNewReveal = true; });
+    prevRevealed = now;
+    if (hasNewReveal) sounds.play('correct');
+});
+
+// --- Incorrect sound ------------------------------------------------------
+// IncorrectAnswer.m4a is host-driven only — the "Wrong Answer" buzzer. It is NOT
+// played automatically on a final-round loss (only TimerEnd plays when the
+// clock runs out). The host bumps a monotonic counter; play the sound each time
+// it advances (undefined prev on first load means no sound until pressed).
+watch(() => props.gameState?.wrong_buzz, (now, prev) => {
+    if (typeof now === 'number' && typeof prev === 'number' && now > prev) {
+        sounds.play('incorrect');
+    }
+});
+
+// --- Question-shown & board-shown sounds ----------------------------------
+// ShowQuestion.m4a: the plaque appears when the host presses "Show Question"
+// (phase → 'question' regular / 'final_question' final).
+// AnswerBoard.m4a: the answer board + clock appear — in the final that's "Reveal
+// Answers & Start" (phase → 'final_play'); in a regular round it's "Start Timer",
+// which sets timer_started_at while phase stays 'question' (handled below).
+watch(phase, (now, prev) => {
+    if (now === prev) return;
+    if (now === 'question' || now === 'final_question') sounds.play('question');
+    else if (now === 'final_play') sounds.play('board');
+});
+
+// Regular round: board/clock appear on the timer's false→true start. Gated to the
+// 'question' phase so it doesn't double up with the final_play case above (the
+// final sets phase and timer together).
+watch(() => props.gameState?.timer_started_at != null, (started, wasStarted) => {
+    if (started && !wasStarted && phase.value === 'question') sounds.play('board');
+});
 
 // A final question's answer board is shown once the host reveals it (phase
 // final_play), while reviewing misses after time is up (final_review), or any
@@ -270,6 +458,14 @@ onMounted(() => {
 onUnmounted(() => {
     if (timerInterval) {
         clearInterval(timerInterval);
+    }
+    if (bgm) {
+        bgm.pause();
+        bgm = null;
+    }
+    if (theme) {
+        theme.pause();
+        theme = null;
     }
 });
 </script>
@@ -471,6 +667,39 @@ onUnmounted(() => {
             <p class="as-headline font-logo">Paused</p>
         </div>
 
+        <!-- Sound check + one-time audio unlock. TVs/browsers block sound until a
+             user gesture, so this panel shows on load: preview the cues, then
+             "Start" enables audio and dismisses it. -->
+        <!-- keeler-app brings the palette tokens into scope so the shared Button
+             component's color variants (success / danger / primary) resolve — the
+             rest of this board is intentionally off-palette hex. -->
+        <div v-if="soundPanelOpen" class="as-soundcheck keeler-app">
+            <div class="as-soundcheck-card">
+                <p class="as-soundcheck-title font-logo">Sound Check</p>
+                <p class="as-soundcheck-hint">Tap a sound to preview it, then press Done.</p>
+                <div class="as-soundcheck-row">
+                    <Button variant="success" size="md" @click="sounds.play('correct')">&#9654;&nbsp; Correct Answer</Button>
+                    <Button variant="danger" size="md" @click="sounds.play('incorrect')">&#9654;&nbsp; Incorrect Answer</Button>
+                </div>
+                <Button variant="accent" size="md" @click="startShow">Done</Button>
+            </div>
+        </div>
+
+        <!-- Theme slide: the map + team matchup while the theme music plays, then
+             it dismisses itself (on the music's 'ended') to reveal gameplay. -->
+        <div v-if="themeSlideOpen" class="as-center as-theme">
+            <div class="as-logo" aria-label="America Says">
+                <span class="as-logo-word as-logo-america">America</span>
+                <span class="as-logo-word as-logo-says">Says</span>
+            </div>
+            <div v-if="orderedTeams.length" class="as-matchup">
+                <template v-for="(team, ti) in orderedTeams" :key="team.id">
+                    <span v-if="ti > 0" class="as-vs font-logo">vs</span>
+                    <span class="as-team font-logo" :style="{ color: team.color }">{{ team.name }}</span>
+                </template>
+            </div>
+        </div>
+
         <!-- Final round: a brief "Out of Time" flash over the map the moment the
              clock expires, before the reveal board shows beneath it. -->
         <div v-if="timeUpSplash" class="as-center as-timeup">
@@ -596,6 +825,13 @@ onUnmounted(() => {
 }
 .as-row-final { flex: 0 0 auto; }
 .as-ans-final { text-align: left; }
+/* Theme slide: map + team matchup over a soft scrim while the theme plays. Sits
+   above gameplay but below the sound-check panel (they never show together). */
+.as-theme {
+    z-index: 35;
+    background: radial-gradient(120% 80% at 50% 45%, rgba(6, 12, 40, 0.55), rgba(2, 3, 12, 0.85));
+    animation: as-timeup-in 0.4s ease-out;
+}
 /* Brief full-screen "Out of Time" flash when the final clock expires. */
 .as-timeup {
     z-index: 30;
@@ -846,6 +1082,57 @@ onUnmounted(() => {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.08); }
 }
+
+/* Sound-check panel: a full-screen scrim over the board with a gold-rimmed card,
+   matching the off-palette board look. Shows on load until "Start". */
+/* Compact card tucked into the top-left corner (no full-screen scrim) so the
+   America Says logo + map stay visible behind it. The card itself uses Keeler
+   palette tokens — keeler-app scope is set on the wrapper for exactly this. */
+.as-soundcheck {
+    position: absolute;
+    top: 3%;
+    left: 2.4%;
+    z-index: 40;
+    /* keeler-app is a page wrapper by default (fills the viewport, gray ground) —
+       we only want its palette variables, so cancel those two effects. */
+    min-height: 0;
+    background: transparent;
+}
+.as-soundcheck-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    width: min(320px, 36vw);
+    padding: 16px 18px;
+    border-radius: 16px;
+    background: rgb(var(--color-surface-elevated));
+    border: 1px solid rgb(var(--color-border-strong));
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+.as-soundcheck-title {
+    color: rgb(var(--color-text));
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: clamp(16px, 1.6vw, 22px);
+}
+.as-soundcheck-hint {
+    margin: 0 0 2px;
+    color: rgb(var(--color-text-muted));
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    font-size: clamp(11px, 1vw, 14px);
+}
+.as-soundcheck-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+/* Preview + Done controls (shared Button component) fill the compact card width
+   so they read clearly as buttons. */
+.as-soundcheck-card :deep(button) { width: 100%; justify-content: center; }
 
 @media (prefers-reduced-motion: reduce) {
     .as-typing { animation: none; max-width: 100%; }

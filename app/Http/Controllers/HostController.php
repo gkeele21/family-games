@@ -1124,6 +1124,27 @@ class HostController extends Controller
     }
 
     /**
+     * America Says — sound the "wrong answer" buzzer on the display. A wrong
+     * guess has no board state to change (it simply isn't on the board), so we
+     * bump a monotonic counter the display watches, playing its incorrect sound
+     * once each time it advances.
+     */
+    public function buzzWrong(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        if ($state) {
+            $current = (int) $state->getStateValue('wrong_buzz', 0);
+            $state->setStateValue('wrong_buzz', $current + 1);
+        }
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
      * America Says guided flow — end the current round and show the scoreboard.
      * Sets the phase to "recap"; the host then advances with nextQuestion
      * ("Start Round N+1"), which moves to the next round's intro.

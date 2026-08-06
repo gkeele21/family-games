@@ -467,6 +467,12 @@ const endRound = async () => {
     fetchState();
 };
 
+// Sound the wrong-answer buzzer on the display (no board change — just the cue).
+const buzzWrong = async () => {
+    await axios.post(route('host.buzz.wrong', props.gameSession.id));
+    fetchState();
+};
+
 // ---- America Says final round -------------------------------------------------
 // A single time budget covers all final questions; the leading team plays for a
 // pass/fail win. The clock auto-pauses between questions (server-side) so the
@@ -961,6 +967,22 @@ onUnmounted(() => {
                                     <div class="flex items-center justify-between">
                                         <span class="font-semibold">{{ answer.answer_text }}</span>
                                         <span v-if="!isFinal" class="text-lg font-bold text-muted">{{ answerPoints(answer) }} pts</span>
+                                    </div>
+                                </button>
+
+                                <!-- Wrong-answer buzzer: sits in the next open grid cell
+                                     (the 8th slot on a 7-answer board), styled like the
+                                     answer cells but in danger colors. Just sounds the cue
+                                     on the display — no board/score change. -->
+                                <button
+                                    v-if="isAmericaSays"
+                                    type="button"
+                                    title="Sound the wrong-answer buzzer"
+                                    class="hover-glow cursor-pointer rounded-lg border border-danger bg-danger/10 p-4 text-left text-danger transition-all"
+                                    @click="buzzWrong"
+                                >
+                                    <div class="flex items-center">
+                                        <span class="font-semibold">Wrong Answer</span>
                                     </div>
                                 </button>
                             </div>

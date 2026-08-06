@@ -146,6 +146,9 @@ class DisplayController extends Controller
                 // Final round: the lone team playing, and the pass/fail outcome.
                 'final_team_id' => $state?->getStateValue('final_team_id'),
                 'final_result' => $state?->getStateValue('final_result'),
+                // Monotonic counter bumped by the host's "Wrong" buzzer; the
+                // display plays its incorrect sound each time it advances.
+                'wrong_buzz' => $state?->getStateValue('wrong_buzz'),
                 // True on the last regular round's recap, before the final begins.
                 'final_queued' => $finalQueued,
                 // True when the recap follows the last question of the round.
