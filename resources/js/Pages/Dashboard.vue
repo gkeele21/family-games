@@ -43,13 +43,11 @@ defineProps<{
 
 // Top-menu links to the three game modules (same set as /games).
 const navItems = [
-    { label: 'Trivia', route: 'games.index', activeMatch: ['games.*'] },
     {
-        label: 'Scorekeeper',
-        route: 'scorekeeper.home',
-        activeMatch: ['scorekeeper.*'],
+        label: 'Question Library',
+        route: 'questions.index',
+        activeMatch: ['questions.*'],
     },
-    { label: 'PropOff', route: 'propoff.home', activeMatch: ['propoff.*'] },
 ];
 
 // ---- join by code ----
