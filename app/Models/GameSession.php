@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Support\Str;
+use App\Support\GameCode;
 
 class GameSession extends Model
 {
@@ -36,7 +36,7 @@ class GameSession extends Model
 
         static::creating(function ($session) {
             if (empty($session->invite_code)) {
-                $session->invite_code = strtoupper(Str::random(6));
+                $session->invite_code = GameCode::generate();
             }
         });
     }
