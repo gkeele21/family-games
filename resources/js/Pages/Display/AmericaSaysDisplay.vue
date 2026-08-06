@@ -126,7 +126,13 @@ const startTheme = () => {
     themeStarted = true;
     const t = getTheme();
     themeSlideOpen.value = true;
-    const finish = () => { themeSlideOpen.value = false; };
+    let done = false;
+    const finish = () => {
+        if (done) return;
+        done = true;
+        if (safety) clearTimeout(safety);
+        themeSlideOpen.value = false;
+    };
     // Close on natural end, or immediately if the file is missing/blocked so the
     // board never gets stuck behind the slide.
     t.addEventListener('ended', finish, { once: true });
@@ -134,6 +140,9 @@ const startTheme = () => {
     t.currentTime = 0;
     const p = t.play();
     if (p) p.catch(() => finish());
+    // Safety net: if the audio stalls without firing 'ended'/'error', drop the
+    // curtain anyway once it's outlasted any reasonable theme length.
+    const safety = window.setTimeout(finish, 15000);
 };
 
 const maybeStartTheme = () => {
@@ -149,13 +158,22 @@ const startShow = () => {
     sounds.unlock();
     soundCheckDone.value = true;
     blessAudio(getBgm());
-    blessAudio(getTheme());
     soundPanelOpen.value = false;
     if (props.status === 'playing') {
+        // Game already started — play the theme now, inside this Done gesture.
+        // Do NOT bless the theme first: blessAudio() plays it muted then pauses
+        // and resets on a deferred promise, which would stop the theme we just
+        // started — leaving the curtain stuck with no music. Playing it here is
+        // itself a gesture, so it's unlocked without blessing.
         maybeStartTheme();
-    } else if (props.gameState?.timer_started_at) {
-        // Display opened mid-round (no theme) — just resume the round music.
-        getBgm().play().catch(() => {});
+    } else {
+        // Game not started yet — bless the theme so the status watcher can start
+        // it later (that fires outside a user gesture), and resume round music if
+        // we opened mid-round.
+        blessAudio(getTheme());
+        if (props.gameState?.timer_started_at) {
+            getBgm().play().catch(() => {});
+        }
     }
 };
 
@@ -499,7 +517,10 @@ onUnmounted(() => {
         </div>
 
         <!-- ===================== PLAYING ===================== -->
-        <template v-if="status === 'playing'">
+        <!-- Held back while the theme slide (game-start curtain) plays, so no
+             phase content — Round intro, question plaque, scores — ghosts through
+             the theme scrim. Whatever phase is current appears once it dismisses. -->
+        <template v-if="status === 'playing' && !themeSlideOpen">
             <!-- Final round: the single time budget stays on the board through every
                  beat (intro / question / play / cleared) — like the regular round
                  clock. It shows the banked time while idle and counts down during

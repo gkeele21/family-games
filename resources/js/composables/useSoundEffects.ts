@@ -34,6 +34,9 @@ export function useSoundEffects(options: { volume?: number } = {}) {
     const players: Partial<Record<SoundName, HTMLAudioElement>> = {};
     // true = loaded OK, false = failed to load (missing file), undefined = unknown yet.
     const available: Partial<Record<SoundName, boolean>> = {};
+    // Set once a real play() has fired for a sound, so a still-pending unlock
+    // bless (see below) won't pause/mute the playback the user actually wants.
+    const primed: Partial<Record<SoundName, boolean>> = {};
 
     const ensureLoaded = (name: SoundName): HTMLAudioElement => {
         let el = players[name];
@@ -62,14 +65,20 @@ export function useSoundEffects(options: { volume?: number } = {}) {
             const el = ensureLoaded(name);
             el.muted = true;
             const p = el.play();
-            if (p) {
-                p.then(() => {
-                    el.pause();
-                    el.currentTime = 0;
-                    el.muted = false;
-                }).catch(() => { el.muted = false; });
-            } else {
+            // Restore the element to a clean, audible, paused state. This may run
+            // late (the play promise only resolves once the file can play), so if
+            // a real play() has already taken the element over (primed), leave it
+            // running and just make sure it isn't left muted.
+            const restore = () => {
                 el.muted = false;
+                if (primed[name]) return;
+                el.pause();
+                el.currentTime = 0;
+            };
+            if (p) {
+                p.then(restore).catch(() => { el.muted = false; });
+            } else {
+                restore();
             }
         });
     };
@@ -78,6 +87,10 @@ export function useSoundEffects(options: { volume?: number } = {}) {
 
     const play = (name: SoundName) => {
         const el = ensureLoaded(name);
+        // Take ownership so a still-pending unlock bless won't pause us, and force
+        // audible in case that bless hasn't unmuted this element yet.
+        primed[name] = true;
+        el.muted = false;
         try {
             el.currentTime = 0;
             const p = el.play();

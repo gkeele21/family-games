@@ -9,6 +9,17 @@ use Inertia\Response;
 class DisplayController extends Controller
 {
     /**
+     * Code-entry landing page for the TV display. This is the stable URL you add
+     * to an iPhone home screen once: launching it opens chromeless (via the
+     * standalone meta on the page), you type the current game code, and it routes
+     * to show() below — so the home-screen icon never goes stale between games.
+     */
+    public function entry(): Response
+    {
+        return Inertia::render('Display/Entry');
+    }
+
+    /**
      * Show the display view for a game session.
      * Accessed via invite code so anyone with the link can view.
      */

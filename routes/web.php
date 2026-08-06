@@ -99,6 +99,7 @@ Route::get('/play/{gameSession}', [PlayerController::class, 'game'])->name('play
 Route::get('/play/{gameSession}/state', [PlayerController::class, 'getState'])->name('player.state');
 
 // Display Routes (no auth required - for TV/projector display)
+Route::get('/display', [DisplayController::class, 'entry'])->name('display.entry');
 Route::get('/display/{inviteCode}', [DisplayController::class, 'show'])->name('display.show');
 Route::get('/display/{inviteCode}/state', [DisplayController::class, 'getState'])->name('display.state');
 

@@ -2,6 +2,7 @@
 import AmericaSaysDisplay from './AmericaSaysDisplay.vue';
 import OodlesDisplay from './OodlesDisplay.vue';
 import GameTimer from '@/Components/GameTimer.vue';
+import DisplayFrame from '@/Components/Display/DisplayFrame.vue';
 import { Head } from '@inertiajs/vue3';
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import axios from 'axios';
@@ -120,21 +121,35 @@ const isAllPlay = computed(() => currentQuestion.value?.control_status === 'all_
 </script>
 
 <template>
-    <Head :title="`${gameSession.game_type.name} - Display`" />
+    <Head :title="`${gameSession.game_type.name} - Display`">
+        <!-- TV/projector presentation hints. On iOS, launching from an
+             Add-to-Home-Screen icon uses these to open chromeless (no Safari
+             bar) — the dependable "fullscreen" path on iPhone. Harmless on
+             desktop browsers, which use the in-page fullscreen button instead. -->
+        <meta head-key="amwac" name="apple-mobile-web-app-capable" content="yes" />
+        <meta head-key="mwac" name="mobile-web-app-capable" content="yes" />
+        <meta head-key="sbs" name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta head-key="awt" name="apple-mobile-web-app-title" content="Keeler Games" />
+        <meta head-key="tc" name="theme-color" content="#404040" />
+    </Head>
 
-    <!-- America Says: one map-backed board handles every state (lobby / playing /
-         paused / completed) so the neon map is a constant backdrop. -->
-    <AmericaSaysDisplay
-        v-if="isAmericaSays"
-        :status="status"
-        :teams="teams"
-        :game-state="gameState"
-        :current-question="currentQuestion"
-        :invite-code="gameSession.invite_code"
-    />
+    <!-- Display boards live inside a full-viewport frame that owns the screen:
+         fullscreen toggle, wake lock, cursor/controls auto-hide, and a live
+         overscan-fit so the board fits whatever the TV renders. -->
+    <DisplayFrame>
+        <!-- America Says: one map-backed board handles every state (lobby /
+             playing / paused / completed) so the neon map is a constant backdrop. -->
+        <AmericaSaysDisplay
+            v-if="isAmericaSays"
+            :status="status"
+            :teams="teams"
+            :game-state="gameState"
+            :current-question="currentQuestion"
+            :invite-code="gameSession.invite_code"
+        />
 
-    <!-- Other games: original per-status screens -->
-    <template v-else>
+        <!-- Other games: original per-status screens -->
+        <template v-else>
     <!-- Lobby State - Same for all games -->
     <div v-if="status === 'lobby'" class="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 text-white">
         <div class="min-h-screen flex flex-col">
@@ -330,5 +345,6 @@ const isAllPlay = computed(() => currentQuestion.value?.control_status === 'all_
             </div>
         </div>
     </div>
-    </template>
+        </template>
+    </DisplayFrame>
 </template>
