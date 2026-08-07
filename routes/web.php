@@ -70,6 +70,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/bonus', [HostController::class, 'awardBonus'])->name('host.bonus');
     Route::post('/host/{gameSession}/question/select', [HostController::class, 'selectQuestion'])->name('host.question.select');
     Route::post('/host/{gameSession}/question/show', [HostController::class, 'showQuestion'])->name('host.question.show');
+    Route::post('/host/{gameSession}/round/intro', [HostController::class, 'roundIntro'])->name('host.round.intro');
     Route::post('/host/{gameSession}/round/end', [HostController::class, 'endRound'])->name('host.round.end');
     Route::post('/host/{gameSession}/final/show', [HostController::class, 'finalShowQuestion'])->name('host.final.show');
     Route::post('/host/{gameSession}/final/start', [HostController::class, 'finalStart'])->name('host.final.start');
@@ -77,6 +78,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/final/skip', [HostController::class, 'finalSkip'])->name('host.final.skip');
     Route::post('/host/{gameSession}/final/timeout', [HostController::class, 'finalTimeout'])->name('host.final.timeout');
     Route::post('/host/{gameSession}/final/select', [HostController::class, 'finalSelect'])->name('host.final.select');
+    Route::post('/host/{gameSession}/tiebreaker/show', [HostController::class, 'tiebreakerShow'])->name('host.tiebreaker.show');
+    Route::post('/host/{gameSession}/tiebreaker/swap', [HostController::class, 'tiebreakerSwap'])->name('host.tiebreaker.swap');
+    Route::post('/host/{gameSession}/tiebreaker/resolve', [HostController::class, 'tiebreakerResolve'])->name('host.tiebreaker.resolve');
     Route::post('/host/{gameSession}/question/next', [HostController::class, 'nextQuestion'])->name('host.question.next');
     Route::post('/host/{gameSession}/question/previous', [HostController::class, 'previousQuestion'])->name('host.question.previous');
     Route::post('/host/{gameSession}/question/correct', [HostController::class, 'markCorrect'])->name('host.question.correct');

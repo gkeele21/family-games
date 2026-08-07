@@ -34,6 +34,8 @@ interface GameState {
     // Final round: the lone team playing, and the pass/fail outcome.
     final_team_id?: number | null;
     final_result?: string | null;
+    // Tie-off after the last regular round: the teams tied for the lead.
+    tiebreaker_team_ids?: number[] | null;
     // True on the last regular round's recap, before the final begins.
     final_queued?: boolean;
     // True when the recap follows the last question of the round (every team has
@@ -102,14 +104,27 @@ const getTheme = (): HTMLAudioElement => {
     return theme;
 };
 
+// Once a real play() has taken over the theme/bgm, a still-pending bless must NOT
+// pause it. blessAudio() plays muted then pauses/rewinds on a *deferred* promise;
+// if a real play() started in between, that deferred restore would silence it —
+// the "theme slide shows but no sound" bug. These flags let the real play win.
+let themePrimed = false;
+let bgmPrimed = false;
+
 // "Bless" an audio element inside a user gesture so it can be played
 // programmatically later, even though that later play isn't a gesture itself.
-const blessAudio = (m: HTMLAudioElement) => {
+// isPrimed lets a real play() that already started win the race with this bless's
+// deferred restore, so we never pause audio the game actually wants playing.
+const blessAudio = (m: HTMLAudioElement, isPrimed?: () => boolean) => {
     m.muted = true;
     const p = m.play();
     if (p) {
-        p.then(() => { m.pause(); m.currentTime = 0; m.muted = false; })
-         .catch(() => { m.muted = false; });
+        p.then(() => {
+            m.muted = false;
+            if (isPrimed && isPrimed()) return;
+            m.pause();
+            m.currentTime = 0;
+        }).catch(() => { m.muted = false; });
     }
 };
 
@@ -138,6 +153,7 @@ const startTheme = () => {
     t.addEventListener('ended', finish, { once: true });
     t.addEventListener('error', finish, { once: true });
     t.currentTime = 0;
+    themePrimed = true;
     const p = t.play();
     if (p) p.catch(() => finish());
     // Safety net: if the audio stalls without firing 'ended'/'error', drop the
@@ -157,7 +173,7 @@ const soundPanelOpen = ref(true);
 const startShow = () => {
     sounds.unlock();
     soundCheckDone.value = true;
-    blessAudio(getBgm());
+    blessAudio(getBgm(), () => bgmPrimed);
     soundPanelOpen.value = false;
     if (props.status === 'playing') {
         // Game already started — play the theme now, inside this Done gesture.
@@ -170,8 +186,9 @@ const startShow = () => {
         // Game not started yet — bless the theme so the status watcher can start
         // it later (that fires outside a user gesture), and resume round music if
         // we opened mid-round.
-        blessAudio(getTheme());
+        blessAudio(getTheme(), () => themePrimed);
         if (props.gameState?.timer_started_at) {
+            bgmPrimed = true;
             getBgm().play().catch(() => {});
         }
     }
@@ -256,21 +273,48 @@ watch(() => props.gameState?.timer_started_at, (newVal, oldVal) => {
 });
 
 // --- Background music --------------------------------------------------------
-// Play round music while the timer runs; pause it when the timer pauses; rewind
-// on a new question or when play stops. Music and timer both advance in real time
-// and pause together, so the climax lands near the timer's end with no manual
-// position syncing. (On resume we DON'T rewind, so it continues where it paused.)
-watch(() => props.gameState?.timer_started_at != null, (running, wasRunning) => {
+// The round music is positioned so its TAIL lands on 0:00: whenever it (re)starts
+// while the clock is live we seek to (duration − seconds-left). That glues the
+// music's ending to the timer's ending even when time has been banked (final
+// round) or we loop back to a skipped question with the clock still mid-run — so
+// the music never dies early or runs out ahead of the clock.
+const alignBgmToTimer = () => {
     const m = getBgm();
-    if (running) m.play().catch(() => {});
-    else if (wasRunning) m.pause();
+    const seek = () => {
+        const left = remainingTime.value;
+        if (isFinite(m.duration) && m.duration > 0 && left > 0) {
+            m.currentTime = Math.max(0, m.duration - left);
+        }
+    };
+    if (isFinite(m.duration) && m.duration > 0) seek();
+    else m.addEventListener('loadedmetadata', seek, { once: true });
+};
+
+const startBgm = () => {
+    const m = getBgm();
+    bgmPrimed = true;
+    m.play().catch(() => {});
+    alignBgmToTimer();
+};
+
+// Play round music while the clock runs; bank it (pause) when the clock stops.
+watch(() => props.gameState?.timer_started_at != null, (running, wasRunning) => {
+    if (running) startBgm();
+    else if (wasRunning) getBgm().pause();
 });
 
-// New question → music back to the top (the timer isn't running yet here).
+// New question: if the clock is ALREADY running we've looped back to a skipped
+// final question — keep the music playing, re-aligned to the time left, instead
+// of killing it (the "timer runs but music stops" bug). Otherwise reset it to the
+// top so the next Start begins clean.
 watch(() => props.currentQuestion?.id, () => {
     const m = getBgm();
-    m.pause();
-    m.currentTime = 0;
+    if (props.gameState?.timer_started_at != null) {
+        startBgm();
+    } else {
+        m.pause();
+        m.currentTime = 0;
+    }
 });
 
 // Status changes: leaving active play stops the round music; entering it (admin
@@ -312,6 +356,15 @@ const finalTeam = computed<Team | null>(() => {
     return id ? props.teams.find((t) => t.id === id) ?? null : null;
 });
 const finalResult = computed(() => props.gameState?.final_result ?? null);
+
+// Tie-off: the teams tied for the lead after the last regular round, named on the
+// tiebreaker board so the room knows who's playing it off.
+const tiebreakerTeams = computed<Team[]>(() => {
+    const ids = props.gameState?.tiebreaker_team_ids ?? [];
+    return ids
+        .map((id) => props.teams.find((t) => t.id === id))
+        .filter((t): t is Team => !!t);
+});
 
 // --- Correct-answer sound -------------------------------------------------
 // Play CorrectAnswer.m4a whenever a new answer flips to revealed on the SAME question.
@@ -358,8 +411,8 @@ watch(() => props.gameState?.wrong_buzz, (now, prev) => {
 // which sets timer_started_at while phase stays 'question' (handled below).
 watch(phase, (now, prev) => {
     if (now === prev) return;
-    if (now === 'question' || now === 'final_question') sounds.play('question');
-    else if (now === 'final_play') sounds.play('board');
+    if (now === 'question' || now === 'final_question' || now === 'tiebreaker_question') sounds.play('question');
+    else if (now === 'final_play' || now === 'tiebreaker_play') sounds.play('board');
 });
 
 // Regular round: board/clock appear on the timer's false→true start. Gated to the
@@ -402,6 +455,26 @@ watch(phase, (newPhase, oldPhase) => {
     if (newPhase === 'final_review' && oldPhase && oldPhase !== 'final_review') {
         timeUpSplash.value = true;
         window.setTimeout(() => { timeUpSplash.value = false; }, 3000);
+    }
+});
+
+// Final win: hold on the cleared board ~3s so the room sees the last answer land,
+// THEN roll the celebration slide + theme music together. Buffering the win this
+// way also masks any cast audio delay — the theme starts with the slide, not
+// ahead of it (sound first, animation right after — see the win-sequence notes).
+const winCelebrate = ref(false);
+watch([phase, finalResult], ([ph, res]) => {
+    if (ph === 'final_result' && res === 'win') {
+        winCelebrate.value = false;
+        window.setTimeout(() => {
+            winCelebrate.value = true;
+            const t = getTheme();
+            themePrimed = true;
+            t.currentTime = 0;
+            t.play().catch(() => {});
+        }, 3000);
+    } else {
+        winCelebrate.value = false;
     }
 });
 
@@ -527,7 +600,7 @@ onUnmounted(() => {
                  play. Once time is up (final_review) the clock is gone; the host is
                  just revealing the answers they missed. -->
             <div
-                v-if="['final_intro', 'final_question', 'final_play', 'final_cleared'].includes(phase)"
+                v-if="['final_intro', 'final_ready', 'final_question', 'final_play', 'final_cleared'].includes(phase)"
                 class="as-timer"
                 :class="{ 'as-timer-warn': timerWarning, 'as-timer-expired': timerExpired }"
             >{{ timerDisplay }}</div>
@@ -559,8 +632,8 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <!-- FINAL — intro: which team is playing, get ready -->
-            <div v-else-if="phase === 'final_intro'" class="as-center">
+            <!-- FINAL — intro / per-question Get Ready: which team is playing, get ready -->
+            <div v-else-if="phase === 'final_intro' || phase === 'final_ready'" class="as-center">
                 <p class="as-eyebrow font-logo">Final Round</p>
                 <p class="as-headline as-headline-sm font-logo" :style="finalTeam ? { color: finalTeam.color } : undefined">{{ finalTeam?.name ?? '' }}</p>
                 <p class="as-subhead font-logo">Get Ready</p>
@@ -568,7 +641,7 @@ onUnmounted(() => {
 
             <!-- FINAL — pass/fail result. A win gets a celebratory "You Won!!!!"
                  with confetti raining continuously; a loss keeps "Out of Time". -->
-            <div v-else-if="phase === 'final_result'" class="as-center">
+            <div v-else-if="phase === 'final_result' && (finalResult !== 'win' || winCelebrate)" class="as-center">
                 <div v-if="finalResult === 'win'" class="as-confetti" aria-hidden="true">
                     <span
                         v-for="(p, pi) in confettiPieces"
@@ -599,7 +672,7 @@ onUnmounted(() => {
                  reveals (final_play), stays up after the question is cleared
                  (final_cleared), and is shown when reviewing misses (final_review) or
                  whenever the current question already has revealed answers. -->
-            <template v-else-if="['final_question', 'final_play', 'final_cleared', 'final_review'].includes(phase)">
+            <template v-else-if="['final_question', 'final_play', 'final_cleared', 'final_review'].includes(phase) || (phase === 'final_result' && finalResult === 'win' && !winCelebrate)">
                 <div class="as-overlay">
                     <div class="as-plaque">
                         <div class="as-face">
@@ -610,6 +683,47 @@ onUnmounted(() => {
                     </div>
 
                     <div v-if="currentQuestion && finalBoardVisible" class="as-answers as-answers-final">
+                        <div class="as-final-col">
+                            <div v-for="ans in sortedAnswers" :key="ans.id" class="as-row-final">
+                                <div class="as-ans as-ans-final font-logo">
+                                    <span v-if="!ans.revealed" class="as-blank-wrap"><template
+                                        v-for="(seg, si) in blankSegments(ans.answer_text)" :key="si"
+                                    ><span v-if="seg.hyphen" class="as-hyphen">-</span><span v-else class="as-blank">{{ seg.text }}</span></template></span>
+                                    <span v-else class="as-typing">{{ ans.answer_text }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- TIE-OFF — intro: the teams tied for the lead, first-to-answer wins. -->
+            <div v-else-if="phase === 'tiebreaker_intro'" class="as-center">
+                <p class="as-eyebrow font-logo">Tiebreaker</p>
+                <div v-if="tiebreakerTeams.length" class="as-matchup">
+                    <template v-for="(team, ti) in tiebreakerTeams" :key="team.id">
+                        <span v-if="ti > 0" class="as-vs font-logo">vs</span>
+                        <span class="as-team font-logo" :style="{ color: team.color }">{{ team.name }}</span>
+                    </template>
+                </div>
+                <p class="as-subhead font-logo">First to Answer Wins</p>
+            </div>
+
+            <!-- TIE-OFF — question: one-answer board, just like Final question 1.
+                 Plaque shows first (tiebreaker_question); the answer appears when
+                 the host reveals it (tiebreaker_play). The winner is declared by
+                 the host, so there's no result slide here. -->
+            <template v-else-if="['tiebreaker_question', 'tiebreaker_play'].includes(phase)">
+                <div class="as-overlay">
+                    <div class="as-plaque">
+                        <div class="as-face">
+                            <p class="font-logo"><template v-if="currentQuestion"><template
+                                v-for="(seg, si) in questionSegments(currentQuestion.question_text)" :key="si"
+                            ><span v-if="seg.blank" class="as-qblank">{{ seg.text }}</span><template v-else>{{ seg.text }}</template></template></template></p>
+                        </div>
+                    </div>
+
+                    <div v-if="currentQuestion && phase === 'tiebreaker_play'" class="as-answers as-answers-final">
                         <div class="as-final-col">
                             <div v-for="ans in sortedAnswers" :key="ans.id" class="as-row-final">
                                 <div class="as-ans as-ans-final font-logo">

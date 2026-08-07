@@ -94,7 +94,7 @@ const fetchState = async () => {
 
 onMounted(() => {
     fetchState();
-    pollInterval = window.setInterval(fetchState, 500);
+    pollInterval = window.setInterval(fetchState, 300);
 });
 
 onUnmounted(() => {

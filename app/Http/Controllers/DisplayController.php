@@ -157,6 +157,9 @@ class DisplayController extends Controller
                 // Final round: the lone team playing, and the pass/fail outcome.
                 'final_team_id' => $state?->getStateValue('final_team_id'),
                 'final_result' => $state?->getStateValue('final_result'),
+                // Tie-off after the last regular round: the teams tied for the lead
+                // (the display names them on the tiebreaker board).
+                'tiebreaker_team_ids' => $state?->getStateValue('tiebreaker_team_ids'),
                 // Monotonic counter bumped by the host's "Wrong" buzzer; the
                 // display plays its incorrect sound each time it advances.
                 'wrong_buzz' => $state?->getStateValue('wrong_buzz'),
