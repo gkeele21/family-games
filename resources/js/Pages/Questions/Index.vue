@@ -6,8 +6,9 @@ import TextField from '@/Components/Form/TextField.vue';
 import Select from '@/Components/Form/Select.vue';
 import Toggle from '@/Components/Form/Toggle.vue';
 import Confirm from '@/Components/Feedback/Confirm.vue';
+import Pagination from '@/Components/Base/Pagination.vue';
 import { Head, useForm, router } from '@inertiajs/vue3';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 
 interface Answer { id: number | null; answer_text: string; points: number; display_order: number }
 interface Category { id: number; name: string }
@@ -64,9 +65,10 @@ const difficultyFilter = ref<string>('');
 const sourceFilter = ref<string>('');
 const statusFilter = ref<string>('');
 const roundFilter = ref<string>('');
+const answersFilter = ref<number | ''>('');
 const openId = ref<number | null>(null);
 
-const categoryFilterOptions = computed(() => props.categories.map((c) => ({ value: c.id, label: c.name })));
+// The full difficulty set — used by the editor form (always offers all three).
 const difficultyOptions = [
     { value: 'easy', label: 'Easy' },
     { value: 'medium', label: 'Medium' },
@@ -81,6 +83,33 @@ const statusOptions = [
     { value: 'inactive', label: 'Inactive' },
 ];
 
+// ---- Dynamic filters ----
+// A filter only earns its place if the loaded bank actually spans 2+ distinct
+// values for it (treating "none" as a value) — otherwise it can't narrow
+// anything, so we hide it. Options are limited to the values actually present.
+const distinctCount = (fn: (q: Question) => unknown) => new Set(props.questions.map(fn)).size;
+
+const usedCategoryIds = computed(() => new Set(props.questions.map((q) => q.category_id)));
+const categoryFilterOptions = computed(() =>
+    props.categories.filter((c) => usedCategoryIds.value.has(c.id)).map((c) => ({ value: c.id, label: c.name })),
+);
+const presentDifficulties = computed(() => new Set<string | null>(props.questions.map((q) => q.difficulty)));
+const difficultyFilterOptions = computed(() => difficultyOptions.filter((o) => presentDifficulties.value.has(o.value)));
+
+// Answer counts actually in the bank (e.g. 1–4 for finals, 7 for regular America Says), sorted.
+const answerCountOptions = computed(() =>
+    [...new Set(props.questions.map((q) => q.answers.length))]
+        .sort((a, b) => a - b)
+        .map((n) => ({ value: n, label: `${n} ${n === 1 ? 'answer' : 'answers'}` })),
+);
+
+const showCategoryFilter = computed(() => distinctCount((q) => q.category_id) >= 2);
+const showDifficultyFilter = computed(() => distinctCount((q) => q.difficulty) >= 2);
+const showSourceFilter = computed(() => distinctCount((q) => q.is_official) >= 2);
+const showRoundFilter = computed(() => hasFinalRound.value && distinctCount((q) => q.round_type) >= 2);
+const showAnswersFilter = computed(() => distinctCount((q) => q.answers.length) >= 2);
+const showStatusFilter = computed(() => distinctCount((q) => q.is_active) >= 2);
+
 const filtered = computed(() => {
     const s = search.value.trim().toLowerCase();
     return props.questions.filter((q) => {
@@ -91,9 +120,51 @@ const filtered = computed(() => {
         if (sourceFilter.value === 'official' && !q.is_official) return false;
         if (sourceFilter.value === 'custom' && q.is_official) return false;
         if (roundFilter.value && q.round_type !== roundFilter.value) return false;
+        if (answersFilter.value !== '' && q.answers.length !== answersFilter.value) return false;
         if (s && !q.question_text.toLowerCase().includes(s)) return false;
         return true;
     });
+});
+
+// ---- Active-filter chips + clear ----
+const labelFor = (opts: { value: unknown; label: string }[], v: unknown) =>
+    opts.find((o) => o.value === v)?.label ?? String(v);
+// Each active filter renders as a removable chip; `clear` resets just that one.
+const activeFilters = computed(() => {
+    const chips: { key: string; label: string; value: string; clear: () => void }[] = [];
+    if (search.value.trim()) chips.push({ key: 'search', label: 'search', value: `“${search.value.trim()}”`, clear: () => (search.value = '') });
+    if (categoryFilter.value) chips.push({ key: 'category', label: 'category', value: labelFor(categoryFilterOptions.value, categoryFilter.value), clear: () => (categoryFilter.value = '') });
+    if (difficultyFilter.value) chips.push({ key: 'difficulty', label: 'difficulty', value: labelFor(difficultyOptions, difficultyFilter.value), clear: () => (difficultyFilter.value = '') });
+    if (sourceFilter.value) chips.push({ key: 'source', label: 'source', value: labelFor(sourceOptions, sourceFilter.value), clear: () => (sourceFilter.value = '') });
+    if (roundFilter.value) chips.push({ key: 'round', label: 'round', value: labelFor(roundFilterOptions.value, roundFilter.value), clear: () => (roundFilter.value = '') });
+    if (answersFilter.value !== '') chips.push({ key: 'answers', label: 'answers', value: labelFor(answerCountOptions.value, answersFilter.value), clear: () => (answersFilter.value = '') });
+    if (statusFilter.value) chips.push({ key: 'status', label: 'status', value: labelFor(statusOptions, statusFilter.value), clear: () => (statusFilter.value = '') });
+    return chips;
+});
+const hasActiveFilters = computed(() => activeFilters.value.length > 0);
+const clearAllFilters = () => {
+    search.value = '';
+    categoryFilter.value = '';
+    difficultyFilter.value = '';
+    sourceFilter.value = '';
+    roundFilter.value = '';
+    answersFilter.value = '';
+    statusFilter.value = '';
+};
+
+// ---- Client-side pagination over the filtered list ----
+const perPageOptions = [25, 50, 100];
+const perPage = ref(50);
+const page = ref(1);
+const setPerPage = (n: number) => {
+    perPage.value = n;
+    page.value = 1;
+};
+const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / perPage.value)));
+const paged = computed(() => filtered.value.slice((page.value - 1) * perPage.value, page.value * perPage.value));
+// Any filter change (or a page that no longer exists) snaps back to page 1.
+watch([filtered, totalPages], () => {
+    if (page.value > totalPages.value) page.value = 1;
 });
 
 const difficultyClass = (d: string) =>
@@ -231,7 +302,7 @@ const inputClass = 'w-full rounded-lg border-border bg-surface-inset text-body p
             </div>
         </template>
 
-        <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-[1440px] px-4 py-8 sm:px-6 lg:px-8">
             <!-- game type tabs -->
             <div class="mb-5 flex gap-1 border-b border-border">
                 <button
@@ -250,18 +321,36 @@ const inputClass = 'w-full rounded-lg border-border bg-surface-inset text-body p
                 <div class="min-w-[180px] flex-1">
                     <TextField v-model="search" placeholder="Search questions…" />
                 </div>
-                <Select v-model="categoryFilter" :options="categoryFilterOptions" allow-empty empty-label="All categories" />
-                <Select v-model="difficultyFilter" :options="difficultyOptions" allow-empty empty-label="Any difficulty" />
-                <Select v-model="sourceFilter" :options="sourceOptions" allow-empty empty-label="Any source" />
-                <Select v-if="hasFinalRound" v-model="roundFilter" :options="roundFilterOptions" allow-empty empty-label="Any round" />
-                <Select v-model="statusFilter" :options="statusOptions" allow-empty empty-label="All statuses" />
+                <Select v-if="showCategoryFilter" v-model="categoryFilter" :options="categoryFilterOptions" allow-empty empty-label="All categories" />
+                <Select v-if="showDifficultyFilter" v-model="difficultyFilter" :options="difficultyFilterOptions" allow-empty empty-label="Any difficulty" />
+                <Select v-if="showSourceFilter" v-model="sourceFilter" :options="sourceOptions" allow-empty empty-label="Any source" />
+                <Select v-if="showRoundFilter" v-model="roundFilter" :options="roundFilterOptions" allow-empty empty-label="Any round" />
+                <Select v-if="showAnswersFilter" v-model="answersFilter" :options="answerCountOptions" allow-empty empty-label="Any # of answers" />
+                <Select v-if="showStatusFilter" v-model="statusFilter" :options="statusOptions" allow-empty empty-label="All statuses" />
             </div>
 
-            <p class="mb-4 text-sm text-subtle"><span class="text-muted">{{ activeGame?.questions_count ?? 0 }}</span> questions · showing {{ filtered.length }}</p>
+            <!-- active-filter chips + clear all -->
+            <div v-if="hasActiveFilters" class="mb-4 flex flex-wrap items-center gap-2">
+                <span class="mr-1 text-xs text-subtle">Filters:</span>
+                <span v-for="f in activeFilters" :key="f.key" class="inline-flex items-center gap-2 rounded-full border border-border bg-surface-overlay py-1 pl-3 pr-1.5 text-xs font-semibold text-body">
+                    <span class="font-medium text-muted">{{ f.label }}:</span> {{ f.value }}
+                    <button type="button" class="grid h-[17px] w-[17px] place-items-center rounded-full bg-surface text-[11px] leading-none text-muted transition hover:bg-border-strong hover:text-body" :title="`Remove ${f.label} filter`" @click="f.clear()">✕</button>
+                </span>
+                <button type="button" class="ml-1 text-xs font-semibold text-warning hover:underline" @click="clearAllFilters">Clear all</button>
+            </div>
+
+            <!-- results count pill -->
+            <div class="mb-4">
+                <span class="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs font-semibold text-body">
+                    <span class="h-1.5 w-1.5 rounded-full bg-primary"></span>
+                    <template v-if="hasActiveFilters">{{ filtered.length }} {{ filtered.length === 1 ? 'match' : 'matches' }} <span class="font-medium text-subtle">· of {{ props.questions.length }}</span></template>
+                    <template v-else>{{ props.questions.length }} {{ props.questions.length === 1 ? 'question' : 'questions' }}</template>
+                </span>
+            </div>
 
             <!-- list -->
             <div class="space-y-2.5">
-                <div v-for="q in filtered" :key="q.id" :class="['rounded-xl border bg-surface', openId === q.id ? 'border-border-strong' : 'border-border']">
+                <div v-for="q in paged" :key="q.id" :class="['rounded-xl border bg-surface', openId === q.id ? 'border-border-strong' : 'border-border']">
                     <div class="flex cursor-pointer items-center gap-3 p-4" @click="openId = openId === q.id ? null : q.id">
                         <span :class="['w-3.5 flex-none text-xs text-subtle transition', openId === q.id ? 'rotate-90' : '']">▶</span>
                         <span class="flex min-w-0 flex-1 items-center gap-2.5">
@@ -269,7 +358,7 @@ const inputClass = 'w-full rounded-lg border-border bg-surface-inset text-body p
                             <span class="flex-none whitespace-nowrap text-xs text-subtle">{{ q.answers.length }} {{ q.answers.length === 1 ? 'answer' : 'answers' }}</span>
                             <span v-if="q.round_type === 'final'" class="flex-none whitespace-nowrap rounded-full border border-info/40 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-info" :title="`Reserved for the ${finalLabel} round`">Final</span>
                             <span v-if="q.is_official" class="flex-none whitespace-nowrap rounded-full border border-gold/40 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gold" title="From the show">★ Show</span>
-                            <span v-if="!q.is_active" class="flex-none whitespace-nowrap rounded-full border border-border-strong bg-surface-overlay px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted">Inactive</span>
+                            <span v-if="!q.is_active" class="flex-none whitespace-nowrap rounded-full border border-danger/40 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-danger">Inactive</span>
                         </span>
                         <span class="flex flex-none items-center gap-3.5">
                             <span v-if="q.category" class="whitespace-nowrap rounded-full border border-border bg-surface-inset px-2.5 py-0.5 text-xs text-muted">{{ q.category.name }}</span>
@@ -279,24 +368,18 @@ const inputClass = 'w-full rounded-lg border-border bg-surface-inset text-body p
                         </span>
                     </div>
 
-                    <!-- expanded preview -->
-                    <div v-if="openId === q.id" class="border-t border-border bg-surface-inset px-5 py-3">
-                        <table class="w-full text-sm">
-                            <thead>
-                                <tr class="text-xs uppercase tracking-wide text-subtle">
-                                    <th class="w-8 py-1 text-left font-semibold">#</th>
-                                    <th class="py-1 text-left font-semibold">{{ isOodles ? 'Answer (letter ' + (q.answer_letter || '?') + ')' : 'Answer' }}</th>
-                                    <th v-if="showPoints" class="py-1 text-right font-semibold">Points</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="(a, i) in q.answers" :key="a.id ?? i" class="border-t border-border">
-                                    <td class="py-1.5 text-subtle">{{ i + 1 }}</td>
-                                    <td class="py-1.5 text-body">{{ a.answer_text }}</td>
-                                    <td v-if="showPoints" class="py-1.5 text-right font-semibold text-gold">{{ a.points }}</td>
-                                </tr>
-                            </tbody>
-                        </table>
+                    <!-- expanded preview — answers as pills -->
+                    <div v-if="openId === q.id" class="border-t border-border bg-surface-inset px-5 py-3.5">
+                        <p class="mb-2.5 text-xs font-semibold uppercase tracking-wide text-subtle">
+                            {{ isOodles ? 'Answer (letter ' + (q.answer_letter || '?') + ')' : 'Answers' }}
+                        </p>
+                        <div class="flex flex-wrap gap-2">
+                            <span v-for="(a, i) in q.answers" :key="a.id ?? i" class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1 text-sm text-body">
+                                <span class="text-[11px] tabular-nums text-subtle">{{ i + 1 }}</span>
+                                {{ a.answer_text }}
+                                <span v-if="showPoints" class="text-[11px] font-bold tabular-nums text-gold">{{ a.points }}</span>
+                            </span>
+                        </div>
                     </div>
                 </div>
 
@@ -304,6 +387,16 @@ const inputClass = 'w-full rounded-lg border-border bg-surface-inset text-body p
                     No questions {{ props.questions.length ? 'match your filters' : 'yet — add one to get started' }}.
                 </div>
             </div>
+
+            <Pagination
+                client
+                :current-page="page"
+                :per-page="perPage"
+                :per-page-options="perPageOptions"
+                :total="filtered.length"
+                @update:page="page = $event"
+                @update:per-page="setPerPage"
+            />
         </div>
 
         <!-- Add / Edit modal -->
