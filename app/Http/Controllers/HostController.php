@@ -78,6 +78,9 @@ class HostController extends Controller
                 'category' => $q->category?->name,
                 'category_id' => $q->category_id,
                 'difficulty' => $q->difficulty,
+                // How many completed games this question has appeared in — surfaced
+                // in the picker and used to prefer least-used questions.
+                'times_used' => (int) $q->times_used,
             ]);
 
         return ['bank' => $bank];
@@ -266,8 +269,11 @@ class HostController extends Controller
     public function startTimer(GameSession $gameSession)
     {
         $state = $gameSession->gameState;
+        // Start ~1s in the future so the board has a beat to reach the (cast) TV
+        // before the clock ticks — otherwise casting latency eats the first few
+        // seconds and the timer already reads low by the time it's on screen.
         $state->update([
-            'timer_started_at' => now(),
+            'timer_started_at' => now()->addSecond(),
         ]);
 
         return response()->json(['success' => true]);
@@ -366,7 +372,9 @@ class HostController extends Controller
 
         $segment = $currentQuestion->segment ?? 'main';
         $query = $gameSession->sessionQuestions();
-        if (in_array($segment, ['final', 'fast_money'], true)) {
+        if (in_array($segment, ['final', 'fast_money', 'tiebreaker'], true)) {
+            // Scope by segment, not round_number — final/tiebreaker questions have
+            // no round_number, so a round_number match would sweep them all up.
             $query->where('segment', $segment);
         } else {
             $query->where('round_number', $currentQuestion->round_number);
@@ -423,6 +431,10 @@ class HostController extends Controller
                 $stateData['final_skipped_question_id'] = null;
                 $stateData['final_result'] = null;
                 $state->update(['state_data' => $stateData]);
+            } elseif ($segment === 'tiebreaker') {
+                // Replay the tie-off from its intro; keep the tied teams so the
+                // host can re-run and re-declare the winner.
+                $state->setStateValue('phase', 'tiebreaker_intro');
             } else {
                 // Replay from the round intro (question hidden until "Show Question").
                 $state->setStateValue('phase', 'intro');
@@ -1089,7 +1101,7 @@ class HostController extends Controller
         $stateData['final_skip_used'] = false;
         $stateData['final_skipped_question_id'] = null;
         $stateData['final_result'] = null;
-        unset($stateData['tiebreaker_team_ids']);
+        unset($stateData['tiebreaker_team_ids'], $stateData['tiebreaker_winner_id']);
 
         $state->update([
             'current_question_id' => $nextQuestion->id,
@@ -1133,7 +1145,6 @@ class HostController extends Controller
             'segment' => 'tiebreaker',
             'answers_needed' => 1,
         ]);
-        $question->incrementUsed();
 
         $stateData = $state->state_data ?? [];
         $stateData['phase'] = 'tiebreaker_intro';
@@ -1169,8 +1180,8 @@ class HostController extends Controller
             ->whereNotIn('id', $usedIds)
             ->has('answers', '=', 1);
 
-        return $base()->where('round_type', 'final')->inRandomOrder()->first()
-            ?? $base()->inRandomOrder()->first();
+        return $base()->where('round_type', 'final')->orderBy('times_used')->inRandomOrder()->first()
+            ?? $base()->orderBy('times_used')->inRandomOrder()->first();
     }
 
     /**
@@ -1184,6 +1195,38 @@ class HostController extends Controller
         }
 
         $gameSession->gameState?->setStateValue('phase', 'tiebreaker_question');
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Tie-off — reveal the (blank) answer board, like a regular round's Start
+     * Timer. Moves "tiebreaker_question" (question plaque only) → "tiebreaker_play"
+     * (the board of blank answer slots). Does NOT reveal the answer text.
+     */
+    public function tiebreakerRevealBoard(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $gameSession->gameState?->setStateValue('phase', 'tiebreaker_play');
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Tie-off — advance from "answer revealed" to the declare-winner step. The
+     * board doesn't change (answer stays up); this just moves the host's guided
+     * step from "Answer Revealed" to "Declare Winner". Mirrors "Show Scores".
+     */
+    public function tiebreakerToDeclare(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $gameSession->gameState?->setStateValue('phase', 'tiebreaker_declare');
 
         return response()->json(['success' => true]);
     }
@@ -1212,7 +1255,6 @@ class HostController extends Controller
 
         $tieQuestion->answerReveals()->delete();
         $tieQuestion->update(['question_id' => $replacement->id]);
-        $replacement->incrementUsed();
 
         // Re-hide the answer: keep the plaque up if the host was mid tie-off,
         // otherwise stay on the intro.
@@ -1224,8 +1266,11 @@ class HostController extends Controller
     }
 
     /**
-     * Tie-off — the host declares which tied team won the buzz-off. That team
-     * plays the final round; the tiebreaker question is marked done.
+     * Tie-off — the host declares which tied team won the buzz-off. This does NOT
+     * jump straight into the final: it lands on a "tiebreaker_result" beat so the
+     * display can crown the winner ("Team X Wins! — On to the Final Round"), just
+     * like the regular round's recap. The host then presses "Start Final Round"
+     * (tiebreakerToFinal) to actually begin it. The tiebreaker question is done.
      */
     public function tiebreakerResolve(Request $request, GameSession $gameSession)
     {
@@ -1248,7 +1293,28 @@ class HostController extends Controller
             $tieQuestion->update(['status' => 'completed']);
         }
 
-        $winner = $gameSession->teams()->whereKey($validated['team_id'])->first();
+        $stateData = $state->state_data ?? [];
+        $stateData['phase'] = 'tiebreaker_result';
+        $stateData['tiebreaker_winner_id'] = $validated['team_id'];
+        $state->update(['state_data' => $stateData]);
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Tie-off — begin the final round with the team that won the tie-off. Fired by
+     * "Start Final Round" on the winner slide (tiebreaker_result), mirroring the
+     * regular recap's "Start Final Round" button.
+     */
+    public function tiebreakerToFinal(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $winnerId = $state?->getStateValue('tiebreaker_winner_id');
+        $winner = $winnerId ? $gameSession->teams()->whereKey($winnerId)->first() : null;
 
         return $this->enterFinalRound($gameSession, $state, $winner);
     }
@@ -1409,7 +1475,9 @@ class HostController extends Controller
         }
 
         $state = $gameSession->gameState;
-        $state->update(['timer_started_at' => now()]);
+        // Reveal the board now but start the clock ~1s later, so casting latency
+        // doesn't eat the opening seconds (see startTimer).
+        $state->update(['timer_started_at' => now()->addSecond()]);
         $state->setStateValue('phase', 'final_play');
 
         return response()->json(['success' => true]);
@@ -1618,27 +1686,19 @@ class HostController extends Controller
         $next = $this->nextFinalQuestion($state->gameSession, $state);
         $stateData = $state->state_data ?? [];
 
-        if ($next && $next->display_order < $currentQuestion->display_order) {
-            // Looping back to an earlier question the team already saw (one they
-            // skipped and parked). They've now been shown every question, so don't
-            // stop to re-read it — keep the clock running and drop straight into
-            // revealing it. The same applies to any further incomplete question.
-            $stateData['phase'] = 'final_play';
-            $state->update(['current_question_id' => $next->id, 'state_data' => $stateData]);
-
-            return response()->json(['success' => true, 'points' => 0]);
-        }
-
-        // Otherwise the clock pauses here, banking its remaining time.
+        // Clearing a board ALWAYS pauses (banks) the clock — the team then gets to
+        // re-read the next question before it resumes. This holds for the parked
+        // (skipped) question too: looping back to it doesn't keep the clock running
+        // or drop straight in; it goes through Get Ready like every other question.
         $state->update([
             'timer_started_at' => null,
             'timer_duration' => $state->getRemainingSeconds(),
         ]);
 
         if ($next) {
-            // Moving forward to a not-yet-seen question: stay on the just-cleared
-            // question so its revealed answers remain on the board (no "Get Ready"
-            // flash). The host advances with finalNext when ready to read the next.
+            // Stay on the just-cleared question so its revealed answers remain on
+            // the board (no "Get Ready" flash). The host advances with finalNext
+            // when ready, which lands on the next question's Get Ready beat.
             $stateData['phase'] = 'final_cleared';
             $state->update(['state_data' => $stateData]);
         } else {

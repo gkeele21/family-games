@@ -48,7 +48,7 @@ class GameTypeSeeder extends Seeder
                 'number_of_teams' => 2, // teams auto-created in the lobby (Team A, Team B…)
                 'allow_team_selection' => false, // If true, players can pick their team
                 'answers_per_question' => 7,
-                'control_timer_seconds' => 30,
+                'control_timer_seconds' => 40,
                 // Final round: 4 questions revealing the top 1 → 4 answers, one 60s
                 // clock. Questions are pulled at random, each needing at least as
                 // many answers as its slot requires. (Gameplay wired up later.)

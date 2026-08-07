@@ -79,8 +79,11 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/final/timeout', [HostController::class, 'finalTimeout'])->name('host.final.timeout');
     Route::post('/host/{gameSession}/final/select', [HostController::class, 'finalSelect'])->name('host.final.select');
     Route::post('/host/{gameSession}/tiebreaker/show', [HostController::class, 'tiebreakerShow'])->name('host.tiebreaker.show');
+    Route::post('/host/{gameSession}/tiebreaker/reveal-board', [HostController::class, 'tiebreakerRevealBoard'])->name('host.tiebreaker.reveal-board');
+    Route::post('/host/{gameSession}/tiebreaker/to-declare', [HostController::class, 'tiebreakerToDeclare'])->name('host.tiebreaker.to-declare');
     Route::post('/host/{gameSession}/tiebreaker/swap', [HostController::class, 'tiebreakerSwap'])->name('host.tiebreaker.swap');
     Route::post('/host/{gameSession}/tiebreaker/resolve', [HostController::class, 'tiebreakerResolve'])->name('host.tiebreaker.resolve');
+    Route::post('/host/{gameSession}/tiebreaker/to-final', [HostController::class, 'tiebreakerToFinal'])->name('host.tiebreaker.to-final');
     Route::post('/host/{gameSession}/question/next', [HostController::class, 'nextQuestion'])->name('host.question.next');
     Route::post('/host/{gameSession}/question/previous', [HostController::class, 'previousQuestion'])->name('host.question.previous');
     Route::post('/host/{gameSession}/question/correct', [HostController::class, 'markCorrect'])->name('host.question.correct');

@@ -58,7 +58,7 @@ interface GameTypeOption {
     slug: string;
 }
 
-interface BankQuestion { id: number; question_text: string; round_type: 'regular' | 'final'; is_official: boolean; answers_count: number; category: string | null; category_id: number | null; difficulty: string | null }
+interface BankQuestion { id: number; question_text: string; round_type: 'regular' | 'final'; is_official: boolean; answers_count: number; category: string | null; category_id: number | null; difficulty: string | null; times_used: number }
 interface QuestionData { bank: BankQuestion[] }
 interface Slot { id: number | null; pinned: boolean }
 interface QSelection { regular: Slot[][]; final: Slot[] }
@@ -329,6 +329,9 @@ const pickSource = ref('');
 const pickType = ref<'regular' | 'final' | ''>('regular');
 const pickCategory = ref<number | ''>('');
 const pickDifficulty = ref('');
+// Only meaningful when the type filter is "Final" — narrows to a specific answer
+// count (Final questions come in fixed answer-count tiers).
+const pickAnswers = ref<number | ''>('');
 const pickSourceOptions = [
     { value: 'official', label: 'From the show' },
     { value: 'custom', label: 'Made up' },
@@ -347,6 +350,13 @@ const categoryOptions = computed(() => {
     qBank.value.forEach((q) => { if (q.category_id != null && q.category) seen.set(q.category_id, q.category); });
     return Array.from(seen, ([value, label]) => ({ value, label }));
 });
+// Answer-count options for the Final type filter, drawn from the Final questions
+// actually in this bank so it adapts to what's authored.
+const answerCountOptions = computed(() => {
+    const counts = new Set<number>();
+    qBank.value.forEach((q) => { if (q.round_type === 'final') counts.add(q.answers_count); });
+    return Array.from(counts).sort((a, b) => a - b).map((n) => ({ value: n, label: `${n} answer${n === 1 ? '' : 's'}` }));
+});
 // Which filters to show, driven by the data present in this game's bank.
 const showSource = computed(() => qBank.value.some((q) => q.is_official) && qBank.value.some((q) => !q.is_official));
 const showType = computed(() => qBank.value.some((q) => q.round_type === 'final'));
@@ -356,6 +366,7 @@ const regularPool = computed(() => {
     const s = questionSearch.value.trim().toLowerCase();
     return qBank.value.filter((q) => {
         if (pickType.value && q.round_type !== pickType.value) return false;
+        if (pickType.value === 'final' && pickAnswers.value !== '' && q.answers_count !== pickAnswers.value) return false;
         if (pickSource.value === 'official' && !q.is_official) return false;
         if (pickSource.value === 'custom' && q.is_official) return false;
         if (pickCategory.value && q.category_id !== pickCategory.value) return false;
@@ -380,9 +391,14 @@ const finalSlotCount = computed(() =>
 );
 
 // ---- slot grid: regular = rounds x teams, final = N answer-count slots ----
-const pickRandom = (pool: { id: number }[], exclude: Set<number>): number | null => {
+// Prefer the least-used questions: pick at random among those tied at the lowest
+// times_used, so the library rotates through everything before repeating.
+const pickRandom = (pool: { id: number; times_used?: number }[], exclude: Set<number>): number | null => {
     const avail = pool.filter((q) => !exclude.has(q.id));
-    return avail.length ? avail[Math.floor(Math.random() * avail.length)].id : null;
+    if (!avail.length) return null;
+    const min = Math.min(...avail.map((q) => q.times_used ?? 0));
+    const leastUsed = avail.filter((q) => (q.times_used ?? 0) === min);
+    return leastUsed[Math.floor(Math.random() * leastUsed.length)].id;
 };
 const usedRegular = () => {
     const s = new Set<number>();
@@ -471,7 +487,8 @@ const shuffleFinal = () => qsel.value.final.forEach((s, i) => { if (!s.pinned) s
 const slotText = (id: number | null) => (id != null ? questionById.value.get(id)?.question_text ?? '(missing)' : null);
 const slotMeta = (id: number | null) => {
     const q = id != null ? questionById.value.get(id) : null;
-    return q ? `${q.answers_count} answers` : '';
+    if (!q) return '';
+    return `${q.answers_count} answers · used ${q.times_used}×`;
 };
 
 const questionSelectionReady = computed(() => {
@@ -650,10 +667,11 @@ const copyDisplayUrl = () => {
                             <template v-if="activeSlot.group === 'regular'">
                                 <Select v-if="showSource" v-model="pickSource" :options="pickSourceOptions" allow-empty empty-label="Any source" />
                                 <Select v-if="showType" v-model="pickType" :options="pickTypeOptions" allow-empty empty-label="Any type" />
+                                <Select v-if="pickType === 'final' && answerCountOptions.length" v-model="pickAnswers" :options="answerCountOptions" allow-empty empty-label="Any # answers" />
                                 <Select v-if="showCategory" v-model="pickCategory" :options="categoryOptions" allow-empty empty-label="All categories" />
                                 <Select v-if="showDifficulty" v-model="pickDifficulty" :options="difficultyOptions" allow-empty empty-label="Any difficulty" />
                             </template>
-                            <div class="min-w-[150px] flex-1"><TextField v-model="questionSearch" placeholder="Search…" /></div>
+                            <div class="min-w-[110px] flex-1"><TextField v-model="questionSearch" placeholder="Search…" /></div>
                         </div>
                         <div class="max-h-[42rem] overflow-y-auto rounded-lg border border-border">
                             <button
@@ -668,6 +686,7 @@ const copyDisplayUrl = () => {
                                 <span v-if="q.id === activeCurrentId" class="flex-none rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Current</span>
                                 <span v-else-if="assignedLabels.has(q.id)" class="flex-none whitespace-nowrap rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-semibold text-primary">{{ assignedLabels.get(q.id) }}</span>
                                 <span class="flex-none whitespace-nowrap text-xs text-subtle">{{ q.answers_count }} ans</span>
+                                <span class="flex-none whitespace-nowrap text-xs text-muted" title="Times used in completed games">{{ q.times_used }}× used</span>
                             </button>
                             <p v-if="!activeList.length" class="px-3 py-6 text-center text-sm text-muted">No matching questions.</p>
                         </div>

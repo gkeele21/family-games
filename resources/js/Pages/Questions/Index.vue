@@ -105,6 +105,10 @@ const difficultyLabel = (d: string) => d.charAt(0).toUpperCase() + d.slice(1);
 // ---- Editor ----
 const showEditor = ref(false);
 const editorMode = ref<'add' | 'edit'>('add');
+// The Question TextField, so the "Insert blank" button can drop the fill-in blank
+// (our 7-underscore convention) at the cursor.
+const questionField = ref<{ insertAtCursor: (s: string) => void } | null>(null);
+const insertBlank = () => questionField.value?.insertAtCursor('_______');
 const form = useForm({
     id: null as number | null,
     game_type_id: null as number | null,
@@ -311,7 +315,13 @@ const inputClass = 'w-full rounded-lg border-border bg-surface-inset text-body p
                 </div>
 
                 <div class="space-y-4 px-5 py-5">
-                    <TextField v-model="form.question_text" label="Question" placeholder="e.g., Name a fruit you'd put in a smoothie" :error="form.errors.question_text" />
+                    <div>
+                        <div class="mb-1.5 flex items-center justify-between">
+                            <label class="block text-sm font-medium text-body">Question</label>
+                            <Button v-if="isAmericaSays" variant="ghost" size="xs" title="Insert a fill-in blank (7 underscores) at the cursor" @click="insertBlank">＋ Insert blank</Button>
+                        </div>
+                        <TextField ref="questionField" v-model="form.question_text" placeholder="e.g., A ______ you'd put in a smoothie" :error="form.errors.question_text" />
+                    </div>
 
                     <div class="grid grid-cols-2 items-end gap-4" :class="isOodles ? 'sm:grid-cols-3' : ''">
                         <div>

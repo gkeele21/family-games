@@ -453,7 +453,7 @@ const timerPaused = computed(() => {
     const d = gameState.value?.timer_duration ?? 0;
     return !timerRunning.value && d > 0 && d < fullTimerDuration.value;
 });
-const startTimerLabel = computed(() => (timerPaused.value ? 'Resume Timer' : 'Start Timer'));
+const startTimerLabel = computed(() => (timerPaused.value ? 'Resume Timer' : 'Reveal Board - Start Timer'));
 // The team that does NOT currently hold the turn — offered as a one-click "steal".
 const otherTeam = computed<Team | null>(() =>
     teams.value.find(t => t.id !== gameState.value?.active_team_id) ?? null
@@ -472,8 +472,8 @@ const roundSteps = computed(() => {
     return [
         { title: 'Round Intro', hint: `Round ${rn} is on the board. Show the question when you’re ready to read it.` },
         { title: 'Question Shown', hint: 'Just the question is on the board — answers still hidden, no clock. Read it aloud, then start the timer.' },
-        { title: 'Timer & Guessing', hint: 'The answer board and clock are up. Reveal answers as they’re guessed. Hand control to the other team to steal. When you’re done, show the scores.' },
-        { title: 'Scores', hint: 'The scoreboard is on the board. Move on to the next question, or end the game if that was the last one.' },
+        { title: 'Team\'s Playing', hint: 'The answer board and clock are up. Reveal answers as they’re guessed. Hand control to the other team to steal. When you’re done, show the scores.' },
+        { title: 'Scores', hint: 'The scoreboard is on the board. Move on to the next question.' },
     ];
 });
 
@@ -483,7 +483,7 @@ const showQuestion = async () => {
 };
 
 // A round step is "done" only when it's genuinely finished — importantly, the
-// Timer & Guessing step (index 2) stays UNchecked until every answer is on the
+// Team's Playing step (index 2) stays UNchecked until every answer is on the
 // board. That way, if the host jumps to Scores with an answer still hidden, the
 // step reads as incomplete instead of a misleading green check.
 const stepComplete = (i: number): boolean => {
@@ -492,7 +492,7 @@ const stepComplete = (i: number): boolean => {
 };
 
 // The steps double as navigation: click an earlier step to jump back to it — e.g.
-// back to Timer & Guessing from Scores to reveal an answer you missed, then Show
+// back to Team's Playing from Scores to reveal an answer you missed, then Show
 // Scores again. Each maps to the phase that step represents (reveals are kept).
 const goToStep = async (i: number) => {
     if (i === roundStepIndex.value) return;
@@ -500,7 +500,7 @@ const goToStep = async (i: number) => {
         ? 'host.round.intro'          // Round Intro → Get Ready
         : i === 3
             ? 'host.round.end'        // Scores → recap
-            : 'host.question.show';   // Question Shown / Timer & Guessing → board
+            : 'host.question.show';   // Question Shown / Team's Playing → board
     await axios.post(route(routeName, props.gameSession.id));
     fetchState();
 };
@@ -534,16 +534,44 @@ const isFinal = computed(() => currentQuestion.value?.segment === 'final');
 // decides who plays the final. The board looks like Final question 1; the host
 // reveals the answer if needed, then declares which tied team won.
 const isTiebreaker = computed(() => currentQuestion.value?.segment === 'tiebreaker');
+// The tie-off answer is clickable (revealable) once the board is up — i.e. from
+// "Team's Playing" through "Declare Winner". Before that (intro / question plaque)
+// it's host reference only.
+const tiebreakerAnswersActive = computed(() =>
+    isTiebreaker.value && (phase.value === 'tiebreaker_play' || phase.value === 'tiebreaker_declare')
+);
 const tiebreakerTeamIds = computed<number[]>(() => gameState.value?.state_data?.tiebreaker_team_ids ?? []);
 const tiebreakerTeams = computed<Team[]>(() =>
     tiebreakerTeamIds.value
         .map(id => teams.value.find(t => t.id === id))
         .filter((t): t is Team => !!t)
 );
-const tiebreakerRevealed = computed(() => !!currentQuestion.value?.answers?.some(a => a.revealed));
+// Two or more teams tied for the lead — the recap heads into a tie-off, not the
+// final, so the advance button reads "Start Tiebreaker".
+const isLeadTie = computed(() => {
+    if (teams.value.length < 2) return false;
+    const max = Math.max(...teams.value.map(t => t.total_score));
+    return teams.value.filter(t => t.total_score === max).length > 1;
+});
 
 const tiebreakerShow = async () => {
     await axios.post(route('host.tiebreaker.show', props.gameSession.id));
+    fetchState();
+};
+// Reveal the (blank) answer board — like a regular round's Start Timer. This does
+// NOT reveal the answer text; it just brings up the board. Backend flips the phase
+// to tiebreaker_play (the display swaps the question plaque for the board).
+const tiebreakerRevealBoard = async () => {
+    await axios.post(route('host.tiebreaker.reveal-board', props.gameSession.id));
+    fetchState();
+};
+const tiebreakerToDeclare = async () => {
+    await axios.post(route('host.tiebreaker.to-declare', props.gameSession.id));
+    fetchState();
+};
+// Start the final round with the tie-off winner (from the winner slide).
+const tiebreakerToFinal = async () => {
+    await axios.post(route('host.tiebreaker.to-final', props.gameSession.id));
     fetchState();
 };
 const tiebreakerSwap = async () => {
@@ -554,6 +582,26 @@ const tiebreakerSwap = async () => {
         alert('Error: ' + (error.response?.data?.error || error.message));
     }
 };
+
+// The tie-off mirrors a regular round's 4-step checklist, but the last step is
+// "Declare Winner" instead of "Scores".
+const tiebreakerStepIndex = computed(() => {
+    switch (phase.value) {
+        case 'tiebreaker_intro': return 0;
+        case 'tiebreaker_question': return 1;
+        case 'tiebreaker_play': return 2;
+        case 'tiebreaker_declare': return 3;
+        case 'tiebreaker_result': return 4;
+        default: return 0;
+    }
+});
+const tiebreakerSteps = computed(() => [
+    { title: 'Tie-Off', hint: 'Teams tied for the lead. Whoever answers first gets to guess — right, they win; wrong, the other team wins. Show the question when ready.' },
+    { title: 'Question Shown', hint: 'Just the question is on the board. Read it aloud, then reveal the board (the blank answer) when they answer.' },
+    { title: 'Team\'s Playing', hint: 'The blank answer board is up. See who got it (or was closest), then move on to declare the winner.' },
+    { title: 'Declare Winner', hint: 'Declare the team that won the tie-off.' },
+    { title: 'Winner', hint: 'The tie-off winner is crowned on the board. Start the final round when the room is ready.' },
+]);
 const tiebreakerResolve = async (teamId: number) => {
     await axios.post(route('host.tiebreaker.resolve', props.gameSession.id), { team_id: teamId });
     fetchState();
@@ -748,7 +796,7 @@ onUnmounted(() => {
                                 <div v-if="i === roundStepIndex" class="mt-3 flex flex-wrap gap-2 pl-8">
                                     <Button v-if="phase === 'intro'" variant="primary" size="sm" @click="showQuestion">Show Question</Button>
                                     <template v-else-if="phase === 'recap'">
-                                        <Button v-if="finalQueued" variant="primary" size="sm" @click="advanceQuestion">Start Final Round &rarr;</Button>
+                                        <Button v-if="finalQueued" variant="primary" size="sm" @click="advanceQuestion">{{ isLeadTie ? 'Start Tiebreaker' : 'Start Final Round' }} &rarr;</Button>
                                         <Button v-else-if="isLastQuestion" variant="secondary" size="sm" @click="endGame">End Game</Button>
                                         <Button v-else variant="primary" size="sm" @click="advanceQuestion">Next Question &rarr;</Button>
                                     </template>
@@ -843,54 +891,46 @@ onUnmounted(() => {
                         </div>
                     </Card>
 
-                    <!-- Tie-off (America Says): teams tied for the lead play a
-                         one-answer question; the host reveals the answer if needed
-                         and declares which team won, and that team plays the final. -->
+                    <!-- Tie-off (America Says): mirrors a regular round's 4-step
+                         checklist, but the last step declares the tie-off winner
+                         (who then plays the final) instead of showing scores. -->
                     <Card v-if="isAmericaSays && isTiebreaker" title="Tiebreaker" class="mt-4">
-                        <div class="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-muted">
-                            <p class="font-semibold text-warning">Tied for the lead</p>
-                            <p class="mt-1">One-answer tie-off. The first team to answer gets to guess — if they're right they win the tie-off and play the final; if they're wrong, the other team wins. Reveal the answer to check their guess, then declare the winner.</p>
-                        </div>
-
-                        <div class="mt-3 flex flex-wrap items-center gap-2">
-                            <span class="text-xs uppercase tracking-widest text-subtle">Tied:</span>
-                            <span
-                                v-for="team in tiebreakerTeams"
-                                :key="team.id"
-                                class="rounded-full px-3 py-1 text-sm font-bold text-white"
-                                :style="{ backgroundColor: team.color }"
-                            >{{ team.name }}</span>
-                        </div>
-
-                        <div class="mt-4 space-y-2">
-                            <div v-if="phase === 'tiebreaker_intro'" class="space-y-2">
-                                <p class="text-sm text-muted">Read the rules of the tie-off, then show the question when they're ready.</p>
-                                <Button variant="primary" size="md" class="w-full" @click="tiebreakerShow">Show Question &rarr;</Button>
-                            </div>
-                            <p v-else class="text-sm text-muted">
-                                {{ tiebreakerRevealed ? 'Answer revealed. Declare the team that won the tie-off.' : 'Click the answer on the board to reveal it, then declare the winner.' }}
-                            </p>
-
-                            <Button
-                                v-if="phase !== 'tiebreaker_play'"
-                                variant="secondary"
-                                size="sm"
-                                @click="tiebreakerSwap"
-                            >Swap question</Button>
-
-                            <div v-if="phase !== 'tiebreaker_intro'" class="mt-2 space-y-2">
-                                <p class="text-xs uppercase tracking-widest text-subtle">Declare the winner</p>
-                                <div class="grid grid-cols-1 gap-2">
-                                    <button
-                                        v-for="team in tiebreakerTeams"
-                                        :key="team.id"
-                                        class="flex items-center justify-center gap-2 rounded-lg border-2 p-3 font-bold text-white transition-all"
-                                        :style="{ backgroundColor: team.color, borderColor: team.color }"
-                                        @click="tiebreakerResolve(team.id)"
-                                    >🏆 {{ team.name }} won the tie-off</button>
+                        <ol class="space-y-2">
+                            <li
+                                v-for="(step, i) in tiebreakerSteps"
+                                :key="i"
+                                class="rounded-lg border p-3 transition-all"
+                                :class="i === tiebreakerStepIndex ? 'border-border bg-surface-inset ring-2 ring-white shadow-[0_0_18px_2px_rgba(255,255,255,0.45)]' : 'border-border bg-surface-inset'"
+                            >
+                                <div class="flex items-center gap-2">
+                                    <span
+                                        class="flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs font-bold"
+                                        :class="i < tiebreakerStepIndex ? 'bg-success text-white' : 'bg-warning text-white'"
+                                    >
+                                        <span v-if="i < tiebreakerStepIndex">&check;</span><span v-else>{{ i + 1 }}</span>
+                                    </span>
+                                    <span class="font-semibold" :class="i === tiebreakerStepIndex ? 'text-body' : 'text-muted'">{{ step.title }}</span>
                                 </div>
-                            </div>
-                        </div>
+                                <p class="mt-1 pl-8 text-xs" :class="i === tiebreakerStepIndex ? 'text-body' : 'text-subtle'">{{ step.hint }}</p>
+
+                                <!-- The action lives on the current step -->
+                                <div v-if="i === tiebreakerStepIndex" class="mt-3 pl-8">
+                                    <Button v-if="phase === 'tiebreaker_intro'" variant="primary" size="sm" @click="tiebreakerShow">Show Question &rarr;</Button>
+                                    <Button v-else-if="phase === 'tiebreaker_question'" variant="primary" size="sm" @click="tiebreakerRevealBoard">Reveal Board</Button>
+                                    <Button v-else-if="phase === 'tiebreaker_play'" variant="primary" size="sm" @click="tiebreakerToDeclare">Declare Winner &rarr;</Button>
+                                    <div v-else-if="phase === 'tiebreaker_declare'" class="grid grid-cols-1 gap-2">
+                                        <button
+                                            v-for="team in tiebreakerTeams"
+                                            :key="team.id"
+                                            class="flex items-center justify-center gap-2 rounded-lg border-2 p-3 font-bold text-white transition-all"
+                                            :style="{ backgroundColor: team.color, borderColor: team.color }"
+                                            @click="tiebreakerResolve(team.id)"
+                                        >🏆 {{ team.name }} won the tie-off</button>
+                                    </div>
+                                    <Button v-else-if="phase === 'tiebreaker_result'" variant="primary" size="sm" @click="tiebreakerToFinal">Start Final Round &rarr;</Button>
+                                </div>
+                            </li>
+                        </ol>
                     </Card>
 
                     <div v-if="isOodles && currentQuestion" class="mt-4">
@@ -959,7 +999,17 @@ onUnmounted(() => {
                                         <span v-if="roundLabel" class="rounded-full border border-primary/50 px-3 py-1 text-sm font-semibold text-primary">{{ roundLabel }}</span>
                                         <span v-if="currentQuestionNumber && (totalQuestions ?? 0) > 1" class="rounded-full bg-surface-inset px-3 py-1 text-sm font-medium text-muted">Question {{ currentQuestionNumber }} of {{ totalQuestions }}</span>
                                     </div>
-                                    <h3 class="text-2xl font-bold text-body"><BlankText :text="currentQuestion.question_text" /></h3>
+                                    <div class="flex items-center justify-center gap-2 lg:justify-start">
+                                        <h3 class="text-2xl font-bold text-body"><BlankText :text="currentQuestion.question_text" /></h3>
+                                        <Button
+                                            v-if="isTiebreaker && ['tiebreaker_intro', 'tiebreaker_question'].includes(phase)"
+                                            variant="muted"
+                                            size="xs"
+                                            class="flex-none"
+                                            title="Swap the tiebreaker question"
+                                            @click="tiebreakerSwap"
+                                        >⇄ Swap</Button>
+                                    </div>
                                 </div>
                                 <GameTimer
                                     v-if="gameState && !isTiebreaker"
@@ -1092,20 +1142,20 @@ onUnmounted(() => {
                                 <button
                                     v-for="answer in currentQuestion.answers"
                                     :key="answer.id"
-                                    :disabled="isFinal && phase !== 'final_play' && phase !== 'final_review'"
-                                    :title="answer.revealed ? 'Click to undo' : 'Click to reveal'"
+                                    :disabled="(isFinal && phase !== 'final_play' && phase !== 'final_review') || (isTiebreaker && !tiebreakerAnswersActive)"
+                                    :title="isTiebreaker && !tiebreakerAnswersActive ? 'Tie-off answer (reveal the board first)' : (answer.revealed ? 'Click to undo' : 'Click to reveal')"
                                     class="hover-glow rounded-lg border p-4 text-left transition-all"
                                     :class="[
                                         answer.revealed
                                             ? 'border-success bg-success/10 text-body shadow-[0_0_18px_-2px_rgb(var(--color-success)_/_0.55)]'
                                             : 'border-border bg-surface-inset text-body',
-                                        (isFinal && phase !== 'final_play' && phase !== 'final_review') ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+                                        (isFinal && phase !== 'final_play' && phase !== 'final_review') ? 'cursor-not-allowed opacity-50' : (isTiebreaker && !tiebreakerAnswersActive ? 'cursor-default' : 'cursor-pointer'),
                                     ]"
                                     @click="toggleAnswer(answer)"
                                 >
                                     <div class="flex items-center justify-between">
                                         <span class="font-semibold">{{ answer.answer_text }}</span>
-                                        <span v-if="!isFinal" class="text-lg font-bold text-muted">{{ answerPoints(answer) }} pts</span>
+                                        <span v-if="!isFinal && !isTiebreaker" class="text-lg font-bold text-muted">{{ answerPoints(answer) }} pts</span>
                                     </div>
                                 </button>
 
@@ -1114,7 +1164,7 @@ onUnmounted(() => {
                                      answer cells but in danger colors. Just sounds the cue
                                      on the display — no board/score change. -->
                                 <button
-                                    v-if="isAmericaSays"
+                                    v-if="isAmericaSays && !isTiebreaker"
                                     type="button"
                                     title="Sound the wrong-answer buzzer"
                                     class="hover-glow cursor-pointer rounded-lg border border-danger bg-danger/10 p-4 text-left text-danger transition-all"

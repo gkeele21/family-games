@@ -46,7 +46,9 @@ const updateTimer = () => {
     if (props.timerStartedAt) {
         const startTime = new Date(props.timerStartedAt).getTime();
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        remainingSeconds.value = Math.max(0, props.timerDuration - elapsed);
+        // Clamp to the duration — the clock starts ~1s in the future (grace beat
+        // for casting latency), so elapsed is briefly negative; hold at full.
+        remainingSeconds.value = Math.min(props.timerDuration, Math.max(0, props.timerDuration - elapsed));
 
         if (remainingSeconds.value <= 0) {
             emit('expired');

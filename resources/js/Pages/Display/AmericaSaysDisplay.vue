@@ -36,6 +36,8 @@ interface GameState {
     final_result?: string | null;
     // Tie-off after the last regular round: the teams tied for the lead.
     tiebreaker_team_ids?: number[] | null;
+    // The team the host declared as the tie-off winner (crowned before the final).
+    tiebreaker_winner_id?: number | null;
     // True on the last regular round's recap, before the final begins.
     final_queued?: boolean;
     // True when the recap follows the last question of the round (every team has
@@ -165,6 +167,17 @@ const maybeStartTheme = () => {
     if (soundCheckDone.value && props.status === 'playing') startTheme();
 };
 
+// Skip Intro: cut the theme music and drop the curtain immediately, revealing the
+// current game phase beneath it. (Any pending 'ended'/safety handlers just find
+// the slide already closed.)
+const skipTheme = () => {
+    if (theme) {
+        theme.pause();
+        theme.currentTime = 0;
+    }
+    themeSlideOpen.value = false;
+};
+
 // The sound-check panel shows on load. It doubles as the browser autoplay unlock
 // (TVs block sound until a user gesture) and lets whoever's running the display
 // preview the correct/incorrect cues so the room knows them. "Done" unlocks all
@@ -255,7 +268,10 @@ const calculateRemainingTime = () => {
     const startTime = new Date(props.gameState.timer_started_at).getTime();
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     const prevTime = remainingTime.value;
-    remainingTime.value = Math.max(0, (props.gameState?.timer_duration || 30) - elapsed);
+    // Clamp to the duration: the clock starts ~1s in the future (a grace beat for
+    // casting latency), so elapsed is briefly negative — hold at full, don't show >dur.
+    const dur = props.gameState?.timer_duration || 30;
+    remainingTime.value = Math.min(dur, Math.max(0, dur - elapsed));
 
     // Play timeout sound when timer crosses from >0 to 0
     if (prevTime > 0 && remainingTime.value === 0) {
@@ -365,6 +381,11 @@ const tiebreakerTeams = computed<Team[]>(() => {
         .map((id) => props.teams.find((t) => t.id === id))
         .filter((t): t is Team => !!t);
 });
+// The declared tie-off winner, crowned on the board before the final begins.
+const tiebreakerWinner = computed<Team | null>(() => {
+    const id = props.gameState?.tiebreaker_winner_id;
+    return id ? props.teams.find((t) => t.id === id) ?? null : null;
+});
 
 // --- Correct-answer sound -------------------------------------------------
 // Play CorrectAnswer.m4a whenever a new answer flips to revealed on the SAME question.
@@ -389,18 +410,45 @@ watch(revealedKey, () => {
     let hasNewReveal = false;
     now.forEach((id) => { if (!prevRevealed.has(id)) hasNewReveal = true; });
     prevRevealed = now;
-    if (hasNewReveal) sounds.play('correct');
+    if (hasNewReveal) {
+        sounds.play('correct');
+        // Tie-off: revealing the answer effectively settles the round, so cut the
+        // game music (there's no countdown to end it on its own).
+        if (phase.value === 'tiebreaker_play') getBgm().pause();
+        // Regular round: clearing the board (every answer revealed) ends the round
+        // even if the clock is still running, so cut the music.
+        else if (phase.value === 'question') {
+            const answers = props.currentQuestion?.answers ?? [];
+            if (answers.length > 0 && answers.every((a) => a.revealed)) getBgm().pause();
+        }
+    }
+});
+
+// Keep the reveal-sound baseline in sync with the CURRENT question, even when the
+// question loads/changes without a change to its revealed set — the first question
+// arriving from the poll, or switching to one with no reveals. Without this the
+// baseline question id stays null (gameState is fetched, not server-rendered), so
+// the FIRST reveal is mis-read as a question switch and its sound is swallowed.
+watch(() => props.currentQuestion?.id, (qid) => {
+    prevQuestionId = qid ?? null;
+    prevRevealed = new Set(revealedIds.value);
 });
 
 // --- Incorrect sound ------------------------------------------------------
 // IncorrectAnswer.m4a is host-driven only — the "Wrong Answer" buzzer. It is NOT
 // played automatically on a final-round loss (only TimerEnd plays when the
-// clock runs out). The host bumps a monotonic counter; play the sound each time
-// it advances (undefined prev on first load means no sound until pressed).
-watch(() => props.gameState?.wrong_buzz, (now, prev) => {
-    if (typeof now === 'number' && typeof prev === 'number' && now > prev) {
-        sounds.play('incorrect');
-    }
+// clock runs out). The host bumps a monotonic counter each buzz.
+//
+// null until the first state poll lands; the first non-null value is adopted as
+// the baseline WITHOUT a sound, so a mid-game reconnect doesn't replay the last
+// buzz. Every increment after that plays — including the very first buzz of a
+// fresh game (0 → 1), which the old "prev must be a number" guard swallowed.
+const wrongBuzzCount = computed<number | null>(() =>
+    props.gameState ? (props.gameState.wrong_buzz ?? 0) : null
+);
+watch(wrongBuzzCount, (now, prev) => {
+    if (now === null || prev === null || prev === undefined) return;
+    if (now > prev) sounds.play('incorrect');
 });
 
 // --- Question-shown & board-shown sounds ----------------------------------
@@ -420,6 +468,25 @@ watch(phase, (now, prev) => {
 // final sets phase and timer together).
 watch(() => props.gameState?.timer_started_at != null, (started, wasStarted) => {
     if (started && !wasStarted && phase.value === 'question') sounds.play('board');
+});
+
+// Tie-off round music. The tie-off has no countdown, so the clock-driven music
+// watcher never fires — play the round music from the top when the answer board
+// is revealed (tiebreaker_play), like a regular round, and stop it when the host
+// moves on to declare the winner.
+watch(phase, (now, prev) => {
+    if (now === prev) return;
+    if (now === 'tiebreaker_play') {
+        const m = getBgm();
+        bgmPrimed = true;
+        m.currentTime = 0;
+        m.play().catch(() => {});
+    } else if (prev === 'tiebreaker_play') {
+        getBgm().pause();
+    }
+    // "Show Scores" (regular round recap) cuts the music, even if the clock hasn't
+    // run out yet.
+    if (now === 'recap') getBgm().pause();
 });
 
 // A final question's answer board is shown once the host reveals it (phase
@@ -458,7 +525,7 @@ watch(phase, (newPhase, oldPhase) => {
     }
 });
 
-// Final win: hold on the cleared board ~3s so the room sees the last answer land,
+// Final win: hold on the cleared board ~2s so the room sees the last answer land,
 // THEN roll the celebration slide + theme music together. Buffering the win this
 // way also masks any cast audio delay — the theme starts with the slide, not
 // ahead of it (sound first, animation right after — see the win-sequence notes).
@@ -472,7 +539,7 @@ watch([phase, finalResult], ([ph, res]) => {
             themePrimed = true;
             t.currentTime = 0;
             t.play().catch(() => {});
-        }, 3000);
+        }, 2000);
     } else {
         winCelebrate.value = false;
     }
@@ -486,6 +553,22 @@ const leadingTeam = computed<Team | null>(() => {
     return [...props.teams].sort(
         (a, b) => b.total_score - a.total_score || (a.display_order ?? 0) - (b.display_order ?? 0)
     )[0];
+});
+// Two or more teams share the top score — a tie-off decides who plays the final,
+// so the recap must NOT crown a single "winner".
+const isLeadTie = computed(() => {
+    if (props.teams.length < 2) return false;
+    const max = Math.max(...props.teams.map((t) => t.total_score));
+    return props.teams.filter((t) => t.total_score === max).length > 1;
+});
+// The team crowned on the "X Wins! — On to the Final Round" slide, which is shared
+// by two phases: the tie-off winner (tiebreaker_result) when a tie was played off,
+// otherwise the leading team as the last regular round wraps up (recap). Null when
+// the recap is just showing round scores (not yet the final crown).
+const crownTeam = computed<Team | null>(() => {
+    if (phase.value === 'tiebreaker_result') return tiebreakerWinner.value;
+    if (finalQueued.value && !isLeadTie.value) return leadingTeam.value;
+    return null;
 });
 // The answer board + clock only appear once the host starts the timer. Before
 // that (just after "Show Question") only the question plaque is shown.
@@ -616,15 +699,21 @@ onUnmounted(() => {
                 <p v-else class="as-headline font-logo">Get Ready</p>
             </div>
 
-            <!-- RECAP: round scoreboard. After the last regular round, crown the
-                 leading team before the final round begins. -->
-            <div v-else-if="phase === 'recap'" class="as-center">
-                <template v-if="finalQueued && leadingTeam">
-                    <p class="as-headline font-logo" :style="{ color: leadingTeam.color }">{{ leadingTeam.name }} Wins!</p>
+            <!-- RECAP / TIE-OFF WINNER: one shared slide. It shows the round
+                 scoreboard, and crowns the team headed to the final with the same
+                 "Team X Wins! — On to the Final Round" markup for BOTH the regular
+                 recap (leading team, with score chips) and the tie-off winner
+                 (declared winner, no score chips) — see crownTeam. -->
+            <div v-else-if="phase === 'recap' || phase === 'tiebreaker_result'" class="as-center">
+                <template v-if="phase === 'recap' && finalQueued && isLeadTie">
+                    <p class="as-headline font-logo">It's a Tie!</p>
+                </template>
+                <template v-else-if="crownTeam">
+                    <p class="as-headline font-logo" :style="{ color: crownTeam.color }">{{ crownTeam.name }} Wins!</p>
                     <p class="as-subhead font-logo">On to the Final Round</p>
                 </template>
                 <p v-else class="as-eyebrow font-logo">{{ gameState?.end_of_round ? 'End of Round' : 'Round' }} {{ roundNumber }} · Scores</p>
-                <div class="as-finalscores">
+                <div v-if="phase === 'recap'" class="as-finalscores">
                     <div v-for="team in orderedTeams" :key="team.id" class="as-scorechip">
                         <span class="as-scorechip-name" :style="{ color: team.color }">{{ team.name }}</span>
                         <span class="as-scorechip-pts font-logo">{{ team.total_score.toLocaleString() }}</span>
@@ -710,11 +799,15 @@ onUnmounted(() => {
             </div>
 
             <!-- TIE-OFF — question: one-answer board, just like Final question 1.
-                 Plaque shows first (tiebreaker_question); the answer appears when
-                 the host reveals it (tiebreaker_play). The winner is declared by
-                 the host, so there's no result slide here. -->
-            <template v-else-if="['tiebreaker_question', 'tiebreaker_play'].includes(phase)">
+                 The plaque stays up the whole time (like a regular round), and the
+                 blank answer board appears beneath it once the host reveals it
+                 (tiebreaker_play). The winner is declared by the host, so there's
+                 no result slide here. -->
+            <template v-else-if="['tiebreaker_question', 'tiebreaker_play', 'tiebreaker_declare'].includes(phase)">
                 <div class="as-overlay">
+                    <!-- Question plaque: shown on its own first (read it aloud, like a
+                         regular round's "Show Question"), and kept on the board once
+                         the answer board is revealed. -->
                     <div class="as-plaque">
                         <div class="as-face">
                             <p class="font-logo"><template v-if="currentQuestion"><template
@@ -723,7 +816,9 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <div v-if="currentQuestion && phase === 'tiebreaker_play'" class="as-answers as-answers-final">
+                    <!-- The blank answer board appears beneath the plaque once the
+                         host reveals it, like a regular round's answer board. -->
+                    <div v-if="currentQuestion && phase !== 'tiebreaker_question'" class="as-answers as-answers-final">
                         <div class="as-final-col">
                             <div v-for="ans in sortedAnswers" :key="ans.id" class="as-row-final">
                                 <div class="as-ans as-ans-final font-logo">
@@ -834,6 +929,10 @@ onUnmounted(() => {
                 </template>
             </div>
         </div>
+
+        <!-- Skip the theme intro (bottom-right) — cut the music and drop straight
+             into the game. Only shown while the theme curtain is up. -->
+        <button v-if="themeSlideOpen" type="button" class="as-skip font-logo" @click="skipTheme">Skip Intro &rarr;</button>
 
         <!-- Final round: a brief "Out of Time" flash over the map the moment the
              clock expires, before the reveal board shows beneath it. -->
@@ -1212,6 +1311,28 @@ onUnmounted(() => {
     background: rgba(120, 20, 20, 0.8);
     animation: as-pulse 1s infinite;
 }
+
+/* "Skip Intro" pill — bottom-right over the theme curtain, matching the timer
+   chip's gold-rimmed look. Above the theme scrim (z-35). */
+.as-skip {
+    position: absolute;
+    right: 2.8%;
+    bottom: 5%;
+    z-index: 40;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: clamp(14px, 1.4vw, 22px);
+    color: #eaf1ff;
+    padding: 0.5em 1.3em;
+    border-radius: 999px;
+    background: rgba(6, 12, 40, 0.72);
+    border: 2px solid #f4b433;
+    box-shadow: 0 0 22px rgba(80, 130, 255, 0.45), inset 0 0 12px rgba(0, 0, 0, 0.4);
+    cursor: pointer;
+    transition: transform 0.15s ease, background 0.15s ease;
+}
+.as-skip:hover { background: rgba(20, 34, 94, 0.9); transform: scale(1.04); }
 .as-timer-expired { border-color: #ff3b3b; color: #fff; background: #b81f16; }
 @keyframes as-pulse {
     0%, 100% { transform: scale(1); }

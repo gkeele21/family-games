@@ -39,6 +39,24 @@ class GameSession extends Model
                 $session->invite_code = GameCode::generate();
             }
         });
+
+        // Question usage is counted only when a game actually finishes — a setup
+        // that's abandoned or cancelled never counts. When the session transitions
+        // to "completed", bump times_used once for each distinct question that was
+        // part of it. (Selection prefers least-used questions, so this keeps the
+        // rotation honest without charging usage for games that never played.)
+        static::updated(function ($session) {
+            if ($session->wasChanged('status') && $session->status === 'completed') {
+                $questionIds = $session->sessionQuestions()
+                    ->distinct()
+                    ->pluck('question_id')
+                    ->all();
+
+                if ($questionIds) {
+                    Question::whereIn('id', $questionIds)->increment('times_used');
+                }
+            }
+        });
     }
 
     public function gameType(): BelongsTo

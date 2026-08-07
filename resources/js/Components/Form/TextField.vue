@@ -10,6 +10,7 @@
             <textarea
                 v-if="multiline"
                 :id="inputId"
+                ref="textareaRef"
                 :value="modelValue"
                 @input="$emit('update:modelValue', $event.target.value)"
                 :placeholder="placeholder"
@@ -33,6 +34,7 @@
             <input
                 v-else
                 :id="inputId"
+                ref="inputRef"
                 :type="type"
                 :value="modelValue"
                 @input="$emit('update:modelValue', $event.target.value)"
@@ -65,7 +67,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import Icon from '@/Components/Base/Icon.vue';
 import FormLabel from '@/Components/Form/FormLabel.vue';
 
@@ -87,7 +89,7 @@ const props = defineProps({
     rows: { type: Number, default: 3 },
 });
 
-defineEmits(['update:modelValue']);
+const emit = defineEmits(['update:modelValue']);
 
 const sizes = {
     sm: 'py-1.5 text-sm',
@@ -96,4 +98,27 @@ const sizes = {
 };
 
 const inputId = computed(() => `textfield-${Math.random().toString(36).substring(2, 11)}`);
+
+// Expose the underlying element (and a cursor-aware insert helper) so callers can
+// inject a snippet at the caret — e.g. the "insert blank" button on America Says
+// questions. Falls back to appending when there's no live selection.
+const inputRef = ref(null);
+const textareaRef = ref(null);
+const activeEl = () => (props.multiline ? textareaRef.value : inputRef.value);
+const insertAtCursor = (snippet) => {
+    const el = activeEl();
+    const current = String(props.modelValue ?? '');
+    const start = el && typeof el.selectionStart === 'number' ? el.selectionStart : current.length;
+    const end = el && typeof el.selectionEnd === 'number' ? el.selectionEnd : current.length;
+    const next = current.slice(0, start) + snippet + current.slice(end);
+    emit('update:modelValue', next);
+    nextTick(() => {
+        if (!el) return;
+        const pos = start + snippet.length;
+        el.focus();
+        el.setSelectionRange(pos, pos);
+    });
+};
+
+defineExpose({ insertAtCursor, focus: () => activeEl()?.focus() });
 </script>

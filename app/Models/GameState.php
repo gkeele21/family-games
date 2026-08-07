@@ -71,6 +71,9 @@ class GameState extends Model
         $elapsed = now()->timestamp - $this->timer_started_at->timestamp;
         $remaining = $this->timer_duration - $elapsed;
 
-        return max(0, (int) $remaining);
+        // Clamp to the duration: the clock is started ~1s in the future (a grace
+        // beat for casting latency), so before it "starts" elapsed is negative and
+        // remaining would exceed the duration — don't let that inflate banked time.
+        return max(0, min((int) $this->timer_duration, (int) $remaining));
     }
 }

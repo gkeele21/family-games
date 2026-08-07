@@ -415,6 +415,10 @@ class GameSessionController extends Controller
 
         $state->update([
             'active_team_id' => $teams->first()?->id,
+            // Re-read the round timer from the (possibly host-edited) config at
+            // start, so setup changes to control_timer_seconds actually take effect
+            // — it was previously fixed at session-creation time and never refreshed.
+            'timer_duration' => $gameSession->getConfig('control_timer_seconds', 40),
             'state_data' => [
                 'team_order' => $teams->pluck('id')->toArray(),
                 'team_rotation_index' => 0,

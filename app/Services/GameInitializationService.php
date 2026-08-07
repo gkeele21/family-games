@@ -97,16 +97,20 @@ class GameInitializationService
                 $numQuestions = rand($minQuestions, $maxQuestions);
             }
 
-            // Get random questions for this letter (never reuse questions)
+            // Get questions for this letter (never reuse within a game). Prefer the
+            // least-used questions first (random within the same usage tier) so the
+            // library rotates through everything before repeating.
             $questions = Question::where('game_type_id', $gameSession->game_type_id)
                 ->where('is_active', true)
                 ->where('answer_letter', $letter)
                 ->whereNotIn('id', $usedQuestionIds)
+                ->orderBy('times_used')
                 ->inRandomOrder()
                 ->limit($numQuestions)
                 ->get();
 
-            // Create session questions (only using available unique questions)
+            // Create session questions (only using available unique questions).
+            // Usage is counted when the game completes, not here.
             foreach ($questions as $index => $question) {
                 SessionQuestion::create([
                     'game_session_id' => $gameSession->id,
@@ -115,9 +119,6 @@ class GameInitializationService
                     'display_order' => $index + 1,
                     'status' => 'pending',
                 ]);
-
-                // Track question usage statistics
-                $question->incrementUsed();
 
                 $usedQuestionIds[] = $question->id;
             }
@@ -155,6 +156,7 @@ class GameInitializationService
                     ->where('is_active', true)
                     ->where('round_type', '!=', 'final')
                     ->whereNotIn('id', $usedIds)
+                    ->orderBy('times_used')
                     ->inRandomOrder()
                     ->first();
             }
@@ -173,7 +175,6 @@ class GameInitializationService
                 'segment' => 'main',
                 'points_available' => $this->calculateRoundMultiplier($roundIndex + 1, $config),
             ]);
-            $question->incrementUsed();
         }
 
         // Fast Money: 5 fixed slots drawn from the Final pool. Both players answer
@@ -188,6 +189,7 @@ class GameInitializationService
                         ->where('is_active', true)
                         ->where('round_type', 'final')
                         ->whereNotIn('id', $usedIds)
+                        ->orderBy('times_used')
                         ->inRandomOrder()
                         ->first();
                 }
@@ -204,7 +206,6 @@ class GameInitializationService
                     'status' => 'pending',
                     'segment' => 'fast_money',
                 ]);
-                $question->incrementUsed();
             }
         }
 
@@ -250,6 +251,7 @@ class GameInitializationService
                         ->where('is_active', true)
                         ->where('round_type', '!=', 'final')
                         ->whereNotIn('id', $usedIds)
+                        ->orderBy('times_used')
                         ->inRandomOrder()
                         ->first();
                 }
@@ -269,7 +271,6 @@ class GameInitializationService
                     'points_available' => $round['points_per_answer'],
                     'bonus_points' => $round['bonus_points'],
                 ]);
-                $question->incrementUsed();
             }
         }
 
@@ -289,6 +290,7 @@ class GameInitializationService
                         ->where('round_type', 'final')
                         ->whereNotIn('id', $usedIds)
                         ->has('answers', '=', $n)
+                        ->orderBy('times_used')
                         ->inRandomOrder()
                         ->first();
                 }
@@ -306,7 +308,6 @@ class GameInitializationService
                     'segment' => 'final',
                     'answers_needed' => $n,
                 ]);
-                $finalQuestion->incrementUsed();
             }
         }
 
