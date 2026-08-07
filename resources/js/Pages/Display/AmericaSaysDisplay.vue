@@ -84,10 +84,30 @@ const sounds = useSoundEffects();
 // Background round music — its own channel at a lower volume so the one-shot
 // effects cut through it. Plays while the timer runs and pauses with it (see the
 // watchers below).
+//
+// We load the clip fully into memory as a blob and point the <audio> element at
+// that blob URL. Seeking a server-streamed m4a is unreliable — the browser clamps
+// a seek to the currently-"seekable" range, so starting a 40s timer 26s into the
+// 66s clip snapped back to 0:00 and only ever played the low intro. A blob lives
+// entirely in memory, so the whole clip is seekable and currentTime jumps land
+// exactly. It stays a plain <audio> element (not Web Audio) so it routes to the TV
+// over HDMI / AirPlay / mirroring and plays on the media channel, exactly like the
+// sound effects and theme that already work on the display device.
 let bgm: HTMLAudioElement | null = null;
+let bgmObjectUrl: string | null = null;
+const preloadBgmBlob = () => {
+    if (bgmObjectUrl) return;
+    fetch('/sounds/GameplayMusic.m4a')
+        .then((r) => r.blob())
+        .then((b) => {
+            bgmObjectUrl = URL.createObjectURL(b);
+            if (bgm && !bgm.src.startsWith('blob:')) bgm.src = bgmObjectUrl;
+        })
+        .catch(() => { /* keep the streamed src as a fallback */ });
+};
 const getBgm = (): HTMLAudioElement => {
     if (!bgm) {
-        bgm = new Audio('/sounds/GameplayMusic.m4a');
+        bgm = new Audio(bgmObjectUrl ?? '/sounds/GameplayMusic.m4a');
         bgm.preload = 'auto';
         bgm.volume = 0.4;
     }
@@ -290,27 +310,31 @@ watch(() => props.gameState?.timer_started_at, (newVal, oldVal) => {
 
 // --- Background music --------------------------------------------------------
 // The round music is positioned so its TAIL lands on 0:00: whenever it (re)starts
-// while the clock is live we seek to (duration − seconds-left). That glues the
-// music's ending to the timer's ending even when time has been banked (final
-// round) or we loop back to a skipped question with the clock still mid-run — so
-// the music never dies early or runs out ahead of the clock.
-const alignBgmToTimer = () => {
-    const m = getBgm();
-    const seek = () => {
-        const left = remainingTime.value;
-        if (isFinite(m.duration) && m.duration > 0 && left > 0) {
-            m.currentTime = Math.max(0, m.duration - left);
-        }
-    };
-    if (isFinite(m.duration) && m.duration > 0) seek();
-    else m.addEventListener('loadedmetadata', seek, { once: true });
-};
-
+// while the clock is live we seek to (duration − seconds-left), then play. That
+// glues the music's ending to the timer's ending — for ANY timer length up to the
+// clip length — so a 40s timer hears the LAST 40s of the clip (ending on the pitch
+// climax), not the first 40s.
+//
+// The seek MUST happen before play(): setting currentTime right after play() is
+// unreliable and gets dropped by some browsers, which then start the track from
+// 0:00 (the "music never reaches the climax" bug). We also hold playback until the
+// duration is known so the deferred path can't start from the top either.
+// Position the round music so its TAIL lands on 0:00: seek to (duration − seconds
+// left), then play — so a 40s timer hears the LAST 40s of the clip, ending on the
+// pitch climax. Seek BEFORE play() (and only once the duration is known) so the
+// offset isn't dropped and the track doesn't start over at 0:00.
 const startBgm = () => {
     const m = getBgm();
     bgmPrimed = true;
-    m.play().catch(() => {});
-    alignBgmToTimer();
+    const go = () => {
+        const left = remainingTime.value;
+        if (isFinite(m.duration) && m.duration > 0 && left > 0) {
+            try { m.currentTime = Math.max(0, m.duration - left); } catch (e) { /* not seekable yet */ }
+        }
+        m.play().catch(() => {});
+    };
+    if (isFinite(m.duration) && m.duration > 0) go();
+    else m.addEventListener('loadedmetadata', go, { once: true });
 };
 
 // Play round music while the clock runs; bank it (pause) when the clock stops.
@@ -627,6 +651,9 @@ const questionSegments = (text: string): { text: string; blank?: boolean }[] => 
 onMounted(() => {
     calculateRemainingTime();
     timerInterval = window.setInterval(calculateRemainingTime, 100);
+    // Start fetching the round-music blob now so it's in memory (and fully
+    // seekable) by the time the first round starts.
+    preloadBgmBlob();
 });
 
 onUnmounted(() => {
@@ -636,6 +663,10 @@ onUnmounted(() => {
     if (bgm) {
         bgm.pause();
         bgm = null;
+    }
+    if (bgmObjectUrl) {
+        URL.revokeObjectURL(bgmObjectUrl);
+        bgmObjectUrl = null;
     }
     if (theme) {
         theme.pause();

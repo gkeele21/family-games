@@ -616,7 +616,7 @@ const copyDisplayUrl = () => {
                         </div>
                         <div class="flex items-center gap-3">
                             <span class="text-sm text-muted">Round Timer</span>
-                            <NumberInput v-model="settingsForm.settings.control_timer_seconds" :min="10" :max="120" />
+                            <NumberInput v-model="settingsForm.settings.control_timer_seconds" :min="10" :max="60" />
                             <span class="text-sm text-muted">sec</span>
                         </div>
                     </div>
