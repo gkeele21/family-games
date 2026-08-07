@@ -157,6 +157,9 @@ class DisplayController extends Controller
                 // Final round: the lone team playing, and the pass/fail outcome.
                 'final_team_id' => $state?->getStateValue('final_team_id'),
                 'final_result' => $state?->getStateValue('final_result'),
+                // Whether the one-per-final skip has been used (shown on the intro
+                // slides so the room knows how many skips remain).
+                'final_skip_used' => (bool) $state?->getStateValue('final_skip_used'),
                 // Tie-off after the last regular round: the teams tied for the lead
                 // (the display names them on the tiebreaker board).
                 'tiebreaker_team_ids' => $state?->getStateValue('tiebreaker_team_ids'),

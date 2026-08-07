@@ -656,6 +656,55 @@ const finalSelect = async (sessionQuestionId: number) => {
     fetchState();
 };
 
+// The final round is shown as a per-question step checklist, mirroring a regular
+// round: one question at a time flows Get Ready → Question Shown → Team's Playing →
+// Board Complete, with a "Question X of Y" header. The out-of-time / result beats
+// swap the checklist for a review list / banner (see the template).
+const finalSteps = [
+    { title: 'Get Ready' },
+    { title: 'Question Shown' },
+    { title: 'Team\'s Playing' },
+    { title: 'Board Complete' },
+];
+const finalStepIndex = computed(() => {
+    switch (phase.value) {
+        case 'final_intro':
+        case 'final_ready': return 0;
+        case 'final_question': return 1;
+        case 'final_play': return 2;
+        case 'final_cleared': return 3;
+        default: return 0;
+    }
+});
+// Out-of-time review / pass-fail result replace the step checklist.
+const finalInReview = computed(() => phase.value === 'final_review');
+const finalInResult = computed(() => phase.value === 'final_result');
+const finalShowSteps = computed(() => !finalInReview.value && !finalInResult.value);
+// The question currently on the board, and its position in the set (X of Y).
+const currentFinalQuestion = computed<FinalQuestion | null>(() =>
+    finalQuestions.value.find(q => q.is_current) ?? null
+);
+const finalQuestionNumber = computed(() => {
+    const i = finalQuestions.value.findIndex(q => q.is_current);
+    return i >= 0 ? i + 1 : 1;
+});
+const finalTotal = computed(() => finalQuestions.value.length);
+// The skipped question (if any). A skip leaves the question pending and records it
+// by id in state, so it's tracked separately from status.
+const finalSkippedId = computed<number | null>(() => gameState.value?.state_data?.final_skipped_question_id ?? null);
+// At-a-glance status of all four final questions for the key: done / current /
+// skipped / upcoming (completed wins, then the one you're on, then a recorded skip).
+const finalStatusList = computed(() =>
+    finalQuestions.value.map((fq, i) => {
+        let status: 'done' | 'current' | 'skipped' | 'upcoming' = 'upcoming';
+        if (fq.status === 'completed') status = 'done';
+        else if (fq.is_current) status = 'current';
+        else if (finalSkippedId.value === fq.id) status = 'skipped';
+        return { n: i + 1, id: fq.id, status };
+    })
+);
+const finalStatusLabel: Record<string, string> = { done: 'Completed', current: 'On now', skipped: 'Skipped', upcoming: 'Up next' };
+
 const giveControlToOther = () => {
     if (otherTeam.value) selectControllingTeam(otherTeam.value.id);
 };
@@ -766,6 +815,9 @@ onUnmounted(() => {
                     <!-- Round steps (America Says): the whole phase progression with
                          hints; the current phase is highlighted and carries its action. -->
                     <Card v-if="isAmericaSays && currentQuestion && !isFinal && !isTiebreaker" title="Round Steps" class="mt-4">
+                        <div class="mb-3 flex flex-wrap items-center gap-2 border-b border-border pb-3">
+                            <span class="text-sm font-medium text-muted">Round {{ gameState?.round_number ?? 1 }}<span v-if="(totalQuestions ?? 0) > 1"> · Question {{ currentQuestionNumber }} of {{ totalQuestions }}</span></span>
+                        </div>
                         <ol class="space-y-2">
                             <li
                                 v-for="(step, i) in roundSteps"
@@ -785,10 +837,6 @@ onUnmounted(() => {
                                         <span v-if="stepComplete(i)">&check;</span><span v-else>{{ i + 1 }}</span>
                                     </span>
                                     <span class="font-semibold" :class="i === roundStepIndex ? 'text-body' : 'text-muted'">{{ step.title }}</span>
-                                    <span
-                                        v-if="i === 2 && roundStepIndex === 2 && currentQuestionNumber && (totalQuestions ?? 0) > 1"
-                                        class="ml-auto text-xs text-subtle"
-                                    >Q {{ currentQuestionNumber }}/{{ totalQuestions }}</span>
                                 </div>
                                 <p class="mt-1 pl-8 text-xs" :class="i === roundStepIndex ? 'text-body' : 'text-subtle'">{{ step.hint }}</p>
 
@@ -817,77 +865,135 @@ onUnmounted(() => {
                         </ol>
                     </Card>
 
-                    <!-- Final round (America Says): who's playing, the 4-question
-                         guide/navigator, and the guided action for the current phase. -->
+                    <!-- Final round (America Says): a per-question step checklist that
+                         mirrors a regular round — one question at a time flows Get Ready
+                         → Question Shown → Team's Playing → Board Complete, with a
+                         "Question X of Y" header. Out-of-time / result swap the checklist
+                         for a review list / banner. -->
                     <Card v-if="isAmericaSays && isFinal" title="Final Round" class="mt-4">
-                        <!-- The four final questions as steps. In review mode (after the
-                             clock runs out) each is clickable to jump and reveal misses. -->
-                        <ol class="space-y-2">
+                        <!-- Header: the team playing + which question of how many. -->
+                        <div class="mb-3 flex flex-wrap items-center gap-2 border-b border-border pb-3">
+                            <span v-if="finalTeam" class="flex items-center gap-2 text-sm font-semibold text-body">
+                                <span class="h-3 w-3 flex-none rounded-full" :style="{ backgroundColor: finalTeam.color }"></span>
+                                {{ finalTeam.name }}
+                            </span>
+                            <span class="text-sm font-medium text-muted">{{ finalInReview ? 'Reviewing misses' : `Question ${finalQuestionNumber} of ${finalTotal}` }}</span>
+                        </div>
+
+                        <!-- Status key: all four final questions at a glance
+                             (done / skipped / on now / up next). -->
+                        <div v-if="!finalInReview" class="mb-4">
+                            <div class="flex gap-1.5">
+                                <div
+                                    v-for="q in finalStatusList"
+                                    :key="q.id"
+                                    class="flex flex-1 items-center justify-center gap-1 rounded-md border px-1.5 py-1 text-xs font-bold"
+                                    :class="{
+                                        'border-success bg-success/15 text-success': q.status === 'done',
+                                        'border-info bg-info/10 text-info': q.status === 'skipped',
+                                        'border-border bg-surface-overlay text-body ring-2 ring-white': q.status === 'current',
+                                        'border-border bg-surface-inset text-subtle': q.status === 'upcoming',
+                                    }"
+                                    :title="`Question ${q.n} — ${finalStatusLabel[q.status]}`"
+                                >
+                                    <span>{{ q.n }}</span>
+                                    <span v-if="q.status === 'done'">&check;</span>
+                                </div>
+                            </div>
+                            <p class="mt-1.5 text-[11px] text-subtle">
+                                <span class="text-success">Done</span> ·
+                                <span class="text-info">Skipped</span> ·
+                                <span class="text-body">On now</span> ·
+                                <span>Up next</span>
+                            </p>
+                        </div>
+
+                        <!-- Per-question step checklist -->
+                        <ol v-if="finalShowSteps" class="space-y-2">
                             <li
-                                v-for="(fq, i) in finalQuestions"
-                                :key="fq.id"
-                                class="rounded-lg border p-3 transition-all"
-                                :class="[
-                                    fq.is_current ? 'border-border bg-surface-inset ring-2 ring-white shadow-[0_0_18px_2px_rgba(255,255,255,0.45)]' : 'border-border bg-surface-inset',
-                                    canNavigateFinal && !fq.is_current ? 'cursor-pointer hover:border-border-strong' : '',
-                                ]"
-                                @click="canNavigateFinal && !fq.is_current ? finalSelect(fq.id) : null"
+                                v-for="(step, i) in finalSteps"
+                                :key="i"
+                                class="rounded-lg border border-border bg-surface-inset p-3 transition-all"
+                                :class="i === finalStepIndex ? 'ring-2 ring-white shadow-[0_0_18px_2px_rgba(255,255,255,0.45)]' : ''"
                             >
                                 <div class="flex items-center gap-2">
                                     <span
                                         class="flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs font-bold"
-                                        :class="fq.status === 'completed' ? 'bg-success text-white' : 'bg-warning text-white'"
+                                        :class="i < finalStepIndex ? 'bg-success text-white' : 'bg-warning text-white'"
                                     >
-                                        <span v-if="fq.status === 'completed'">&check;</span><span v-else>{{ i + 1 }}</span>
+                                        <span v-if="i < finalStepIndex">&check;</span><span v-else>{{ i + 1 }}</span>
                                     </span>
-                                    <span class="font-semibold" :class="fq.is_current ? 'text-body' : 'text-muted'">Question {{ i + 1 }}</span>
-                                    <span class="ml-auto text-xs text-subtle">{{ fq.revealed_count }}/{{ fq.total_answers }} answers</span>
+                                    <span class="font-semibold" :class="i === finalStepIndex ? 'text-body' : 'text-muted'">{{ step.title }}</span>
+                                    <span
+                                        v-if="(i === 2 || i === 3) && currentFinalQuestion"
+                                        class="ml-auto text-xs text-subtle"
+                                    >{{ currentFinalQuestion.revealed_count }}/{{ currentFinalQuestion.total_answers }} answers</span>
                                 </div>
+
+                                <!-- Hint + action live on the current step -->
+                                <template v-if="i === finalStepIndex">
+                                    <p class="mt-1 pl-8 text-xs text-body">
+                                        <template v-if="phase === 'final_intro' || phase === 'final_ready'">{{ finalTeam?.name ?? 'The team' }} is up. Show the question on the board when they’re ready.</template>
+                                        <template v-else-if="phase === 'final_question'">The question is on the board — answers hidden, {{ gameState?.timer_duration ?? 60 }}s banked. Read it aloud, then reveal the board to start the clock.</template>
+                                        <template v-else-if="phase === 'final_play'">Board and clock are up — reveal answers as they’re guessed. The clock auto-pauses when the board is complete; if it runs out, the board goes to review.</template>
+                                        <template v-else-if="phase === 'final_cleared'">All answers in — they stay on the board. Show the next question when you’re ready.</template>
+                                    </p>
+                                    <div class="mt-3 flex flex-wrap gap-2 pl-8">
+                                        <Button v-if="phase === 'final_intro' || phase === 'final_ready'" variant="primary" size="sm" @click="finalShowQuestion">Show Question</Button>
+                                        <Button v-else-if="phase === 'final_question'" variant="primary" size="sm" @click="finalStart">Reveal Board - Start Timer</Button>
+                                        <template v-else-if="phase === 'final_play'">
+                                            <Button v-if="!finalSkipUsed" variant="secondary" size="sm" @click="finalSkip">Skip this question (1 per final)</Button>
+                                            <span v-else class="text-xs text-subtle">Skip already used</span>
+                                        </template>
+                                        <Button v-else-if="phase === 'final_cleared'" variant="primary" size="sm" @click="finalNext">Next Question &rarr;</Button>
+                                    </div>
+                                </template>
                             </li>
                         </ol>
 
-                        <!-- Phase action -->
-                        <div class="mt-3">
-                            <div v-if="phase === 'final_intro' || phase === 'final_ready'" class="space-y-2">
-                                <p class="text-sm text-muted">{{ finalTeam?.name ?? 'The team' }} is up. Show the {{ phase === 'final_intro' ? 'first' : 'next' }} question on the board when they’re ready.</p>
-                                <Button variant="primary" size="md" class="w-full" @click="finalShowQuestion">Show Question &rarr;</Button>
+                        <!-- Out of time → review: jump to any question to reveal misses. -->
+                        <div v-else-if="finalInReview" class="space-y-3">
+                            <div class="rounded-lg border border-danger/40 bg-danger/10 p-3 text-center">
+                                <p class="font-semibold text-danger">Out of time</p>
+                                <p class="mt-1 text-xs text-muted">Tap a question to jump to it, then reveal the answers they missed.</p>
                             </div>
-
-                            <div v-else-if="phase === 'final_question'" class="space-y-2">
-                                <p class="text-sm text-muted">The question is on the board — answers hidden, {{ gameState?.timer_duration ?? 60 }}s banked. Read it aloud, then reveal the answers to start the clock.</p>
-                                <Button variant="primary" size="md" class="w-full" @click="finalStart">Reveal Answers &amp; Start &rarr;</Button>
-                            </div>
-
-                            <template v-else-if="phase === 'final_play'">
-                                <p class="text-sm text-muted">Reveal answers as they’re guessed — the clock pauses itself when the question is cleared. If it runs out, the board goes to review automatically.</p>
-                                <Button v-if="!finalSkipUsed" variant="secondary" size="md" class="mt-2 w-full" @click="finalSkip">Skip this question (1 per final)</Button>
-                                <p v-else class="mt-2 text-center text-xs text-subtle">Skip already used</p>
-                            </template>
-
-                            <div v-else-if="phase === 'final_cleared'" class="space-y-2">
-                                <p class="text-sm text-muted">Question cleared — its answers stay on the board. Show the next question when you’re ready to read it.</p>
-                                <Button variant="primary" size="md" class="w-full" @click="finalNext">Next Question &rarr;</Button>
-                            </div>
-
-                            <div v-else-if="phase === 'final_review'" class="space-y-2">
-                                <div class="rounded-lg border border-danger/40 bg-danger/10 p-3 text-center">
-                                    <p class="font-semibold text-danger">Out of time</p>
-                                    <p class="mt-1 text-xs text-muted">Click a question above to jump to it, then reveal the answers they missed.</p>
-                                </div>
-                                <Button variant="secondary" size="md" class="w-full" @click="endGame">End Game</Button>
-                            </div>
-
-                            <div v-else-if="phase === 'final_result'" class="space-y-2">
-                                <div
-                                    class="rounded-lg p-3 text-center"
-                                    :class="finalResult === 'win' ? 'border border-success/40 bg-success/10' : 'border border-danger/40 bg-danger/10'"
+                            <ol class="space-y-2">
+                                <li
+                                    v-for="(fq, i) in finalQuestions"
+                                    :key="fq.id"
+                                    class="rounded-lg border border-border bg-surface-inset p-3 transition-all"
+                                    :class="[
+                                        fq.is_current ? 'ring-2 ring-white shadow-[0_0_18px_2px_rgba(255,255,255,0.45)]' : '',
+                                        !fq.is_current ? 'cursor-pointer hover:border-border-strong' : '',
+                                    ]"
+                                    @click="!fq.is_current ? finalSelect(fq.id) : null"
                                 >
-                                    <p class="text-lg font-bold" :class="finalResult === 'win' ? 'text-success' : 'text-danger'">
-                                        {{ finalResult === 'win' ? 'They did it! 🎉' : 'Out of time' }}
-                                    </p>
-                                </div>
-                                <Button variant="secondary" size="md" class="w-full" @click="endGame">End Game</Button>
+                                    <div class="flex items-center gap-2">
+                                        <span
+                                            class="flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs font-bold"
+                                            :class="fq.status === 'completed' ? 'bg-success text-white' : 'bg-warning text-white'"
+                                        >
+                                            <span v-if="fq.status === 'completed'">&check;</span><span v-else>{{ i + 1 }}</span>
+                                        </span>
+                                        <span class="font-semibold" :class="fq.is_current ? 'text-body' : 'text-muted'">Question {{ i + 1 }}</span>
+                                        <span class="ml-auto text-xs text-subtle">{{ fq.revealed_count }}/{{ fq.total_answers }} answers</span>
+                                    </div>
+                                </li>
+                            </ol>
+                            <Button variant="secondary" size="md" class="w-full" @click="endGame">End Game</Button>
+                        </div>
+
+                        <!-- Pass/fail result -->
+                        <div v-else-if="finalInResult" class="space-y-3">
+                            <div
+                                class="rounded-lg p-3 text-center"
+                                :class="finalResult === 'win' ? 'border border-success/40 bg-success/10' : 'border border-danger/40 bg-danger/10'"
+                            >
+                                <p class="text-lg font-bold" :class="finalResult === 'win' ? 'text-success' : 'text-danger'">
+                                    {{ finalResult === 'win' ? 'They did it! 🎉' : 'Out of time' }}
+                                </p>
                             </div>
+                            <Button variant="secondary" size="md" class="w-full" @click="endGame">End Game</Button>
                         </div>
                     </Card>
 

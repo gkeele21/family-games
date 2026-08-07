@@ -34,6 +34,8 @@ interface GameState {
     // Final round: the lone team playing, and the pass/fail outcome.
     final_team_id?: number | null;
     final_result?: string | null;
+    // Whether the one-per-final skip has been used (drives the skips-left note).
+    final_skip_used?: boolean;
     // Tie-off after the last regular round: the teams tied for the lead.
     tiebreaker_team_ids?: number[] | null;
     // The team the host declared as the tie-off winner (crowned before the final).
@@ -396,6 +398,16 @@ const finalTeam = computed<Team | null>(() => {
     return id ? props.teams.find((t) => t.id === id) ?? null : null;
 });
 const finalResult = computed(() => props.gameState?.final_result ?? null);
+// Skips-left note for the final-round intro slides (one skip per final).
+const finalSkipNote = computed(() =>
+    props.gameState?.final_skip_used ? 'No more skips available' : '1 skip available'
+);
+// How many answers the upcoming final question has — the final questions are
+// tiered by answer count (1 → 4), so this doubles as "which one are we on".
+const finalAnswerCount = computed(() => {
+    const q = props.currentQuestion;
+    return q?.answers_needed ?? q?.answers?.length ?? 0;
+});
 
 // Tie-off: the teams tied for the lead after the last regular round, named on the
 // tiebreaker board so the room knows who's playing it off.
@@ -754,9 +766,10 @@ onUnmounted(() => {
 
             <!-- FINAL — intro / per-question Get Ready: which team is playing, get ready -->
             <div v-else-if="phase === 'final_intro' || phase === 'final_ready'" class="as-center">
-                <p class="as-eyebrow font-logo">Final Round</p>
+                <p class="as-eyebrow font-logo">Final Round<template v-if="finalAnswerCount"> · {{ finalAnswerCount }} Answer{{ finalAnswerCount === 1 ? '' : 's' }}</template></p>
                 <p class="as-headline as-headline-sm font-logo" :style="finalTeam ? { color: finalTeam.color } : undefined">{{ finalTeam?.name ?? '' }}</p>
                 <p class="as-subhead font-logo">Get Ready</p>
+                <p class="as-skipnote font-logo">{{ finalSkipNote }}</p>
             </div>
 
             <!-- FINAL — pass/fail result. A win gets a celebratory "You Won!!!!"
@@ -1267,6 +1280,17 @@ onUnmounted(() => {
     letter-spacing: 0.12em;
     font-size: clamp(20px, 2.6vw, 46px);
     text-shadow: 0 0 16px rgba(150, 190, 255, 0.5), 0 2px 6px rgba(0, 0, 0, 0.55);
+}
+/* Skips-left note under the Final Round intro headline — a quieter line beneath
+   the "Get Ready" subhead. */
+.as-skipnote {
+    color: #eaf1ff;
+    opacity: 0.72;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: clamp(13px, 1.5vw, 24px);
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 /* Lobby matchup: "Team A vs Team B" in each team's color. */
 .as-matchup {
