@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import GamePicker from '@/Components/Scorekeeper/GamePicker.vue';
 import InputError from '@/Components/InputError.vue';
-import InputLabel from '@/Components/InputLabel.vue';
-import TextInput from '@/Components/TextInput.vue';
+import InputLabel from '@/Components/Scorekeeper/InputLabel.vue';
+import TextInput from '@/Components/Scorekeeper/TextInput.vue';
 import { ref, watch } from 'vue';
 
 interface ScoreField {
@@ -91,7 +91,7 @@ const removeField = (index: number) => {
                     class="mt-1 block w-full"
                     placeholder="e.g. Hearts to 50"
                 />
-                <p class="mt-1 text-xs text-gray-500">
+                <p class="mt-1 text-xs text-muted">
                     A game can have more than one template — name this set of
                     rules.
                 </p>
@@ -107,7 +107,7 @@ const removeField = (index: number) => {
                     v-model.number="form.target_score"
                     type="number"
                     min="0"
-                    class="mt-1 block w-full rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    class="mt-1 block w-full rounded-lg border-border-strong bg-surface-inset text-body focus:border-primary focus:ring-primary"
                 />
                 <InputError class="mt-1" :message="form.errors.target_score" />
             </div>
@@ -121,7 +121,7 @@ const removeField = (index: number) => {
                     v-model.number="form.max_rounds"
                     type="number"
                     min="1"
-                    class="mt-1 block w-full rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    class="mt-1 block w-full rounded-lg border-border-strong bg-surface-inset text-body focus:border-primary focus:ring-primary"
                 />
                 <InputError class="mt-1" :message="form.errors.max_rounds" />
             </div>
@@ -131,29 +131,29 @@ const removeField = (index: number) => {
             <input
                 v-model="form.low_score_wins"
                 type="checkbox"
-                class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                class="rounded border-border-strong bg-surface-inset text-primary focus:ring-primary"
             />
-            <span class="text-sm text-gray-700">Lowest score wins</span>
+            <span class="text-sm text-body">Lowest score wins</span>
         </label>
 
         <label class="flex items-center gap-2">
             <input
                 v-model="form.team_based"
                 type="checkbox"
-                class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                class="rounded border-border-strong bg-surface-inset text-primary focus:ring-primary"
             />
-            <span class="text-sm text-gray-700">Played in teams</span>
+            <span class="text-sm text-body">Played in teams</span>
         </label>
 
         <label class="flex items-center gap-2">
             <input
                 v-model="form.allow_self_scoring"
                 type="checkbox"
-                class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                class="rounded border-border-strong bg-surface-inset text-primary focus:ring-primary"
             />
-            <span class="text-sm text-gray-700"
+            <span class="text-sm text-body"
                 >Players can enter their own scores
-                <span class="text-xs text-gray-400"
+                <span class="text-xs text-subtle"
                     >(invited players with accounts edit only their own
                     column)</span
                 ></span
@@ -164,9 +164,9 @@ const removeField = (index: number) => {
             <input
                 v-model="form.is_global"
                 type="checkbox"
-                class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                class="rounded border-border-strong bg-surface-inset text-primary focus:ring-primary"
             />
-            <span class="text-sm text-gray-700"
+            <span class="text-sm text-body"
                 >Share with all households</span
             >
         </label>
@@ -174,7 +174,7 @@ const removeField = (index: number) => {
         <!-- Score fields -->
         <div>
             <InputLabel value="Scores tracked each round" />
-            <p class="mb-2 text-xs text-gray-500">
+            <p class="mb-2 text-xs text-muted">
                 Add a field for each number you record per round. Only fields
                 marked "counts toward total" add up to decide the winner.
             </p>
@@ -187,7 +187,7 @@ const removeField = (index: number) => {
                     <div class="flex shrink-0 items-center gap-1">
                         <input
                             type="color"
-                            class="h-8 w-8 cursor-pointer rounded border border-gray-300 bg-white p-0.5"
+                            class="h-8 w-8 cursor-pointer rounded border border-border-strong bg-surface-inset p-0.5"
                             :value="field.color ?? '#cccccc'"
                             title="Score color (optional)"
                             @input="
@@ -199,7 +199,7 @@ const removeField = (index: number) => {
                         <button
                             v-if="field.color"
                             type="button"
-                            class="text-xs text-gray-400 hover:text-gray-600"
+                            class="text-xs text-subtle hover:text-muted"
                             title="Clear color"
                             @click="field.color = null"
                         >
@@ -213,19 +213,19 @@ const removeField = (index: number) => {
                         placeholder="e.g. base, base2, points"
                     />
                     <label
-                        class="flex shrink-0 items-center gap-1 text-sm text-gray-700"
+                        class="flex shrink-0 items-center gap-1 text-sm text-body"
                     >
                         <input
                             v-model="field.counts_toward_total"
                             type="checkbox"
-                            class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            class="rounded border-border-strong bg-surface-inset text-primary focus:ring-primary"
                         />
                         counts toward total
                     </label>
                     <button
                         v-if="form.score_fields.length > 1"
                         type="button"
-                        class="shrink-0 text-sm text-red-600 hover:text-red-500"
+                        class="shrink-0 text-sm text-danger hover:text-danger/80"
                         @click="removeField(i)"
                     >
                         Remove
@@ -234,7 +234,7 @@ const removeField = (index: number) => {
             </div>
             <button
                 type="button"
-                class="mt-2 text-sm font-medium text-[#0b5d3b] hover:text-[#084a2f]"
+                class="mt-2 text-sm font-medium text-primary hover:text-primary-hover"
                 @click="addField"
             >
                 + Add score field

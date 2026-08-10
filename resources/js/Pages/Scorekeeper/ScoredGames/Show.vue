@@ -2,11 +2,12 @@
 import AddPlayerControl from '@/Components/Scorekeeper/AddPlayerControl.vue';
 import InvitePlayerControl from '@/Components/Scorekeeper/InvitePlayerControl.vue';
 import ScorekeeperLayout from '@/Layouts/ScorekeeperLayout.vue';
-import DangerButton from '@/Components/DangerButton.vue';
-import InputLabel from '@/Components/InputLabel.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
-import SecondaryButton from '@/Components/SecondaryButton.vue';
-import TextInput from '@/Components/TextInput.vue';
+import DangerButton from '@/Components/Scorekeeper/DangerButton.vue';
+import InputLabel from '@/Components/Scorekeeper/InputLabel.vue';
+import PrimaryButton from '@/Components/Scorekeeper/PrimaryButton.vue';
+import SecondaryButton from '@/Components/Scorekeeper/SecondaryButton.vue';
+import TextInput from '@/Components/Scorekeeper/TextInput.vue';
+import { playerColorAt } from '@/scorekeeperColors';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 
@@ -283,19 +284,9 @@ const ordinal = (n: number): string => {
     return n + (suffixes[(v - 20) % 10] ?? suffixes[v] ?? suffixes[0]);
 };
 
-// One color per competitor column (cycles for large rosters).
-const palette = [
-    { body: '#eef2ff', head: '#c7d2fe', total: '#e0e7ff', text: '#3730a3' }, // indigo
-    { body: '#ecfdf5', head: '#a7f3d0', total: '#d1fae5', text: '#065f46' }, // emerald
-    { body: '#fffbeb', head: '#fde68a', total: '#fef3c7', text: '#8a4b0a' }, // amber
-    { body: '#fff1f2', head: '#fecdd3', total: '#ffe4e6', text: '#9f1239' }, // rose
-    { body: '#f0f9ff', head: '#bae6fd', total: '#e0f2fe', text: '#075985' }, // sky
-    { body: '#f5f3ff', head: '#ddd6fe', total: '#ede9fe', text: '#5b21b6' }, // violet
-    { body: '#f0fdfa', head: '#99f6e4', total: '#ccfbf1', text: '#115e59' }, // teal
-    { body: '#fff7ed', head: '#fed7aa', total: '#ffedd5', text: '#9a3412' }, // orange
-];
-const colorAt = (i: number) =>
-    palette[((i % palette.length) + palette.length) % palette.length];
+// One color per competitor column, from the shared Scorekeeper palette
+// (cycles for large rosters). Rendered as colored score TEXT, not a cell fill.
+const colorAt = (i: number) => playerColorAt(i);
 const colorIndexFor = (competitorId: number) =>
     props.competitors.findIndex((c) => c.id === competitorId);
 const membersFor = (competitorId: number): string =>
@@ -315,8 +306,9 @@ const uninvitedMembers = computed(() =>
 );
 
 // Colors stay attached to a competitor (by its Manage position), not the column
-// slot — so sorting the grid doesn't reshuffle anyone's color.
-const colorFor = (competitorId: number) => colorAt(colorIndexFor(competitorId));
+// slot — so sorting the grid doesn't reshuffle anyone's color. Returns a hex.
+const colorFor = (competitorId: number): string =>
+    colorAt(colorIndexFor(competitorId));
 
 // View-only column sort. 'manage' = the order set in the Manage section.
 // Field sorts use the MOST RECENT round's saved values (not the cumulative
@@ -603,24 +595,24 @@ const deleteGame = () => {
                                 game.household_id,
                             )
                         "
-                        class="text-sm text-gray-500 hover:text-gray-700"
+                        class="text-sm text-muted hover:text-body"
                         >&larr; Games</Link
                     >
                     <h2
-                        class="text-xl font-semibold leading-tight text-[#0b5d3b]"
+                        class="text-xl font-semibold leading-tight text-body"
                     >
                         {{ game.name }}
                     </h2>
-                    <span class="text-sm text-gray-500">{{ rules }}</span>
+                    <span class="text-sm text-muted">{{ rules }}</span>
                     <span
-                        class="flex items-center gap-1.5 text-sm text-gray-500"
+                        class="flex items-center gap-1.5 text-sm text-muted"
                     >
                         <template v-if="!editingDate">
                             <span v-if="playedOnLabel">· {{ playedOnLabel }}</span>
                             <button
                                 v-if="can.score_all"
                                 type="button"
-                                class="text-gray-400 hover:text-[#0b5d3b]"
+                                class="text-subtle hover:text-primary"
                                 title="Edit play date"
                                 @click="startEditDate"
                             >
@@ -631,11 +623,11 @@ const deleteGame = () => {
                             <input
                                 v-model="dateForm.played_at"
                                 type="date"
-                                class="rounded-md border-gray-300 bg-white text-gray-900 py-0.5 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                class="rounded-md border-border-strong bg-surface text-body py-0.5 text-sm shadow-sm focus:border-primary focus:ring-primary"
                             />
                             <button
                                 type="button"
-                                class="font-medium text-[#0b5d3b] hover:text-[#084a2f] disabled:opacity-40"
+                                class="font-medium text-primary hover:text-primary-hover disabled:opacity-40"
                                 :disabled="dateForm.processing"
                                 @click="saveDate"
                             >
@@ -643,7 +635,7 @@ const deleteGame = () => {
                             </button>
                             <button
                                 type="button"
-                                class="text-gray-400 hover:text-gray-600"
+                                class="text-subtle hover:text-muted"
                                 @click="editingDate = false"
                             >
                                 Cancel
@@ -653,7 +645,7 @@ const deleteGame = () => {
                 </div>
                 <div
                     v-if="page.props.flash?.success"
-                    class="rounded-md bg-green-50 p-4 text-sm text-green-800"
+                    class="rounded-lg border border-primary/30 bg-primary/10 p-4 text-sm text-primary"
                 >
                     {{ page.props.flash.success }}
                 </div>
@@ -661,7 +653,7 @@ const deleteGame = () => {
                 <!-- Winner banner -->
                 <div
                     v-if="game.is_complete"
-                    class="rounded-md border border-[#e7d8a8] bg-[#f8edc9] p-4 text-[#6b5407]"
+                    class="rounded-lg border border-gold/40 bg-gold/10 p-4 text-gold"
                 >
                     <span class="font-semibold">
                         {{ winners.length > 1 ? 'Tie:' : 'Winner:' }}
@@ -673,7 +665,7 @@ const deleteGame = () => {
                 <!-- Completion suggestion -->
                 <div
                     v-else-if="completionMet"
-                    class="flex items-center justify-between rounded-md bg-amber-50 p-4 text-amber-900"
+                    class="flex items-center justify-between rounded-lg border border-warning/30 bg-warning/10 p-4 text-warning"
                 >
                     <span>A completion condition has been met.</span>
                     <PrimaryButton v-if="can.score_all" @click="completeGame"
@@ -682,13 +674,13 @@ const deleteGame = () => {
                 </div>
 
                 <!-- Standings -->
-                <div class="overflow-hidden bg-white shadow-sm sm:rounded-lg">
+                <div class="overflow-hidden bg-surface rounded-lg border border-border">
                     <h3
-                        class="border-b px-6 py-3 text-lg font-medium text-[#0b5d3b]"
+                        class="border-b px-6 py-3 text-lg font-medium text-body"
                     >
                         Standings
                     </h3>
-                    <ol class="divide-y divide-gray-100">
+                    <ol class="divide-y divide-border">
                         <li
                             v-for="s in standings"
                             :key="s.competitor_id"
@@ -698,25 +690,23 @@ const deleteGame = () => {
                                 class="inline-flex min-w-[2.75rem] justify-center rounded-full px-2 py-0.5 text-sm font-semibold"
                                 :class="
                                     s.rank === 1
-                                        ? 'bg-[#f2d27c] text-[#5b4708]'
-                                        : 'bg-gray-100 text-gray-600'
+                                        ? 'bg-gold text-surface-inset'
+                                        : 'bg-surface-overlay text-muted'
                                 "
                                 >{{ ordinal(s.rank) }}</span
                             >
                             <span
                                 class="h-3 w-3 shrink-0 rounded-full"
                                 :style="{
-                                    backgroundColor: colorAt(
-                                        colorIndexFor(s.competitor_id),
-                                    ).head,
+                                    backgroundColor: colorFor(s.competitor_id),
                                 }"
                             ></span>
                             <span
-                                class="w-36 truncate font-medium text-gray-900"
+                                class="w-36 truncate font-medium text-body"
                                 >{{ s.name }}</span
                             >
                             <span
-                                class="w-14 text-right font-semibold tabular-nums text-indigo-900"
+                                class="w-14 text-right font-semibold tabular-nums text-body"
                                 >{{ s.total }}</span
                             >
                             <span
@@ -724,7 +714,7 @@ const deleteGame = () => {
                                     game.team_based &&
                                     membersFor(s.competitor_id)
                                 "
-                                class="text-sm text-gray-500"
+                                class="text-sm text-muted"
                                 >{{ membersFor(s.competitor_id) }}</span
                             >
                         </li>
@@ -732,26 +722,26 @@ const deleteGame = () => {
                 </div>
 
                 <!-- Score grid -->
-                <div class="overflow-hidden bg-white shadow-sm sm:rounded-lg">
+                <div class="overflow-hidden bg-surface rounded-lg border border-border">
                     <div
                         v-if="rounds.length"
                         class="flex items-center gap-3 border-b px-4 py-2 text-sm"
                     >
                         <span
                             v-if="!game.is_complete"
-                            class="flex items-center gap-1.5 text-xs text-gray-400"
+                            class="flex items-center gap-1.5 text-xs text-subtle"
                             title="Scores refresh automatically"
                         >
                             <span
-                                class="h-2 w-2 animate-pulse rounded-full bg-emerald-500"
+                                class="h-2 w-2 animate-pulse rounded-full bg-success"
                             ></span>
                             Live
                         </span>
-                        <label for="sort-by" class="text-gray-500">Sort by</label>
+                        <label for="sort-by" class="text-muted">Sort by</label>
                         <select
                             id="sort-by"
                             v-model="sortBy"
-                            class="rounded-md border-gray-300 bg-white text-gray-900 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            class="rounded-md border-border-strong bg-surface text-body text-sm shadow-sm focus:border-primary focus:ring-primary"
                         >
                             <option value="manage">Order set in Manage</option>
                             <option value="total">Total</option>
@@ -775,43 +765,46 @@ const deleteGame = () => {
                         >
                     </div>
                     <div class="max-h-[70vh] overflow-auto overscroll-x-contain">
-                        <table class="min-w-full divide-y divide-gray-200 text-sm">
+                        <table class="min-w-full divide-y divide-border text-sm">
                             <thead>
                                 <tr>
                                     <th
-                                        class="sticky top-0 z-10 bg-white px-3 py-3 text-left font-medium text-gray-500"
+                                        class="sticky top-0 z-10 bg-surface px-3 py-3 text-left font-medium text-muted"
                                     >
                                         Rd
                                     </th>
                                     <th
                                         v-if="!singleField"
-                                        class="sticky top-0 z-10 bg-white px-2 py-3"
+                                        class="sticky top-0 z-10 bg-surface px-2 py-3"
                                     ></th>
                                     <th
                                         v-for="c in orderedCompetitors"
                                         :key="c.id"
-                                        class="sticky top-0 z-10 px-2 py-3 text-left font-medium"
-                                        :style="{
-                                            backgroundColor: colorFor(c.id).head,
-                                            color: colorFor(c.id).text,
-                                        }"
+                                        class="sticky top-0 z-10 bg-surface px-2 py-3 text-left font-semibold"
+                                        :style="{ color: colorFor(c.id) }"
                                     >
-                                        <div>{{ c.name }}</div>
+                                        <div class="flex items-center gap-1.5">
+                                            <span
+                                                class="h-2 w-2 shrink-0 rounded-full"
+                                                :style="{ backgroundColor: colorFor(c.id) }"
+                                            ></span>
+                                            {{ c.name }}
+                                        </div>
                                         <div
                                             v-if="game.team_based"
-                                            class="text-xs font-normal opacity-80"
+                                            class="text-xs font-normal text-muted"
                                         >
                                             {{ c.members.map((m) => m.name).join(', ') }}
                                         </div>
                                     </th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-gray-100">
+                            <tbody class="divide-y divide-border">
                                 <template v-for="r in rounds" :key="r.id">
                                 <!-- Single field: one row per round -->
                                 <tr v-if="singleField">
                                     <td
-                                        class="px-3 py-2 align-top font-medium text-gray-700"
+                                        class="px-3 py-2 align-top font-medium text-body"
                                     >
                                         <span class="flex items-center gap-1.5">
                                             {{ r.round_number }}
@@ -823,8 +816,8 @@ const deleteGame = () => {
                                                 type="button"
                                                 :class="
                                                     unlockedRounds.has(r.id)
-                                                        ? 'text-[#0b5d3b] hover:text-[#084a2f]'
-                                                        : 'text-gray-400 hover:text-[#0b5d3b]'
+                                                        ? 'text-primary hover:text-primary-hover'
+                                                        : 'text-subtle hover:text-primary'
                                                 "
                                                 :title="
                                                     unlockedRounds.has(r.id)
@@ -841,9 +834,6 @@ const deleteGame = () => {
                                         v-for="c in orderedCompetitors"
                                         :key="c.id"
                                         class="px-2 py-2 align-top"
-                                        :style="{
-                                            backgroundColor: colorFor(c.id).body,
-                                        }"
                                     >
                                         <input
                                             v-if="
@@ -863,14 +853,20 @@ const deleteGame = () => {
                                                     fields[0].key,
                                                 )
                                             "
-                                            class="no-spinner rounded-md border-gray-300 bg-white text-gray-900 px-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                            :style="{ color: colorFor(c.id) }"
+                                            class="no-spinner rounded-md border-border-strong bg-surface-inset px-2 text-sm font-semibold focus:border-primary focus:ring-primary"
                                             :class="fieldWidths[fields[0].key]"
                                         />
-                                        <span v-else class="text-gray-900">{{
-                                            r.scores?.[c.id]?.[
-                                                fields[0].key
-                                            ] ?? '—'
-                                        }}</span>
+                                        <span
+                                            v-else
+                                            class="font-semibold"
+                                            :style="{ color: colorFor(c.id) }"
+                                            >{{
+                                                r.scores?.[c.id]?.[
+                                                    fields[0].key
+                                                ] ?? '—'
+                                            }}</span
+                                        >
                                     </td>
                                 </tr>
 
@@ -881,7 +877,7 @@ const deleteGame = () => {
                                         <td
                                             v-if="fi === 0"
                                             :rowspan="fields.length"
-                                            class="px-3 py-2 align-top font-medium text-gray-700"
+                                            class="px-3 py-2 align-top font-medium text-body"
                                         >
                                             <span
                                                 class="flex items-center gap-1.5"
@@ -895,8 +891,8 @@ const deleteGame = () => {
                                                     type="button"
                                                     :class="
                                                         unlockedRounds.has(r.id)
-                                                            ? 'text-[#0b5d3b] hover:text-[#084a2f]'
-                                                            : 'text-gray-400 hover:text-[#0b5d3b]'
+                                                            ? 'text-primary hover:text-primary-hover'
+                                                            : 'text-subtle hover:text-primary'
                                                     "
                                                     :title="
                                                         unlockedRounds.has(r.id)
@@ -915,7 +911,7 @@ const deleteGame = () => {
                                             class="whitespace-nowrap px-2 py-1"
                                         >
                                             <span
-                                                class="flex items-center gap-1.5 text-sm text-gray-500"
+                                                class="flex items-center gap-1.5 text-sm text-muted"
                                             >
                                                 <span
                                                     v-if="f.color"
@@ -932,10 +928,6 @@ const deleteGame = () => {
                                             v-for="c in orderedCompetitors"
                                             :key="c.id"
                                             class="px-2 py-1"
-                                            :style="{
-                                                backgroundColor:
-                                                    colorFor(c.id).body,
-                                            }"
                                         >
                                             <input
                                                 v-if="
@@ -958,18 +950,24 @@ const deleteGame = () => {
                                                         f.key,
                                                     )
                                                 "
-                                                class="no-spinner rounded-md border-gray-300 bg-white text-gray-900 px-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                :style="{ color: colorFor(c.id) }"
+                                                class="no-spinner rounded-md border-border-strong bg-surface-inset px-2 text-sm font-semibold focus:border-primary focus:ring-primary"
                                                 :class="fieldWidths[f.key]"
                                             />
-                                            <span v-else class="text-gray-900">{{
-                                                r.scores?.[c.id]?.[f.key] ?? '—'
-                                            }}</span>
+                                            <span
+                                                v-else
+                                                :style="{ color: colorFor(c.id) }"
+                                                >{{
+                                                    r.scores?.[c.id]?.[f.key] ??
+                                                    '—'
+                                                }}</span
+                                            >
                                         </td>
                                     </tr>
                                     <tr class="text-sm">
                                         <td
                                             colspan="2"
-                                            class="px-3 py-1 font-medium text-gray-500"
+                                            class="px-3 py-1 font-medium text-muted"
                                         >
                                             Round total
                                         </td>
@@ -977,11 +975,7 @@ const deleteGame = () => {
                                             v-for="c in orderedCompetitors"
                                             :key="c.id"
                                             class="px-2 py-1 font-semibold"
-                                            :style="{
-                                                backgroundColor:
-                                                    colorFor(c.id).body,
-                                                color: colorFor(c.id).text,
-                                            }"
+                                            :style="{ color: colorFor(c.id) }"
                                         >
                                             {{ roundTotal(r, c.id) }}
                                         </td>
@@ -990,7 +984,7 @@ const deleteGame = () => {
                                 </template>
                                 <tr
                                     v-if="rounds.length === 0"
-                                    class="text-gray-500"
+                                    class="text-muted"
                                 >
                                     <td
                                         :colspan="
@@ -1008,18 +1002,15 @@ const deleteGame = () => {
                                 <tr>
                                     <td
                                         :colspan="singleField ? 1 : 2"
-                                        class="border-t-2 border-gray-200 px-3 py-3 align-top font-semibold text-gray-700"
+                                        class="border-t-2 border-border-strong px-3 py-3 align-top font-semibold text-body"
                                     >
                                         Total
                                     </td>
                                     <td
                                         v-for="c in orderedCompetitors"
                                         :key="c.id"
-                                        class="border-t-2 border-white px-2 py-3 align-top"
-                                        :style="{
-                                            backgroundColor: colorFor(c.id).total,
-                                            color: colorFor(c.id).text,
-                                        }"
+                                        class="border-t-2 border-border-strong px-2 py-3 align-top"
+                                        :style="{ color: colorFor(c.id) }"
                                     >
                                         <div class="font-bold">
                                             {{ totals[c.id] ?? 0 }}
@@ -1070,10 +1061,10 @@ const deleteGame = () => {
                 <!-- Manage players / teams (in progress only) -->
                 <div
                     v-if="!game.is_complete && can.score_all"
-                    class="overflow-hidden bg-white shadow-sm sm:rounded-lg"
+                    class="overflow-hidden bg-surface rounded-lg border border-border"
                 >
                     <h3
-                        class="border-b px-6 py-3 text-lg font-medium text-[#0b5d3b]"
+                        class="border-b px-6 py-3 text-lg font-medium text-body"
                     >
                         {{ game.team_based ? 'Manage teams' : 'Manage players' }}
                     </h3>
@@ -1086,18 +1077,18 @@ const deleteGame = () => {
                         <div
                             v-for="(c, ci) in competitors"
                             :key="c.id"
-                            class="rounded-md border border-gray-200 p-3"
-                            :class="{ 'ring-2 ring-indigo-400': isDropTarget(ci) }"
+                            class="rounded-md border border-border p-3"
+                            :class="{ 'ring-2 ring-primary': isDropTarget(ci) }"
                             @dragover.prevent="onDragOver(ci)"
                             @drop.prevent="onDrop(ci)"
                             @dragend="onDragEnd"
                         >
                             <div class="flex items-center justify-between">
                                 <span
-                                    class="flex items-center gap-2 font-medium text-gray-900"
+                                    class="flex items-center gap-2 font-medium text-body"
                                 >
                                     <span
-                                        class="cursor-grab select-none text-gray-400 active:cursor-grabbing"
+                                        class="cursor-grab select-none text-subtle active:cursor-grabbing"
                                         draggable="true"
                                         title="Drag to reorder"
                                         @dragstart="onDragStart(ci, $event)"
@@ -1106,7 +1097,7 @@ const deleteGame = () => {
                                     <span
                                         class="h-3 w-3 rounded-full"
                                         :style="{
-                                            backgroundColor: colorAt(ci).head,
+                                            backgroundColor: colorAt(ci),
                                         }"
                                     ></span>
                                     {{ c.name }}
@@ -1115,7 +1106,7 @@ const deleteGame = () => {
                                     <div class="flex gap-1">
                                         <button
                                             type="button"
-                                            class="rounded border border-gray-200 px-1.5 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                                            class="rounded border border-border px-1.5 text-muted hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-30"
                                             :disabled="ci === 0"
                                             title="Move up"
                                             @click="moveCompetitor(ci, -1)"
@@ -1124,7 +1115,7 @@ const deleteGame = () => {
                                         </button>
                                         <button
                                             type="button"
-                                            class="rounded border border-gray-200 px-1.5 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                                            class="rounded border border-border px-1.5 text-muted hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-30"
                                             :disabled="ci === competitors.length - 1"
                                             title="Move down"
                                             @click="moveCompetitor(ci, 1)"
@@ -1134,7 +1125,7 @@ const deleteGame = () => {
                                     </div>
                                     <button
                                         type="button"
-                                        class="text-sm text-red-600 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                                        class="text-sm text-danger hover:text-danger/80 disabled:cursor-not-allowed disabled:opacity-40"
                                         :disabled="competitors.length <= 2"
                                         @click="removeCompetitor(c.id, c.name)"
                                     >
@@ -1148,7 +1139,7 @@ const deleteGame = () => {
                                     :key="m.id"
                                     class="flex items-center justify-between gap-3 text-sm"
                                 >
-                                    <span class="text-gray-700">{{
+                                    <span class="text-body">{{
                                         m.name
                                     }}</span>
                                     <span class="flex items-center gap-3">
@@ -1159,7 +1150,7 @@ const deleteGame = () => {
                                         />
                                         <button
                                             type="button"
-                                            class="text-red-600 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                                            class="text-danger hover:text-danger/80 disabled:cursor-not-allowed disabled:opacity-40"
                                             :disabled="c.members.length <= 1"
                                             @click="removeMember(c.id, m.id)"
                                         >
@@ -1204,16 +1195,16 @@ const deleteGame = () => {
                                 v-for="(c, ci) in competitors"
                                 :key="c.id"
                                 class="flex items-center justify-between rounded text-sm"
-                                :class="{ 'ring-2 ring-indigo-400': isDropTarget(ci) }"
+                                :class="{ 'ring-2 ring-primary': isDropTarget(ci) }"
                                 @dragover.prevent="onDragOver(ci)"
                                 @drop.prevent="onDrop(ci)"
                                 @dragend="onDragEnd"
                             >
                                 <span
-                                    class="flex items-center gap-2 text-gray-800"
+                                    class="flex items-center gap-2 text-body"
                                 >
                                     <span
-                                        class="cursor-grab select-none text-gray-400 active:cursor-grabbing"
+                                        class="cursor-grab select-none text-subtle active:cursor-grabbing"
                                         draggable="true"
                                         title="Drag to reorder"
                                         @dragstart="onDragStart(ci, $event)"
@@ -1222,7 +1213,7 @@ const deleteGame = () => {
                                     <span
                                         class="h-3 w-3 rounded-full"
                                         :style="{
-                                            backgroundColor: colorAt(ci).head,
+                                            backgroundColor: colorAt(ci),
                                         }"
                                     ></span>
                                     {{ c.name }}
@@ -1239,7 +1230,7 @@ const deleteGame = () => {
                                     <div class="flex gap-1">
                                         <button
                                             type="button"
-                                            class="rounded border border-gray-200 px-1.5 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                                            class="rounded border border-border px-1.5 text-muted hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-30"
                                             :disabled="ci === 0"
                                             title="Move up"
                                             @click="moveCompetitor(ci, -1)"
@@ -1248,7 +1239,7 @@ const deleteGame = () => {
                                         </button>
                                         <button
                                             type="button"
-                                            class="rounded border border-gray-200 px-1.5 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                                            class="rounded border border-border px-1.5 text-muted hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-30"
                                             :disabled="ci === competitors.length - 1"
                                             title="Move down"
                                             @click="moveCompetitor(ci, 1)"
@@ -1258,7 +1249,7 @@ const deleteGame = () => {
                                     </div>
                                     <button
                                         type="button"
-                                        class="text-red-600 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                                        class="text-danger hover:text-danger/80 disabled:cursor-not-allowed disabled:opacity-40"
                                         :disabled="competitors.length <= 2"
                                         @click="removeCompetitor(c.id, c.name)"
                                     >
@@ -1285,29 +1276,29 @@ const deleteGame = () => {
                         can.score_all &&
                         uninvitedMembers.length
                     "
-                    class="overflow-hidden bg-white shadow-sm sm:rounded-lg"
+                    class="overflow-hidden bg-surface rounded-lg border border-border"
                 >
                     <div class="border-b px-6 py-4">
-                        <h3 class="text-lg font-medium text-[#0b5d3b]">
+                        <h3 class="text-lg font-medium text-body">
                             Invite players
                         </h3>
-                        <p class="mt-1 text-sm text-gray-500">
+                        <p class="mt-1 text-sm text-muted">
                             These players don't have accounts yet — invite them
                             and they'll see this game (and their scores) when
                             they sign up.
                         </p>
                     </div>
-                    <ul class="divide-y divide-gray-100">
+                    <ul class="divide-y divide-border">
                         <li
                             v-for="m in uninvitedMembers"
                             :key="m.id"
                             class="flex items-center justify-between gap-3 px-6 py-3"
                         >
-                            <span class="text-gray-900">
+                            <span class="text-body">
                                 {{ m.name }}
                                 <span
                                     v-if="game.team_based"
-                                    class="text-sm text-gray-400"
+                                    class="text-sm text-subtle"
                                     >· {{ m.competitor }}</span
                                 >
                             </span>

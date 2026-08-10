@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import DangerButton from '@/Components/DangerButton.vue';
+import DangerButton from '@/Components/Scorekeeper/DangerButton.vue';
 import InputError from '@/Components/InputError.vue';
-import InputLabel from '@/Components/InputLabel.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
-import SecondaryButton from '@/Components/SecondaryButton.vue';
-import TextInput from '@/Components/TextInput.vue';
+import InputLabel from '@/Components/Scorekeeper/InputLabel.vue';
+import PrimaryButton from '@/Components/Scorekeeper/PrimaryButton.vue';
+import SecondaryButton from '@/Components/Scorekeeper/SecondaryButton.vue';
+import TextInput from '@/Components/Scorekeeper/TextInput.vue';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
@@ -77,7 +77,7 @@ const leave = (h: HouseholdRow) => {
 
     <AuthenticatedLayout>
         <template #header>
-            <h2 class="text-xl font-semibold leading-tight text-[#0b5d3b]">
+            <h2 class="text-xl font-semibold leading-tight text-body">
                 Manage households
             </h2>
         </template>
@@ -86,7 +86,7 @@ const leave = (h: HouseholdRow) => {
             <div class="mx-auto max-w-4xl space-y-6 px-4 sm:px-6 lg:px-8">
                 <div
                     v-if="page.props.flash?.success"
-                    class="rounded-md bg-green-50 p-4 text-sm text-green-800"
+                    class="rounded-lg border border-primary/30 bg-primary/10 p-4 text-sm text-primary"
                 >
                     {{ page.props.flash.success }}
                 </div>
@@ -95,18 +95,18 @@ const leave = (h: HouseholdRow) => {
                 <div
                     v-for="h in households"
                     :key="h.id"
-                    class="overflow-hidden bg-white shadow-sm sm:rounded-lg"
+                    class="overflow-hidden rounded-lg border border-border bg-surface"
                 >
                     <div class="flex flex-wrap items-center gap-3 px-6 py-4">
                         <template v-if="renamingId !== h.id">
-                            <span class="text-lg font-semibold text-gray-900">{{
+                            <span class="text-lg font-semibold text-body">{{
                                 h.name
                             }}</span>
                             <span
-                                class="rounded-full bg-[#f7ecca] px-2 py-0.5 text-xs font-medium text-[#6b5407]"
+                                class="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning"
                                 >{{ h.is_owner ? 'owner' : h.role }}</span
                             >
-                            <span class="text-sm text-gray-500">
+                            <span class="text-sm text-muted">
                                 {{ h.members_count }} member(s) ·
                                 {{ h.players_count }} player(s) ·
                                 {{ h.scored_games_count }} game(s)
@@ -159,13 +159,13 @@ const leave = (h: HouseholdRow) => {
                         </form>
                     </div>
                     <div
-                        class="flex flex-wrap gap-4 border-t bg-gray-50/60 px-6 py-3 text-sm font-medium"
+                        class="flex flex-wrap gap-4 border-t border-border bg-surface-elevated px-6 py-3 text-sm font-medium"
                     >
                         <Link
                             :href="
                                 route('scorekeeper.households.games.index', h.id)
                             "
-                            class="text-[#0b5d3b] hover:text-[#084a2f]"
+                            class="text-primary hover:text-primary-hover"
                             >Games</Link
                         >
                         <Link
@@ -175,20 +175,20 @@ const leave = (h: HouseholdRow) => {
                                     h.id,
                                 )
                             "
-                            class="text-[#0b5d3b] hover:text-[#084a2f]"
+                            class="text-primary hover:text-primary-hover"
                             >Game templates</Link
                         >
                         <Link
                             :href="route('scorekeeper.households.people', h.id)"
-                            class="text-[#0b5d3b] hover:text-[#084a2f]"
+                            class="text-primary hover:text-primary-hover"
                             >People</Link
                         >
                     </div>
                 </div>
 
                 <!-- Create -->
-                <div class="overflow-hidden bg-white p-6 shadow-sm sm:rounded-lg">
-                    <h3 class="mb-4 text-lg font-medium text-[#0b5d3b]">
+                <div class="overflow-hidden rounded-lg border border-border bg-surface p-6">
+                    <h3 class="mb-4 text-lg font-medium text-body">
                         New household
                     </h3>
                     <form class="flex items-end gap-3" @submit.prevent="create">

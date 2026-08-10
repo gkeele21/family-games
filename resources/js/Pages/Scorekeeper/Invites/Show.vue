@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import GuestLayout from '@/Layouts/GuestLayout.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
+import PrimaryButton from '@/Components/Scorekeeper/PrimaryButton.vue';
 import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
@@ -35,8 +35,8 @@ const accept = () => {
     <Head title="Household invitation" />
 
     <GuestLayout>
-        <div class="space-y-4 text-gray-700">
-            <h1 class="text-lg font-semibold text-gray-900">
+        <div class="space-y-4 text-body">
+            <h1 class="text-lg font-semibold text-body">
                 You're invited
             </h1>
             <p>
@@ -58,7 +58,7 @@ const accept = () => {
 
             <!-- Signed in as a different account -->
             <template v-else-if="currentUser">
-                <p class="rounded-md bg-amber-50 p-3 text-sm text-amber-800">
+                <p class="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
                     This invitation was sent to
                     <strong>{{ invite.email }}</strong>, but you're signed in as
                     {{ currentUser.email }}. Sign in with the invited email to
@@ -68,7 +68,7 @@ const accept = () => {
 
             <!-- Not signed in -->
             <template v-else>
-                <p class="text-sm text-gray-500">
+                <p class="text-sm text-muted">
                     Sign in (or create an account) with
                     <strong>{{ invite.email }}</strong> to accept, then reopen
                     this link.
@@ -76,12 +76,12 @@ const accept = () => {
                 <div class="flex gap-3">
                     <Link
                         :href="route('login')"
-                        class="text-sm font-medium text-[#0b5d3b] hover:text-[#084a2f]"
+                        class="text-sm font-medium text-primary hover:text-primary-hover"
                         >Log in</Link
                     >
                     <Link
                         :href="route('register')"
-                        class="text-sm font-medium text-[#0b5d3b] hover:text-[#084a2f]"
+                        class="text-sm font-medium text-primary hover:text-primary-hover"
                         >Register</Link
                     >
                 </div>
