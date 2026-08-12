@@ -5,8 +5,10 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use App\Models\Scorekeeper\Player;
 use App\Support\GameCode;
 
 class GameSession extends Model
@@ -47,9 +49,14 @@ class GameSession extends Model
         // rotation honest without charging usage for games that never played.)
         static::updated(function ($session) {
             if ($session->wasChanged('status') && $session->status === 'completed') {
+                // NB: sessionQuestions() carries a default orderBy('display_order'),
+                // which MySQL rejects when combined with SELECT DISTINCT (error 3065).
+                // Pull the ids and de-dupe in PHP so the counter always bumps.
                 $questionIds = $session->sessionQuestions()
-                    ->distinct()
                     ->pluck('question_id')
+                    ->filter()
+                    ->unique()
+                    ->values()
                     ->all();
 
                 if ($questionIds) {
@@ -92,6 +99,15 @@ class GameSession extends Model
     public function sessionPlayers(): HasMany
     {
         return $this->hasMany(SessionPlayer::class);
+    }
+
+    /**
+     * Household roster players who were present for this game — the attendance
+     * roster behind cross-game question history. See game_session_players.
+     */
+    public function players(): BelongsToMany
+    {
+        return $this->belongsToMany(Player::class, 'game_session_players');
     }
 
     public function unassignedPlayers(): HasMany
