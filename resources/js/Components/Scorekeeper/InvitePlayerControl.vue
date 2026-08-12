@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import SecondaryButton from '@/Components/SecondaryButton.vue';
-import TextInput from '@/Components/TextInput.vue';
+import SecondaryButton from '@/Components/Scorekeeper/SecondaryButton.vue';
+import TextInput from '@/Components/Scorekeeper/TextInput.vue';
 import { useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
@@ -40,14 +40,14 @@ const send = () => {
     <span v-if="!open" class="flex items-center gap-2">
         <button
             type="button"
-            class="text-sm font-medium text-[#0b5d3b] hover:text-[#084a2f]"
+            class="text-sm font-medium text-primary hover:text-primary-hover"
             @click="open = true"
         >
             Invite
         </button>
         <span
             v-if="sentTo"
-            class="text-xs font-medium text-green-700"
+            class="text-xs font-medium text-primary"
             >✓ Invite sent to {{ sentTo }}</span
         >
     </span>
@@ -64,12 +64,12 @@ const send = () => {
         >
         <button
             type="button"
-            class="text-sm text-gray-400 hover:text-gray-600"
+            class="text-sm text-subtle hover:text-muted"
             @click="open = false"
         >
             Cancel
         </button>
-        <span v-if="form.errors.email" class="text-xs text-red-600">{{
+        <span v-if="form.errors.email" class="text-xs text-danger">{{
             form.errors.email
         }}</span>
     </form>

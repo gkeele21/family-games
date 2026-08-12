@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Scorekeeper Redesign — Mockups</title>
+<style>
+  /* ---- Keeler dark design tokens (mirrored from resources/css/app.css) ---- */
+  :root{
+    --bg:#404040;--surface:#1f1f1f;--surface-elevated:#262626;--surface-overlay:#333333;
+    --surface-inset:#0f0f0f;--surface-header:#171717;
+    --text:#f5f5f5;--muted:#a3a3a3;--subtle:#737373;
+    --border:#404040;--border-strong:#525252;
+    --success:#57d025;--warning:#f47612;--danger:#ef4444;--info:#3b82f6;--gold:#eab308;
+    /* Profile-chosen accent (swappable via the switcher). Default green. */
+    --primary:#57d025;--primary-hover:#4db820;
+    /* Scorekeeper LOGO color = red, used ONLY on the wordmark. */
+    --logo:var(--danger);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
+  a{color:inherit}h1,h2,h3,h4,p{margin:0}
+  code{background:var(--surface-inset);padding:1px 5px;border-radius:5px;font-size:.9em;color:var(--muted)}
+
+  .page{max-width:1120px;margin:0 auto;padding:48px 20px 120px}
+  .lede{max-width:760px;margin:0 auto 8px}
+  .lede h1{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .lede .sub{color:var(--muted);margin-top:10px;font-size:15px}
+  .kicker{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+
+  .accentbar{max-width:760px;margin:20px auto 0;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+  .accentbtns{display:flex;gap:7px}
+  .abtn{display:flex;align-items:center;gap:7px;border:1px solid var(--border-strong);background:var(--surface-inset);color:var(--muted);border-radius:999px;padding:5px 12px 5px 8px;font:inherit;font-size:12px;font-weight:650;cursor:pointer}
+  .abtn i{width:14px;height:14px;border-radius:50%}
+  .abtn.active{border-color:var(--text);color:var(--text)}
+
+  .section-title{max-width:900px;margin:64px auto 6px;display:flex;align-items:baseline;gap:12px}
+  .section-title h2{font-size:20px;font-weight:750;letter-spacing:-.01em}
+  .section-title .n{font-size:13px;font-weight:700;color:var(--primary);font-variant-numeric:tabular-nums}
+  .section-desc{max-width:900px;margin:0 auto 20px;color:var(--muted);font-size:14px}
+
+  .frame{max-width:900px;margin:0 auto;border-radius:16px;overflow:hidden;border:1px solid var(--border-strong);box-shadow:0 24px 60px -24px rgba(0,0,0,.7);background:var(--bg)}
+  .frame.wide{max-width:1000px}
+
+  /* ============ MODULE HEADER ============ */
+  .sk-band{background:var(--surface-header);border-bottom:1px solid var(--border);padding:16px 20px 0}
+  .sk-band .row{display:flex;align-items:center;gap:12px}
+  .wm{display:inline-flex;align-items:center;gap:12px}
+  .wm .dia{filter:drop-shadow(0 0 10px color-mix(in srgb,var(--logo) 45%,transparent))}
+  .wm .dia polygon{fill:var(--logo)}
+  .wm .txt{font-weight:800;letter-spacing:-.01em;line-height:1;font-size:26px}
+  .wm .txt .s{color:var(--text)}.wm .txt .k{color:var(--logo)}
+  .wm.sm .txt{font-size:21px}
+  .hh-switch{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer}
+  .hh-switch:hover{color:var(--text)}
+
+  .btn{border:0;cursor:pointer;font:inherit;font-weight:650;border-radius:999px;padding:9px 16px;font-size:13px;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+  .btn-primary{background:var(--primary);color:#0a1204}
+  .btn-primary:hover{background:var(--primary-hover)}
+  .btn-secondary{background:var(--surface-overlay);color:var(--text);border:1px solid var(--border-strong)}
+  .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border-strong)}
+  .btn-danger{background:transparent;color:var(--muted);border:1px solid var(--border-strong)}
+  .btn-danger:hover{color:var(--danger);border-color:rgba(239,68,68,.5)}
+  .btn-sm{padding:6px 12px;font-size:12px}
+  .push{margin-left:auto}
+
+  .tabs{display:flex;gap:8px;margin-top:16px;padding-bottom:14px}
+  .tab{border-radius:999px;padding:7px 15px;font-size:13px;font-weight:650;border:1px solid var(--border-strong);color:var(--muted);cursor:pointer}
+  .tab:hover{color:var(--text);border-color:var(--muted)}
+  .tab.active{background:color-mix(in srgb,var(--primary) 16%,transparent);color:var(--primary);border-color:color-mix(in srgb,var(--primary) 45%,transparent)}
+
+  .ground{background:var(--bg);padding:24px 20px}
+  .stack{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+  .stack.lg{max-width:820px}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .card-head{padding:14px 18px;border-bottom:1px solid var(--border)}
+  .card-head h3{font-size:15px;font-weight:700}
+  .card-head p{font-size:13px;color:var(--muted);margin-top:2px}
+  .card-body{padding:16px 18px}
+  .card-foot{padding:14px 18px;border-top:1px solid var(--border);background:var(--surface-elevated)}
+  .eyebrow{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--subtle)}
+
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .muted{color:var(--muted)}.subtle{color:var(--subtle)}.small{font-size:13px}.xs{font-size:12px}
+  .grow{flex:1}.gap8{display:flex;align-items:center;gap:8px}.gap12{display:flex;align-items:center;gap:12px}.wrap{flex-wrap:wrap}
+
+  .chip{display:inline-flex;align-items:center;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:650}
+  .chip-owner{background:rgba(244,118,18,.15);color:var(--warning)}
+  .chip-member{background:rgba(87,208,37,.15);color:var(--success)}
+  .chip-live{background:rgba(87,208,37,.12);color:var(--success)}
+  .chip-done{background:var(--surface-overlay);color:var(--muted)}
+  .chip-system{background:rgba(244,118,18,.15);color:var(--warning)}
+  .chip-shared{background:rgba(87,208,37,.15);color:var(--success)}
+  .chip-linked{background:rgba(59,130,246,.15);color:var(--info)}
+  .chip-none{background:var(--surface-overlay);color:var(--subtle)}
+
+  .list{list-style:none;margin:0;padding:0}
+  .list li{padding:14px 18px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .list li:first-child{border-top:0}
+  .list li:hover{background:var(--surface-elevated)}
+
+  label.fld{display:block;font-size:12px;font-weight:650;color:var(--muted);margin-bottom:6px}
+  .input,.select{width:100%;background:var(--surface-inset);border:1px solid var(--border-strong);color:var(--text);border-radius:9px;padding:9px 11px;font:inherit;font-size:14px}
+  .input::placeholder{color:var(--subtle)}
+  .input:focus,.select:focus{outline:0;border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 22%,transparent)}
+  .field-row{display:flex;gap:10px;align-items:flex-end}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .check{display:flex;align-items:center;gap:9px;font-size:14px;padding:6px 0}
+  .check i{width:18px;height:18px;border-radius:5px;border:1px solid var(--border-strong);background:var(--surface-inset);flex:none;display:inline-block}
+  .check.on i{background:var(--primary);border-color:var(--primary);position:relative}
+  .check.on i:after{content:"";position:absolute;left:5px;top:1px;width:5px;height:10px;border:solid #0a1204;border-width:0 2px 2px 0;transform:rotate(45deg)}
+
+  .rank{display:inline-flex;min-width:42px;justify-content:center;border-radius:999px;padding:3px 8px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+  .rank-1{background:var(--gold);color:#3a2c00}
+  .rank-n{background:var(--surface-overlay);color:var(--muted)}
+  .dot{width:12px;height:12px;border-radius:50%;flex:none}
+  .standing{display:flex;align-items:center;gap:12px;padding:11px 18px;border-top:1px solid var(--border)}
+  .standing:first-child{border-top:0}
+  .standing .nm{font-weight:600;flex:1}
+  .standing .tot{font-weight:750;font-variant-numeric:tabular-nums;font-size:15px}
+
+  .grid-toolbar{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted)}
+  .live{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--success)}
+  .live i{width:8px;height:8px;border-radius:50%;background:var(--success);display:inline-block;animation:pulse 1.8s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(87,208,37,.5)}70%{box-shadow:0 0 0 7px rgba(87,208,37,0)}100%{box-shadow:0 0 0 0 rgba(87,208,37,0)}}
+  .sc-wrap{overflow:auto}
+  table.sc{border-collapse:collapse;width:100%;font-size:14px}
+  table.sc th,table.sc td{padding:10px 12px;text-align:left;white-space:nowrap}
+  table.sc thead th{position:sticky;top:0;font-weight:700;font-size:13px}
+  table.sc thead th.rd{background:var(--surface);color:var(--muted)}
+  .colhead{font-weight:700}
+  .colhead .cd{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  table.sc tbody td.rd{color:var(--muted);font-weight:650;border-top:1px solid var(--border)}
+  table.sc tbody td.cell{border-top:1px solid var(--border);font-variant-numeric:tabular-nums;border-left:1px solid var(--border);font-weight:650}
+  .scinput{width:60px;background:var(--surface-inset);border:1px solid var(--border-strong);border-radius:7px;padding:6px 8px;font:inherit;font-size:14px;font-weight:650;text-align:center}
+  .scinput:focus{outline:0;border-color:var(--primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--primary) 25%,transparent)}
+  .totrow td{border-top:2px solid var(--border-strong);font-weight:750;background:var(--surface-elevated)}
+
+  .hrow{padding:16px 18px;border-top:1px solid var(--border)}
+  .hrow:first-child{border-top:0}
+  .hrow .title{font-size:16px;font-weight:700}
+  .linkbar{display:flex;gap:18px;padding:11px 18px;border-top:1px solid var(--border);background:var(--surface-elevated);font-size:13px;font-weight:650}
+  .linkbar a{color:var(--primary)}
+  .trophy{color:var(--gold);font-weight:650;font-size:13px}
+
+  .legend{max-width:900px;margin:10px auto 0;font-size:12px;color:var(--subtle);text-align:center}
+  footer{max-width:760px;margin:80px auto 0;color:var(--subtle);font-size:13px;text-align:center}
+
+  /* ---- color library + demo ---- */
+  .demo{max-width:900px;margin:0 auto;background:var(--surface);border:1px solid var(--border-strong);border-radius:16px;padding:20px}
+  .libgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:12px}
+  .libcard{border-radius:12px;border:1px solid var(--border);background:var(--surface-inset);padding:14px 12px;text-align:center;position:relative}
+  .libcard .num{font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+  .libcard .nm{margin-top:9px;font-size:12px;font-weight:700}
+  .libcard .hex{margin-top:2px;font-size:10px;color:var(--subtle);font-family:ui-monospace,Menlo,monospace}
+  .libcard .site{position:absolute;top:8px;right:8px;font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--subtle);border:1px solid var(--border-strong);border-radius:999px;padding:1px 6px}
+  .controls{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:20px 0 16px}
+  .countbtns{display:flex;gap:6px}
+  .countbtn{min-width:40px;height:34px;padding:0 8px;border-radius:9px;border:1px solid var(--border-strong);background:var(--surface-inset);color:var(--muted);font:inherit;font-weight:700;cursor:pointer}
+  .countbtn.active{background:var(--primary);color:#0a1204;border-color:var(--primary)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="lede">
+    <span class="kicker">Keeler Games · Design spec</span>
+    <h1>Scorekeeper redesign</h1>
+    <p class="sub">
+      Every screen re-skinned in the dark <b>keeler-app</b> palette. Identity is the Dashboard wordmark —
+      white <b>SCORE</b> + red <b style="color:var(--logo)">KEEPER</b> — but red is <b>logo-only</b>; all
+      actions follow the profile accent. Player identity is shown as <b>colored score text</b>, chosen from a
+      curated neon palette (§02).
+    </p>
+  </div>
+
+  <div class="accentbar">
+    <span>Profile accent</span>
+    <div class="accentbtns" id="accentbtns">
+      <button class="abtn active" data-a="green"><i style="background:#57d025"></i>Green</button>
+      <button class="abtn" data-a="blue"><i style="background:#3b82f6"></i>Blue</button>
+      <button class="abtn" data-a="orange"><i style="background:#f47612"></i>Orange</button>
+    </div>
+    <span class="xs subtle">— buttons/tabs/links follow this; the logo stays red.</span>
+  </div>
+
+  <!-- 1. MODULE HEADER -->
+  <div class="section-title"><span class="n">01</span><h2>Module frame &amp; tabs</h2></div>
+  <p class="section-desc">The green band → a <b>surface-header</b> bar with the red-diamond wordmark. “New game”, the active tab and links use the profile accent.</p>
+  <div class="frame">
+    <div class="sk-band">
+      <div class="row">
+        <div class="wm"><svg class="dia" width="26" height="31" viewBox="0 0 40 48"><polygon points="20,2 38,24 20,46 2,24"/></svg><div class="txt"><span class="s">SCORE</span><span class="k">KEEPER</span></div></div>
+        <div class="hh-switch">Keele Family ▾</div>
+        <button class="btn btn-primary push">＋ New game</button>
+      </div>
+      <div class="tabs"><span class="tab active">Games</span><span class="tab">Game templates</span><span class="tab">People</span></div>
+    </div>
+    <div class="ground" style="padding:16px 20px"><p class="legend" style="margin:0">↑ This header wraps every Scorekeeper screen below.</p></div>
+  </div>
+
+  <!-- 2. PLAYER COLORS -->
+  <div class="section-title"><span class="n">02</span><h2>Player colors — pick-from library</h2></div>
+  <p class="section-desc">
+    The final set — <b>15</b> colors spread across the wheel (the <b>7 site tokens</b>, tagged <code>site</code>,
+    plus harmonious neon additions). Three unused hues are kept below in case you change your mind. Players show
+    as <b>colored score text</b>, no cell background. As players are added they’re auto-assigned in a set order
+    (previewed below, each color far from the last); anyone can override via the picker, and two players can’t
+    share one in a game.
+  </p>
+  <div class="demo">
+    <div class="library" id="library"></div>
+    <div class="controls">
+      <span class="small muted">Preview players</span>
+      <div class="countbtns" id="countbtns"></div>
+    </div>
+    <div class="card" style="background:var(--surface-inset)"><div class="sc-wrap"><table class="sc" id="demotable"></table></div></div>
+    <p class="xs subtle" id="wrapnote" style="margin-top:12px"></p>
+  </div>
+
+  <!-- 3. SCORECARD -->
+  <div class="section-title"><span class="n">03</span><h2>Scorecard <span class="muted" style="font-size:14px;font-weight:500">— the centerpiece</span></h2></div>
+  <p class="section-desc">Standings + grid on dark surfaces, colored-score-text style. First place = gold rank chip; “Save scores” is the accent action.</p>
+  <div class="frame wide">
+    <div class="sk-band">
+      <div class="row">
+        <div class="wm sm"><svg class="dia" width="22" height="26" viewBox="0 0 40 48"><polygon points="20,2 38,24 20,46 2,24"/></svg><div class="txt"><span class="s">SCORE</span><span class="k">KEEPER</span></div></div>
+        <div class="hh-switch">Keele Family ▾</div>
+        <button class="btn btn-primary push">＋ New game</button>
+      </div>
+      <div class="tabs"><span class="tab active">Games</span><span class="tab">Game templates</span><span class="tab">People</span></div>
+    </div>
+    <div class="ground"><div class="stack lg">
+      <div class="gap12 wrap" style="align-items:baseline">
+        <a class="small muted">← Games</a><h3 style="font-size:18px;font-weight:750">Rummy 500</h3>
+        <span class="small muted">to 500 · high score wins</span><span class="small subtle">· Aug 6, 2026 ✎</span>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Standings</h3></div>
+        <div class="standing"><span class="rank rank-1">1st</span><span class="dot" data-dot="1"></span><span class="nm" data-nm="1">Dana</span><span class="tot" data-tot="1">312</span></div>
+        <div class="standing"><span class="rank rank-n">2nd</span><span class="dot" data-dot="0"></span><span class="nm" data-nm="0">Bert</span><span class="tot" data-tot="0">287</span></div>
+        <div class="standing"><span class="rank rank-n">3rd</span><span class="dot" data-dot="2"></span><span class="nm" data-nm="2">Grandma</span><span class="tot" data-tot="2">241</span></div>
+      </div>
+      <div class="card">
+        <div class="grid-toolbar">
+          <span class="live"><i></i> Live</span><span>Sort by</span><span class="select" style="width:auto;padding:5px 9px">Total ▾</span>
+          <button class="btn btn-primary btn-sm push">Save scores</button>
+        </div>
+        <div class="sc-wrap"><table class="sc">
+          <thead><tr><th class="rd">Rd</th>
+            <th class="colhead" data-head="0"><span class="cd"></span>Bert</th>
+            <th class="colhead" data-head="1"><span class="cd"></span>Dana</th>
+            <th class="colhead" data-head="2"><span class="cd"></span>Grandma</th></tr></thead>
+          <tbody>
+            <tr><td class="rd">1</td><td class="cell" data-c="0">85</td><td class="cell" data-c="1">92</td><td class="cell" data-c="2">70</td></tr>
+            <tr><td class="rd">2</td><td class="cell" data-c="0">110</td><td class="cell" data-c="1">98</td><td class="cell" data-c="2">83</td></tr>
+            <tr><td class="rd">3 ✎</td>
+              <td class="cell" data-c="0"><input class="scinput" data-in="0" value="92"/></td>
+              <td class="cell" data-c="1"><input class="scinput" data-in="1" value="122"/></td>
+              <td class="cell" data-c="2"><input class="scinput" data-in="2" value="88"/></td></tr>
+            <tr class="totrow"><td class="rd" style="color:var(--text)">Total</td><td class="cell" data-c="0">287</td><td class="cell" data-c="1">312</td><td class="cell" data-c="2">241</td></tr>
+          </tbody>
+        </table></div>
+        <div class="card-foot gap8"><button class="btn btn-secondary btn-sm">＋ Add round</button><span class="grow"></span><button class="btn btn-ghost btn-sm">Manage players</button><button class="btn btn-primary btn-sm">Complete game</button></div>
+      </div>
+    </div></div>
+  </div>
+  <p class="legend">Completed games swap the toolbar for a gold winner banner: <b>“🏆 Winner: Dana (312)”</b>.</p>
+
+  <!-- 4. NEW GAME -->
+  <div class="section-title"><span class="n">04</span><h2>New game</h2></div>
+  <p class="section-desc">Template picker, backdatable play date, roster checklist, inline add-player, team builder. “Start game” = accent action.</p>
+  <div class="frame"><div class="ground"><div class="stack">
+    <h3 style="font-size:18px;font-weight:750">New game</h3>
+    <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:18px">
+      <div><div class="row-between" style="margin-bottom:6px"><label class="fld" style="margin:0">Template</label><a class="xs" style="color:var(--primary);font-weight:650">+ New game template</a></div><div class="select">Rummy 500 ▾</div></div>
+      <div><label class="fld">Play date</label><div class="input" style="width:auto;display:inline-block">Aug 8, 2026</div><p class="xs subtle" style="margin-top:6px">Recording an old game night? Set the date it was played.</p></div>
+      <div><label class="fld">Players (pick at least 2)</label>
+        <div class="check on"><i></i> Bert</div><div class="check on"><i></i> Dana</div><div class="check on"><i></i> Grandma</div><div class="check"><i></i> Theo</div>
+        <div class="field-row" style="margin-top:10px;border-top:1px solid var(--border);padding-top:12px"><div class="grow"><label class="fld">Add a player</label><div class="input"><span class="subtle">Name</span></div></div><button class="btn btn-secondary btn-sm">Add</button></div>
+      </div>
+    </div></div>
+    <button class="btn btn-primary" style="align-self:flex-start">Start game</button>
+  </div></div></div>
+
+  <!-- 5. GAMES LIST -->
+  <div class="section-title"><span class="n">05</span><h2>Games list</h2></div>
+  <p class="section-desc">Date, name, status pill (in-progress = green Live, completed = muted), winner in gold, player line.</p>
+  <div class="frame"><div class="ground"><div class="stack"><div class="card"><ul class="list">
+    <li><div><div class="gap8"><span class="small muted">Aug 6, 2026</span><b>Rummy 500</b></div><div class="xs muted" style="margin-top:3px">3 players · Bert, Dana, Grandma</div></div><span class="chip chip-live">In progress</span></li>
+    <li><div><div class="gap8"><span class="small muted">Aug 1, 2026</span><b>Catan</b></div><div class="xs muted" style="margin-top:3px">4 players · Bert, Dana, Theo, Grandma</div></div><div class="gap8"><span class="trophy">🏆 Dana</span><span class="chip chip-done">Completed</span></div></li>
+    <li><div><div class="gap8"><span class="small muted">Jul 28, 2026</span><b>Hearts</b></div><div class="xs muted" style="margin-top:3px">4 players · Bert, Dana, Theo, Grandma</div></div><div class="gap8"><span class="trophy">🏆 Theo</span><span class="chip chip-done">Completed</span></div></li>
+  </ul></div></div></div></div>
+
+  <!-- 6. PEOPLE -->
+  <div class="section-title"><span class="n">06</span><h2>People</h2></div>
+  <p class="section-desc">Roster players + account members in one list with role/link chips, add-player + suggestions, and a full-access email invite card.</p>
+  <div class="frame"><div class="ground"><div class="stack">
+    <div class="card"><div class="card-head row-between"><div><div class="eyebrow">Household</div><h3 style="margin-top:2px">Keele Family</h3></div><div class="gap12"><button class="btn btn-secondary btn-sm">Rename</button><a class="xs" style="color:var(--primary);font-weight:650">Switch households →</a></div></div></div>
+    <div class="card"><div class="card-head"><h3>People</h3><p>Players you keep score for (no account needed) and family with their own login.</p></div>
+      <ul class="list">
+        <li><div class="gap8">Bert <span class="chip chip-owner">owner</span></div><button class="btn btn-danger btn-sm">Remove</button></li>
+        <li><div><div class="gap8">Dana <span class="chip chip-member">member</span></div><div class="xs muted">dana@example.com</div></div><button class="btn btn-danger btn-sm">Remove</button></li>
+        <li><div class="gap8">Grandma <span class="chip chip-none">no account</span></div><div class="gap8"><button class="btn btn-secondary btn-sm">Invite</button><button class="btn btn-danger btn-sm">Remove</button></div></li>
+        <li><div class="gap8">Theo <span class="chip chip-linked">linked</span></div><button class="btn btn-danger btn-sm">Remove</button></li>
+      </ul>
+      <div class="card-foot field-row"><div class="grow"><label class="fld">Add player</label><div class="input"><span class="subtle">Grandma</span></div></div><button class="btn btn-primary btn-sm">Add</button></div>
+    </div>
+    <div class="card"><div class="card-head"><h3>Invite someone who doesn’t play</h3><p>Full access to this household without adding them to the roster.</p></div><div class="card-body field-row"><div class="grow"><label class="fld">Invite by email</label><div class="input"><span class="subtle">family@example.com</span></div></div><div style="width:120px"><label class="fld">Role</label><div class="select">Member ▾</div></div><button class="btn btn-primary btn-sm">Send invite</button></div></div>
+  </div></div></div>
+
+  <!-- 7. TEMPLATES -->
+  <div class="section-title"><span class="n">07</span><h2>Game templates</h2></div>
+  <p class="section-desc">Reusable scoring rule sets. Form on top; list below with System (gold) / Shared (green) chips, a rules summary line, and a “Copy to…” select.</p>
+  <div class="frame"><div class="ground"><div class="stack">
+    <div class="card"><div class="card-head"><h3>New game template</h3></div><div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+      <div class="grid2"><div><label class="fld">Name</label><div class="input"><span class="subtle">Rummy 500</span></div></div><div><label class="fld">Game</label><div class="select">Rummy ▾</div></div></div>
+      <div class="grid2"><div><label class="fld">Target score</label><div class="input">500</div></div><div><label class="fld">Max rounds</label><div class="input"><span class="subtle">—</span></div></div></div>
+      <div class="gap12 wrap"><div class="check"><i></i> Low score wins</div><div class="check"><i></i> Team-based</div><div class="check"><i></i> Allow self-scoring</div></div>
+      <button class="btn btn-primary" style="align-self:flex-start">Create template</button>
+    </div></div>
+    <div class="card"><ul class="list">
+      <li><div><div class="gap8"><b>Rummy 500</b><span class="chip chip-system">System</span></div><div class="xs muted" style="margin-top:3px">Rummy · to 500 · high score wins</div></div></li>
+      <li><div><div class="gap8"><b>Catan Standard</b><span class="chip chip-shared">Shared</span></div><div class="xs muted" style="margin-top:3px">Catan · to 10 · high score wins</div></div><div class="gap8"><span class="select xs" style="width:auto;padding:5px 9px">Copy to… ▾</span><button class="btn btn-secondary btn-sm">Edit</button><button class="btn btn-danger btn-sm">Delete</button></div></li>
+      <li><div><div class="gap8"><b>Golf (9 holes)</b></div><div class="xs muted" style="margin-top:3px">Golf · 9 rounds · low score wins · 2 scores/round</div></div><div class="gap8"><span class="select xs" style="width:auto;padding:5px 9px">Copy to… ▾</span><button class="btn btn-secondary btn-sm">Edit</button><button class="btn btn-danger btn-sm">Delete</button></div></li>
+    </ul></div>
+  </div></div></div>
+
+  <!-- 8. HOUSEHOLDS -->
+  <div class="section-title"><span class="n">08</span><h2>Manage households</h2></div>
+  <p class="section-desc">The switch/manage screen (still on the generic layout today). Dark cards, role chip, counts line, quick-links bar per household.</p>
+  <div class="frame"><div class="ground"><div class="stack">
+    <div class="card"><div class="hrow"><div class="row-between wrap" style="gap:10px"><div class="gap12 wrap"><span class="title">Keele Family</span><span class="chip chip-owner">owner</span><span class="xs muted">2 members · 4 players · 12 games</span></div><div class="gap8"><button class="btn btn-secondary btn-sm">Rename</button><button class="btn btn-danger btn-sm">Delete</button></div></div></div><div class="linkbar"><a>Games</a><a>Game templates</a><a>People</a></div></div>
+    <div class="card"><div class="hrow"><div class="row-between wrap" style="gap:10px"><div class="gap12 wrap"><span class="title">Friday Crew</span><span class="chip chip-member">member</span><span class="xs muted">5 members · 6 players · 3 games</span></div><div class="gap8"><button class="btn btn-danger btn-sm">Leave</button></div></div></div><div class="linkbar"><a>Games</a><a>Game templates</a><a>People</a></div></div>
+    <div class="card"><div class="card-head"><h3>New household</h3></div><div class="card-body field-row"><div class="grow"><label class="fld">Name</label><div class="input"><span class="subtle">Friday crew</span></div></div><button class="btn btn-primary btn-sm">Create</button></div></div>
+  </div></div></div>
+
+  <footer>Mockups only — no code changed. Colors are the real <code>keeler-app</code> tokens from <code>resources/css/app.css</code> (player colors are a curated pick-list, the sanctioned team-color exception).</footer>
+
+</div>
+
+<script>
+/* ---------------- Curated neon player-color library (dark theme) ----------------
+   The 7 site tokens (site:true) plus harmonious additions. Ordered by hue for browsing. */
+const LIBRARY = [
+  /* Final set — 19, ordered by hue for browsing. */
+  {name:'Red',        hex:'#ef4444', site:true, group:'rec'},
+  {name:'Orange',     hex:'#f47612', site:true, group:'rec'},
+  {name:'Gold',       hex:'#eab308', site:true, group:'rec'},
+  {name:'Lime',       hex:'#bef264', group:'rec'},
+  {name:'Green',      hex:'#57d025', site:true, group:'rec'},
+  {name:'Teal',       hex:'#2dd4bf', group:'rec'},
+  {name:'Cyan',       hex:'#22d3ee', group:'rec'},
+  {name:'Blue',       hex:'#3b82f6', site:true, group:'rec'},
+  {name:'Indigo',     hex:'#818cf8', group:'rec'},
+  {name:'Violet',     hex:'#a855f7', group:'rec'},
+  {name:'Magenta',    hex:'#d946ef', group:'rec'},
+  {name:'Pink',       hex:'#f472b6', group:'rec'},
+  {name:'Hot Pink',   hex:'#ff2d95', group:'rec'},
+  {name:'Gray',       hex:'#a3a3a3', site:true, group:'rec'},
+  {name:'White',      hex:'#f5f5f5', site:true, group:'rec'},
+  /* Not used — still here if you change your mind. */
+  {name:'Sky',        hex:'#38bdf8', group:'extra'},
+  {name:'Periwinkle', hex:'#a5b4fc', group:'extra'},
+  {name:'Rose',       hex:'#fb7185', group:'extra'},
+  {name:'Bronze',     hex:'#c88a3e', group:'extra'},
+  {name:'Slate',      hex:'#94a3b8', group:'extra'},
+  {name:'Emerald',    hex:'#34d399', group:'extra'},
+  {name:'Chartreuse', hex:'#a3e635', group:'extra'},
+  {name:'Turquoise',  hex:'#14b8a6', group:'extra'},
+];
+const hexOf = n => LIBRARY.find(c=>c.name===n).hex;
+
+/* Default auto-assign order — each next color is far in hue from the previous;
+   vivid first, Pink/Hot Pink kept apart, Gray/White kept apart. Picker can override. */
+const DEFAULT = ['Green','Magenta','Gold','Blue','Red','Cyan','Violet','Gray','Lime','Pink','Teal','Orange','Indigo','Hot Pink','White'];
+const colorFor = i => hexOf(DEFAULT[i % DEFAULT.length]);
+
+const names = ['Bert','Dana','Grandma','Theo','Sam','Priya','Max','Lena','Ivy','Cole','Ada','Nolan','Rhea','Uma','Ben','Zoe'];
+
+/* ---- render the color library, grouped ---- */
+const lib = document.getElementById('library');
+const card = c => `<div class="libcard">${c.site?'<span class="site">site</span>':''}
+  <div class="num" style="color:${c.hex}">88</div>
+  <div class="nm" style="color:${c.hex}">${c.name}</div>
+  <div class="hex">${c.hex}</div></div>`;
+lib.innerHTML =
+  `<div class="eyebrow" style="margin:0 0 10px">Final set · 15</div>
+   <div class="libgrid">${LIBRARY.filter(c=>c.group==='rec').map(card).join('')}</div>
+   <div class="eyebrow" style="margin:20px 0 10px">Not used — kept in case you change your mind</div>
+   <div class="libgrid">${LIBRARY.filter(c=>c.group==='extra').map(card).join('')}</div>`;
+
+/* ---- interactive colored-text scorecard demo ---- */
+let count = 4;
+const countbtns=document.getElementById('countbtns');
+[2,3,4,6,8,12,16].forEach(n=>{
+  const b=document.createElement('button');
+  b.className='countbtn'+(n===count?' active':''); b.textContent=n; b.dataset.n=n;
+  b.onclick=()=>{count=n;[...countbtns.children].forEach(c=>c.classList.toggle('active',+c.dataset.n===n));render();};
+  countbtns.appendChild(b);
+});
+function render(){
+  const tbl=document.getElementById('demotable');
+  let head='<thead><tr><th class="rd">Rd</th>';
+  for(let i=0;i<count;i++){const col=colorFor(i);
+    head+=`<th class="colhead" style="color:${col}"><span class="cd" style="background:${col}"></span>${names[i]}</th>`;}
+  head+='</tr></thead>';
+  let body='<tbody>';
+  for(let r=1;r<=3;r++){body+=`<tr><td class="rd">${r}</td>`;
+    for(let i=0;i<count;i++){const v=40+((i*7+r*13)%80);
+      body+=`<td class="cell" style="color:${colorFor(i)}">${v}</td>`;}
+    body+='</tr>';}
+  body+='<tr class="totrow"><td class="rd" style="color:var(--text)">Total</td>';
+  for(let i=0;i<count;i++) body+=`<td class="cell" style="color:${colorFor(i)}">${120+i*11}</td>`;
+  body+='</tr></tbody>';
+  tbl.innerHTML=head+body;
+
+  document.getElementById('wrapnote').textContent = count>DEFAULT.length
+    ? `${count} players → colors wrap after ${DEFAULT.length}. Dot + name still identify each column.`
+    : `Colored score text, no cell background. Each column is identified by its colored number, dot and name.`;
+}
+
+/* ---- paint the static §03 scorecard from DEFAULT ---- */
+function paintStatic(){
+  document.querySelectorAll('[data-head]').forEach(el=>{const col=colorFor(+el.dataset.head);el.style.color=col;const cd=el.querySelector('.cd');if(cd)cd.style.background=col;});
+  document.querySelectorAll('[data-c]').forEach(el=>{el.style.color=colorFor(+el.dataset.c);});
+  document.querySelectorAll('[data-in]').forEach(el=>{el.style.color=colorFor(+el.dataset.in);});
+  document.querySelectorAll('[data-dot]').forEach(el=>{el.style.background=colorFor(+el.dataset.dot);});
+  document.querySelectorAll('[data-nm]').forEach(el=>{el.style.color=colorFor(+el.dataset.nm);});
+  document.querySelectorAll('[data-tot]').forEach(el=>{el.style.color=colorFor(+el.dataset.tot);});
+}
+
+/* ---- profile accent switcher ---- */
+const ACCENTS={green:['#57d025','#4db820'],blue:['#3b82f6','#2563eb'],orange:['#f47612','#ea580c']};
+const accentbtns=document.getElementById('accentbtns');
+accentbtns.onclick=e=>{const b=e.target.closest('.abtn');if(!b)return;
+  const [c,h]=ACCENTS[b.dataset.a];
+  document.documentElement.style.setProperty('--primary',c);
+  document.documentElement.style.setProperty('--primary-hover',h);
+  [...accentbtns.children].forEach(x=>x.classList.toggle('active',x===b));};
+
+render(); paintStatic();
+</script>
+</body>
+</html>

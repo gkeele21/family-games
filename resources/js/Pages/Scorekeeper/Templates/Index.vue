@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import DangerButton from '@/Components/DangerButton.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
+import DangerButton from '@/Components/Scorekeeper/DangerButton.vue';
+import PrimaryButton from '@/Components/Scorekeeper/PrimaryButton.vue';
 import ScorekeeperLayout from '@/Layouts/ScorekeeperLayout.vue';
-import SecondaryButton from '@/Components/SecondaryButton.vue';
+import SecondaryButton from '@/Components/Scorekeeper/SecondaryButton.vue';
 import TemplateFormFields from '@/Components/Scorekeeper/TemplateFormFields.vue';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { ref } from 'vue';
@@ -136,14 +136,14 @@ const rules = (t: Template) => {
             <div class="mx-auto max-w-4xl space-y-6 px-4 sm:px-6 lg:px-8">
                 <div
                     v-if="page.props.flash?.success"
-                    class="rounded-md bg-green-50 p-4 text-sm text-green-800"
+                    class="rounded-lg border border-primary/30 bg-primary/10 p-4 text-sm text-primary"
                 >
                     {{ page.props.flash.success }}
                 </div>
 
                 <!-- Create / edit form -->
-                <div class="overflow-hidden bg-white p-6 shadow-sm sm:rounded-lg">
-                    <h3 class="mb-4 text-lg font-medium text-[#0b5d3b]">
+                <div class="overflow-hidden rounded-lg border border-border bg-surface p-6">
+                    <h3 class="mb-4 text-lg font-medium text-body">
                         {{
                             editingId === null
                                 ? 'New game template'
@@ -175,28 +175,28 @@ const rules = (t: Template) => {
                 </div>
 
                 <!-- List -->
-                <div class="overflow-hidden bg-white shadow-sm sm:rounded-lg">
-                    <ul class="divide-y divide-gray-100">
+                <div class="overflow-hidden rounded-lg border border-border bg-surface">
+                    <ul class="divide-y divide-border">
                         <li
                             v-for="t in templates"
                             :key="t.id"
                             class="flex items-center justify-between px-6 py-4"
                         >
                             <div>
-                                <p class="font-medium text-gray-900">
+                                <p class="font-medium text-body">
                                     {{ t.name }}
                                     <span
                                         v-if="t.is_system"
-                                        class="ml-2 rounded-full bg-[#f7ecca] px-2 py-0.5 text-xs font-medium text-[#6b5407]"
+                                        class="ml-2 rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning"
                                         >System</span
                                     >
                                     <span
                                         v-else-if="t.is_global"
-                                        class="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700"
+                                        class="ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary"
                                         >Shared</span
                                     >
                                 </p>
-                                <p class="text-sm text-gray-500">
+                                <p class="text-sm text-muted">
                                     <span v-if="t.game_type"
                                         >{{ t.game_type.name }} · </span
                                     >{{ rules(t) }}
@@ -204,7 +204,7 @@ const rules = (t: Template) => {
                             </div>
                             <div v-if="!t.is_system" class="flex items-center gap-2">
                                 <select
-                                    class="rounded-md border-gray-300 bg-white text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                    class="rounded-lg border-border-strong bg-surface-inset text-sm text-body focus:border-primary focus:ring-primary"
                                     @change="onCopySelect(t, $event)"
                                 >
                                     <option value="">Copy to…</option>

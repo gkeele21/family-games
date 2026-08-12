@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import InputLabel from '@/Components/InputLabel.vue';
-import TextInput from '@/Components/TextInput.vue';
+import InputLabel from '@/Components/Scorekeeper/InputLabel.vue';
+import TextInput from '@/Components/Scorekeeper/TextInput.vue';
 import { ref, watch } from 'vue';
 
 const props = defineProps<{
@@ -78,7 +78,7 @@ watch(
             v-if="selectValue !== NEW"
             :id="id"
             v-model="selectValue"
-            class="mt-1 block w-full rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+            class="mt-1 block w-full rounded-lg border-border-strong bg-surface-inset text-body focus:border-primary focus:ring-primary"
             @change="onSelectChange"
         >
             <option value="" disabled>Select a game…</option>
@@ -98,7 +98,7 @@ watch(
             />
             <button
                 type="button"
-                class="whitespace-nowrap text-sm text-gray-500 hover:text-gray-700"
+                class="whitespace-nowrap text-sm text-muted hover:text-body"
                 @click="backToList"
             >
                 Cancel

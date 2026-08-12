@@ -38,51 +38,33 @@ const tabs = computed(() => [
 <template>
     <AuthenticatedLayout>
         <!-- Scorekeeper module band -->
-        <div class="border-b-4 border-[#d8b95c] bg-[#0b5d3b] text-[#f7f1e3]">
-            <div class="px-4 pt-5 sm:px-6 lg:px-8">
+        <div class="border-b border-border bg-surface-header text-body">
+            <div class="px-4 pt-4 sm:px-6 lg:px-8">
                 <div class="flex items-center gap-3">
+                    <!-- Red diamond mark (module logo color) -->
                     <svg
-                        width="38"
-                        height="38"
-                        viewBox="0 0 48 48"
-                        class="shrink-0"
+                        class="h-8 w-[27px] shrink-0"
+                        viewBox="0 0 40 48"
                         aria-hidden="true"
+                        style="filter: drop-shadow(0 0 10px rgb(var(--color-danger) / 0.45))"
                     >
-                        <rect
-                            x="4"
-                            y="10"
-                            width="26"
-                            height="26"
-                            rx="6"
-                            fill="#f7f1e3"
-                            transform="rotate(-8 17 23)"
+                        <polygon
+                            points="20,2 38,24 20,46 2,24"
+                            fill="rgb(var(--color-danger))"
                         />
-                        <circle cx="12" cy="17" r="2.6" fill="#0b5d3b" />
-                        <circle cx="22" cy="27" r="2.6" fill="#0b5d3b" />
-                        <circle cx="12" cy="27" r="2.6" fill="#d24141" />
-                        <circle cx="22" cy="17" r="2.6" fill="#d24141" />
-                        <rect
-                            x="22"
-                            y="16"
-                            width="22"
-                            height="22"
-                            rx="5"
-                            fill="#f2d27c"
-                            transform="rotate(7 33 27)"
-                        />
-                        <circle cx="33" cy="27" r="2.8" fill="#0b5d3b" />
                     </svg>
                     <div>
                         <div
-                            class="text-xl font-extrabold leading-tight tracking-tight"
+                            class="text-xl font-extrabold leading-none tracking-tight"
                         >
-                            <span class="text-[#f2d27c]">Score</span>keeper
+                            <span class="text-body">SCORE</span
+                            ><span class="text-danger">KEEPER</span>
                         </div>
                         <Dropdown align="left" width="48">
                             <template #trigger>
                                 <button
                                     type="button"
-                                    class="flex items-center gap-1 text-xs text-[#cfe4d3] hover:text-[#f7f1e3]"
+                                    class="mt-1 flex items-center gap-1 text-xs text-muted hover:text-body"
                                 >
                                     {{ household.name }}
                                     <svg
@@ -118,11 +100,11 @@ const tabs = computed(() => [
                                     >
                                     <span
                                         v-if="h.id === household.id"
-                                        class="ml-1 text-xs text-gray-400"
+                                        class="ml-1 text-xs text-primary"
                                         >✓</span
                                     >
                                 </DropdownLink>
-                                <div class="border-t border-gray-100"></div>
+                                <div class="border-t border-border"></div>
                                 <DropdownLink
                                     :href="route('scorekeeper.households.index')"
                                 >
@@ -138,7 +120,7 @@ const tabs = computed(() => [
                                 household.id,
                             )
                         "
-                        class="ml-auto whitespace-nowrap rounded-full bg-[#d24141] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#bb3535]"
+                        class="ml-auto whitespace-nowrap rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-hover"
                     >
                         ＋ New game
                     </Link>
@@ -152,8 +134,8 @@ const tabs = computed(() => [
                         class="whitespace-nowrap rounded-full border px-4 py-1.5 text-sm font-semibold transition"
                         :class="
                             t.key === tab
-                                ? 'border-[#f7f1e3] bg-[#f7f1e3] text-[#0b5d3b]'
-                                : 'border-[#f7f1e3]/40 text-[#f7f1e3]/85 hover:border-[#f7f1e3]/80 hover:text-[#f7f1e3]'
+                                ? 'border-primary/45 bg-primary/15 text-primary'
+                                : 'border-border-strong text-muted hover:border-muted hover:text-body'
                         "
                     >
                         {{ t.label }}
@@ -163,7 +145,7 @@ const tabs = computed(() => [
         </div>
 
         <!-- Module ground -->
-        <div class="min-h-screen bg-[#f6f3ea]">
+        <div class="min-h-screen bg-bg">
             <slot />
         </div>
     </AuthenticatedLayout>

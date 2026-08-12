@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import InputLabel from '@/Components/InputLabel.vue';
-import SecondaryButton from '@/Components/SecondaryButton.vue';
-import TextInput from '@/Components/TextInput.vue';
+import InputLabel from '@/Components/Scorekeeper/InputLabel.vue';
+import SecondaryButton from '@/Components/Scorekeeper/SecondaryButton.vue';
+import TextInput from '@/Components/Scorekeeper/TextInput.vue';
 import { computed, ref } from 'vue';
 
 const props = withDefaults(
@@ -81,7 +81,7 @@ const submit = () => {
         <div class="flex items-center gap-2">
             <select
                 v-model="selectValue"
-                class="rounded-md border-gray-300 bg-white text-gray-900 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                class="rounded-lg border-border-strong bg-surface-inset text-body text-sm focus:border-primary focus:ring-primary"
                 @change="onSelectChange"
             >
                 <option value="">Add a player…</option>
@@ -123,11 +123,11 @@ const submit = () => {
                 placeholder="New player name"
                 @keydown.enter.prevent="submit"
             />
-            <label class="flex items-center gap-1 text-sm text-gray-700">
+            <label class="flex items-center gap-1 text-sm text-body">
                 <input
                     v-model="addToHousehold"
                     type="checkbox"
-                    class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    class="rounded border-border-strong bg-surface-inset text-primary focus:ring-primary"
                 />
                 Add to household roster
             </label>

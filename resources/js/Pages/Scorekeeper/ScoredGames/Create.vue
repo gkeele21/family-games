@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import InputError from '@/Components/InputError.vue';
-import InputLabel from '@/Components/InputLabel.vue';
+import InputLabel from '@/Components/Scorekeeper/InputLabel.vue';
 import Modal from '@/Components/Modal.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
+import PrimaryButton from '@/Components/Scorekeeper/PrimaryButton.vue';
 import ScorekeeperLayout from '@/Layouts/ScorekeeperLayout.vue';
-import SecondaryButton from '@/Components/SecondaryButton.vue';
-import TextInput from '@/Components/TextInput.vue';
+import SecondaryButton from '@/Components/Scorekeeper/SecondaryButton.vue';
+import TextInput from '@/Components/Scorekeeper/TextInput.vue';
 import TemplateFormFields from '@/Components/Scorekeeper/TemplateFormFields.vue';
 import { Head, useForm } from '@inertiajs/vue3';
 import { computed, reactive, ref, watch } from 'vue';
@@ -184,11 +184,11 @@ const createTemplate = () => {
     <ScorekeeperLayout :household="household" tab="games">
         <div class="py-10">
             <div class="mx-auto max-w-2xl space-y-4 px-4 sm:px-6 lg:px-8">
-                <h2 class="text-xl font-semibold leading-tight text-[#0b5d3b]">
+                <h2 class="text-xl font-semibold leading-tight text-body">
                     New game
                 </h2>
                 <form
-                    class="space-y-6 overflow-hidden bg-white p-6 shadow-sm sm:rounded-lg"
+                    class="space-y-6 overflow-hidden rounded-lg border border-border bg-surface p-6"
                     @submit.prevent="submit"
                 >
                     <!-- Template -->
@@ -197,7 +197,7 @@ const createTemplate = () => {
                             <InputLabel for="template" value="Template" />
                             <button
                                 type="button"
-                                class="text-sm font-medium text-[#0b5d3b] hover:text-[#084a2f]"
+                                class="text-sm font-medium text-primary hover:text-primary-hover"
                                 @click="openTemplateModal"
                             >
                                 + New game template
@@ -206,7 +206,7 @@ const createTemplate = () => {
                         <select
                             id="template"
                             v-model="form.game_template_id"
-                            class="mt-1 block w-full rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            class="mt-1 block w-full rounded-lg border-border-strong bg-surface-inset text-body focus:border-primary focus:ring-primary"
                         >
                             <option
                                 v-for="t in templates"
@@ -229,9 +229,9 @@ const createTemplate = () => {
                             id="played-at"
                             v-model="form.played_at"
                             type="date"
-                            class="mt-1 block rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            class="mt-1 block rounded-lg border-border-strong bg-surface-inset text-body focus:border-primary focus:ring-primary"
                         />
-                        <p class="mt-1 text-xs text-gray-500">
+                        <p class="mt-1 text-xs text-muted">
                             Recording a game from a while back? Set the date it
                             was actually played.
                         </p>
@@ -254,13 +254,13 @@ const createTemplate = () => {
                                     v-model="form.player_ids"
                                     type="checkbox"
                                     :value="p.id"
-                                    class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    class="rounded border-border-strong bg-surface-inset text-primary focus:ring-primary"
                                 />
-                                <span class="text-gray-900">{{ p.name }}</span>
+                                <span class="text-body">{{ p.name }}</span>
                             </label>
                             <p
                                 v-if="players.length === 0"
-                                class="text-sm text-gray-500"
+                                class="text-sm text-muted"
                             >
                                 No players in the roster yet — add one below.
                             </p>
@@ -306,7 +306,7 @@ const createTemplate = () => {
                                 <InputLabel value="Teams" />
                                 <button
                                     type="button"
-                                    class="text-sm font-medium text-[#0b5d3b] hover:text-[#084a2f]"
+                                    class="text-sm font-medium text-primary hover:text-primary-hover"
                                     @click="addTeam"
                                 >
                                     + Add team
@@ -327,7 +327,7 @@ const createTemplate = () => {
                                     <button
                                         v-if="teams.length > 2"
                                         type="button"
-                                        class="shrink-0 text-sm text-red-600 hover:text-red-500"
+                                        class="shrink-0 text-sm text-danger hover:text-danger/80"
                                         @click="removeTeam(team.id)"
                                     >
                                         Remove
@@ -340,7 +340,7 @@ const createTemplate = () => {
                             <InputLabel value="Assign selected players" />
                             <p
                                 v-if="selectedPlayers.length === 0"
-                                class="mt-2 text-sm text-gray-500"
+                                class="mt-2 text-sm text-muted"
                             >
                                 Pick the players above, then assign each to a
                                 team.
@@ -351,12 +351,12 @@ const createTemplate = () => {
                                     :key="p.id"
                                     class="flex items-center justify-between gap-3"
                                 >
-                                    <span class="text-gray-900">{{
+                                    <span class="text-body">{{
                                         p.name
                                     }}</span>
                                     <select
                                         v-model="assignment[p.id]"
-                                        class="rounded-md border-gray-300 bg-white text-gray-900 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                        class="rounded-lg border-border-strong bg-surface-inset text-body text-sm focus:border-primary focus:ring-primary"
                                     >
                                         <option :value="null">
                                             — Pick team —
@@ -383,8 +383,8 @@ const createTemplate = () => {
 
         <!-- Inline "create template" so you never leave the New Game flow -->
         <Modal :show="showTemplateModal" @close="showTemplateModal = false">
-            <form class="space-y-4 p-6" @submit.prevent="createTemplate">
-                <h3 class="text-lg font-medium text-[#0b5d3b]">
+            <form class="space-y-4 bg-surface p-6 text-body" @submit.prevent="createTemplate">
+                <h3 class="text-lg font-medium text-body">
                     New game template
                 </h3>
                 <TemplateFormFields

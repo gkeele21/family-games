@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import DangerButton from '@/Components/DangerButton.vue';
+import DangerButton from '@/Components/Scorekeeper/DangerButton.vue';
 import InputError from '@/Components/InputError.vue';
-import InputLabel from '@/Components/InputLabel.vue';
+import InputLabel from '@/Components/Scorekeeper/InputLabel.vue';
 import InvitePlayerControl from '@/Components/Scorekeeper/InvitePlayerControl.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
+import PrimaryButton from '@/Components/Scorekeeper/PrimaryButton.vue';
 import ScorekeeperLayout from '@/Layouts/ScorekeeperLayout.vue';
-import SecondaryButton from '@/Components/SecondaryButton.vue';
-import TextInput from '@/Components/TextInput.vue';
+import SecondaryButton from '@/Components/Scorekeeper/SecondaryButton.vue';
+import TextInput from '@/Components/Scorekeeper/TextInput.vue';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
@@ -78,10 +78,10 @@ const removePlayer = (person: { player_id: number | null; name: string }) => {
 
 const roleChipClass = (role: string) =>
     role === 'owner'
-        ? 'bg-[#f8edc9] text-[#6b5407]'
+        ? 'bg-warning/15 text-warning'
         : role === 'guest'
-          ? 'bg-gray-100 text-gray-600'
-          : 'bg-[#d9f3e5] text-[#0b7a48]';
+          ? 'bg-surface-overlay text-muted'
+          : 'bg-primary/15 text-primary';
 
 // Invite someone who isn't on the roster (full-access invite).
 const inviteForm = useForm({ email: '', role: 'member' });
@@ -116,23 +116,23 @@ const rename = () => {
             <div class="mx-auto max-w-4xl space-y-6 px-4 sm:px-6 lg:px-8">
                 <div
                     v-if="page.props.flash?.success"
-                    class="rounded-md bg-green-50 p-4 text-sm text-green-800"
+                    class="rounded-lg border border-primary/30 bg-primary/10 p-4 text-sm text-primary"
                 >
                     {{ page.props.flash.success }}
                 </div>
 
                 <!-- Which household this is + household-level actions -->
-                <div class="overflow-hidden bg-white shadow-sm sm:rounded-lg">
+                <div class="overflow-hidden rounded-lg border border-border bg-surface">
                     <div
                         class="flex flex-wrap items-center justify-between gap-3 px-6 py-4"
                     >
                         <div v-if="!editing">
                             <p
-                                class="text-xs font-medium uppercase tracking-wide text-gray-400"
+                                class="text-xs font-medium uppercase tracking-wide text-subtle"
                             >
                                 Household
                             </p>
-                            <h3 class="text-lg font-medium text-[#0b5d3b]">
+                            <h3 class="text-lg font-medium text-body">
                                 {{ household.name }}
                             </h3>
                         </div>
@@ -174,7 +174,7 @@ const rename = () => {
                             >
                             <Link
                                 :href="route('scorekeeper.households.index')"
-                                class="text-sm font-medium text-[#0b5d3b] hover:text-[#084a2f]"
+                                class="text-sm font-medium text-primary hover:text-primary-hover"
                                 >Switch or manage households &rarr;</Link
                             >
                         </span>
@@ -182,19 +182,19 @@ const rename = () => {
                 </div>
 
                 <!-- Everyone: roster players + account members -->
-                <div class="overflow-hidden bg-white shadow-sm sm:rounded-lg">
+                <div class="overflow-hidden rounded-lg border border-border bg-surface">
                     <div class="border-b px-6 py-4">
-                        <h3 class="text-lg font-medium text-[#0b5d3b]">
+                        <h3 class="text-lg font-medium text-body">
                             People
                         </h3>
-                        <p class="mt-1 text-sm text-gray-500">
+                        <p class="mt-1 text-sm text-muted">
                             Everyone in this household — players you keep score
                             for (no account needed) and family with their own
                             login. Invite a player and they'll see their games
                             and scores on their own device.
                         </p>
                     </div>
-                    <ul class="divide-y divide-gray-100">
+                    <ul class="divide-y divide-border">
                         <li
                             v-for="person in people"
                             :key="`${person.player_id ?? 'u'}-${person.name}-${person.email}`"
@@ -202,7 +202,7 @@ const rename = () => {
                         >
                             <div>
                                 <span
-                                    class="flex items-center gap-2 text-gray-900"
+                                    class="flex items-center gap-2 text-body"
                                 >
                                     {{ person.name }}
                                     <span
@@ -213,19 +213,19 @@ const rename = () => {
                                     >
                                     <span
                                         v-else-if="person.has_account"
-                                        class="rounded-full bg-[#d9f3e5] px-2 py-0.5 text-xs font-medium text-[#0b7a48]"
+                                        class="rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info"
                                         title="This player has an account"
                                         >linked</span
                                     >
                                     <span
                                         v-else
-                                        class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500"
+                                        class="rounded-full bg-surface-overlay px-2 py-0.5 text-xs font-medium text-subtle"
                                         >no account</span
                                     >
                                 </span>
                                 <p
                                     v-if="person.email"
-                                    class="text-sm text-gray-500"
+                                    class="text-sm text-muted"
                                 >
                                     {{ person.email }}
                                 </p>
@@ -248,7 +248,7 @@ const rename = () => {
                         </li>
                         <li
                             v-if="people.length === 0"
-                            class="px-6 py-3 text-sm text-gray-500"
+                            class="px-6 py-3 text-sm text-muted"
                         >
                             No people yet — add the people you play with (they
                             don't need accounts).
@@ -276,7 +276,7 @@ const rename = () => {
                                     suggestionsOpen &&
                                     matchingSuggestions.length
                                 "
-                                class="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg"
+                                class="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-border bg-surface-elevated shadow-lg"
                             >
                                 <li
                                     v-for="s in matchingSuggestions"
@@ -284,13 +284,13 @@ const rename = () => {
                                 >
                                     <button
                                         type="button"
-                                        class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-gray-50"
+                                        class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-surface-inset"
                                         @click="pickSuggestion(s)"
                                     >
-                                        <span class="text-gray-900">{{
+                                        <span class="text-body">{{
                                             s.name
                                         }}</span>
-                                        <span class="text-xs text-gray-400">{{
+                                        <span class="text-xs text-subtle">{{
                                             s.source
                                         }}</span>
                                     </button>
@@ -308,12 +308,12 @@ const rename = () => {
                 </div>
 
                 <!-- Full-access invite for someone not on the roster -->
-                <div class="overflow-hidden bg-white shadow-sm sm:rounded-lg">
+                <div class="overflow-hidden rounded-lg border border-border bg-surface">
                     <div class="border-b px-6 py-4">
-                        <h3 class="text-lg font-medium text-[#0b5d3b]">
+                        <h3 class="text-lg font-medium text-body">
                             Invite someone who doesn't play
                         </h3>
-                        <p class="mt-1 text-sm text-gray-500">
+                        <p class="mt-1 text-sm text-muted">
                             Gives full access to this household — roster,
                             templates, and game history — without adding them
                             to the roster. To invite a player, use the Invite
@@ -343,7 +343,7 @@ const rename = () => {
                             <select
                                 id="role"
                                 v-model="inviteForm.role"
-                                class="mt-1 rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                class="mt-1 rounded-md border-border-strong bg-surface-inset text-body shadow-sm focus:border-primary focus:ring-primary"
                             >
                                 <option value="member">Member</option>
                                 <option value="guest">Guest</option>
