@@ -84,8 +84,9 @@ class DashboardController extends Controller
             ->sortByDesc('updated_at')
             ->values();
 
-        // Recent completed trivia games
-        $recentTriviaGames = GameSession::with(['gameType', 'teams', 'sessionPlayers.user'])
+        // Recent completed trivia games. "Who played" comes from the attendance
+        // roster (game_session_players), which is editable from this list.
+        $recentTriviaGames = GameSession::with(['gameType', 'teams', 'players'])
             ->where('host_user_id', $user->id)
             ->where('status', 'completed')
             ->orderByDesc('completed_at')
@@ -93,22 +94,19 @@ class DashboardController extends Controller
             ->get()
             ->map(function (GameSession $g) {
                 $winner = $g->teams->sortByDesc('total_score')->first();
-                $players = $g->sessionPlayers
-                    ->map(fn ($p) => (object) ['id' => $p->id, 'name' => $p->display_name]);
-                $display = $this->scoreGameService->displayNames($players);
+                $players = $g->players->sortBy('name');
 
                 return [
-                    'kind'         => 'trivia',
-                    'id'           => $g->id,
-                    'code'         => null,
-                    'name'         => $g->name ?: $g->gameType->name,
-                    'game_type'    => ['name' => $g->gameType->name, 'slug' => $g->gameType->slug],
-                    'finished_at'  => $g->completed_at ?? $g->created_at,
-                    'player_count' => $players->count(),
-                    'players'      => $players
-                        ->map(fn ($p) => $display[$p->id] ?? $p->name)
-                        ->values(),
-                    'winners'      => $winner
+                    'kind'               => 'trivia',
+                    'id'                 => $g->id,
+                    'code'               => null,
+                    'name'               => $g->name ?: $g->gameType->name,
+                    'game_type'          => ['name' => $g->gameType->name, 'slug' => $g->gameType->slug],
+                    'finished_at'        => $g->completed_at ?? $g->created_at,
+                    'player_count'       => $players->count(),
+                    'players'            => $players->pluck('name')->values(),
+                    'present_player_ids' => $players->pluck('id')->values(),
+                    'winners'            => $winner
                         ? [['name' => $winner->name, 'color' => $winner->color, 'score' => $winner->total_score]]
                         : [],
                 ];
@@ -250,9 +248,20 @@ class DashboardController extends Controller
             ->keys()
             ->first();
 
+        // Household rosters for the "who played" editor on recent trivia games.
+        $attendanceRosters = $user->households()
+            ->with(['players' => fn ($q) => $q->orderBy('name')])
+            ->get()
+            ->map(fn ($h) => [
+                'id' => $h->id,
+                'name' => $h->name,
+                'players' => $h->players->map(fn ($p) => ['id' => $p->id, 'name' => $p->name])->values(),
+            ])->values();
+
         return Inertia::render('Dashboard', [
             'activeGames' => $activeGames,
             'recentGames' => $recentGames,
+            'attendanceRosters' => $attendanceRosters,
             'stats' => [
                 'totalGamesHosted' => $totalGamesHosted,
                 'completedGames' => $completedGames,

@@ -2,8 +2,12 @@
 import StandardLayout from '@/Layouts/StandardLayout.vue';
 import GameWordmark from '@/Components/GameWordmark.vue';
 import GameBadge from '@/Components/GameBadge.vue';
+import Modal from '@/Components/Base/Modal.vue';
+import Button from '@/Components/Base/Button.vue';
+import Select from '@/Components/Form/Select.vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
+import axios from 'axios';
 
 interface ActiveGame {
     kind: 'trivia' | 'scorekeeper' | 'propoff';
@@ -33,12 +37,17 @@ interface RecentGame {
     finished_at: string;
     player_count: number;
     players: string[];
+    present_player_ids?: number[];
     winners: Winner[];
 }
 
-defineProps<{
+interface RosterPlayer { id: number; name: string }
+interface AttendanceHousehold { id: number; name: string; players: RosterPlayer[] }
+
+const props = defineProps<{
     activeGames: ActiveGame[];
     recentGames: RecentGame[];
+    attendanceRosters: AttendanceHousehold[];
 }>();
 
 // Top-menu links to the three game modules (same set as /games).
@@ -55,6 +64,73 @@ const joinCode = ref('');
 const join = () => {
     const code = joinCode.value.trim().toUpperCase();
     router.get(route('player.join'), code ? { code } : {});
+};
+
+// ---- "Who played" editor (post-hoc attendance on recent trivia games) ----
+const playerName = new Map<number, string>();
+props.attendanceRosters.forEach((h) => h.players.forEach((p) => playerName.set(p.id, p.name)));
+const hasRoster = props.attendanceRosters.some((h) => h.players.length);
+
+// Live attendance per game so edits reflect immediately without a page reload.
+const attendanceState = ref<Record<number, number[]>>({});
+props.recentGames.forEach((g) => {
+    if (g.kind === 'trivia') attendanceState.value[g.id] = g.present_player_ids ?? [];
+});
+
+const canEditPlayers = (game: RecentGame) => game.kind === 'trivia' && hasRoster;
+const displayPlayers = (game: RecentGame): string[] =>
+    game.kind === 'trivia'
+        ? (attendanceState.value[game.id] ?? []).map((id) => playerName.get(id)).filter((n): n is string => !!n)
+        : game.players;
+const displayCount = (game: RecentGame): number =>
+    game.kind === 'trivia' ? (attendanceState.value[game.id] ?? []).length : game.player_count;
+
+const editing = ref<RecentGame | null>(null);
+const editHouseholdId = ref<number | null>(null);
+const editPresent = ref<Set<number>>(new Set());
+const saving = ref(false);
+
+const householdOptions = computed(() =>
+    props.attendanceRosters.map((h) => ({ value: h.id, label: `${h.name} (${h.players.length})` })),
+);
+const editRoster = computed<RosterPlayer[]>(() =>
+    props.attendanceRosters.find((h) => h.id === editHouseholdId.value)?.players ?? [],
+);
+const allEditPresent = computed(() =>
+    editRoster.value.length > 0 && editRoster.value.every((p) => editPresent.value.has(p.id)),
+);
+
+const openEditor = (game: RecentGame) => {
+    editing.value = game;
+    editPresent.value = new Set(attendanceState.value[game.id] ?? []);
+    // Default to the household that already holds the attendees, else the first.
+    editHouseholdId.value =
+        props.attendanceRosters.find((h) => h.players.some((p) => editPresent.value.has(p.id)))?.id
+        ?? props.attendanceRosters[0]?.id
+        ?? null;
+};
+const toggleEdit = (playerId: number) => {
+    const next = new Set(editPresent.value);
+    next.has(playerId) ? next.delete(playerId) : next.add(playerId);
+    editPresent.value = next;
+};
+const toggleAllEdit = () => {
+    const next = new Set(editPresent.value);
+    if (allEditPresent.value) editRoster.value.forEach((p) => next.delete(p.id));
+    else editRoster.value.forEach((p) => next.add(p.id));
+    editPresent.value = next;
+};
+const saveEditor = async () => {
+    if (!editing.value) return;
+    saving.value = true;
+    const ids = [...editPresent.value];
+    try {
+        await axios.post(route('host.attendance', editing.value.id), { player_ids: ids });
+        attendanceState.value = { ...attendanceState.value, [editing.value.id]: ids };
+        editing.value = null;
+    } finally {
+        saving.value = false;
+    }
 };
 
 const getStatusBadge = (status: string) => {
@@ -245,12 +321,21 @@ const getActiveGameLink = (game: ActiveGame) => {
                             <h4 class="font-semibold text-body">{{ game.name || game.game_type.name }}</h4>
                             <div class="truncate text-sm text-muted">
                                 {{ formatDate(game.finished_at) }}
-                                <template v-if="game.player_count > 0">
-                                    &middot; {{ game.player_count }} {{ game.player_count === 1 ? 'player' : 'players' }}
+                                <template v-if="displayCount(game) > 0">
+                                    &middot; {{ displayCount(game) }} {{ displayCount(game) === 1 ? 'player' : 'players' }}
                                 </template>
-                                <template v-if="game.players.length"> &middot; {{ game.players.join(', ') }}</template>
+                                <template v-if="displayPlayers(game).length"> &middot; {{ displayPlayers(game).join(', ') }}</template>
                             </div>
                         </div>
+                        <button
+                            v-if="canEditPlayers(game)"
+                            type="button"
+                            class="flex-none rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted transition hover:border-border-strong hover:text-body"
+                            title="Edit who played"
+                            @click.stop.prevent="openEditor(game)"
+                        >
+                            ✎ Players
+                        </button>
                         <div class="whitespace-nowrap text-right text-sm">
                             <div v-if="game.winners.length" class="flex items-center gap-2">
                                 <span class="text-lg text-gold">&#127942;</span>
@@ -268,6 +353,37 @@ const getActiveGameLink = (game: ActiveGame) => {
                 </div>
             </div>
         </div>
+
+        <!-- Who-played editor for a recent trivia game -->
+        <Modal :show="editing !== null" max-width="lg" @close="editing = null">
+            <div class="p-6">
+                <h3 class="text-base font-semibold text-body">Who played?</h3>
+                <p class="mt-0.5 text-sm text-muted">{{ editing?.name }}</p>
+
+                <div class="mt-4 flex flex-wrap items-center gap-2">
+                    <Select v-if="householdOptions.length > 1" v-model="editHouseholdId" :options="householdOptions" />
+                    <span class="text-xs text-subtle">{{ editPresent.size }} selected</span>
+                    <Button variant="muted" size="xs" class="ml-auto" @click="toggleAllEdit">{{ allEditPresent ? 'Clear all' : 'Select all' }}</Button>
+                </div>
+
+                <div class="mt-3 flex flex-wrap gap-2">
+                    <button
+                        v-for="p in editRoster"
+                        :key="p.id"
+                        type="button"
+                        :class="['rounded-full border px-3 py-1.5 text-sm transition', editPresent.has(p.id) ? 'border-primary bg-primary/10 text-body' : 'border-border bg-surface-inset text-muted hover:border-border-strong']"
+                        @click="toggleEdit(p.id)"
+                    >
+                        <span v-if="editPresent.has(p.id)" class="mr-1 text-primary">✓</span>{{ p.name }}
+                    </button>
+                </div>
+
+                <div class="mt-6 flex items-center justify-end gap-2">
+                    <Button variant="secondary" size="md" @click="editing = null">Cancel</Button>
+                    <Button variant="primary" size="md" :disabled="saving" @click="saveEditor">{{ saving ? 'Saving…' : 'Save' }}</Button>
+                </div>
+            </div>
+        </Modal>
     </StandardLayout>
 </template>
 

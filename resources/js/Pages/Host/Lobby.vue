@@ -12,6 +12,7 @@ import Confirm from '@/Components/Feedback/Confirm.vue';
 import BlankText from '@/Components/BlankText.vue';
 import { Head, Link, useForm, router } from '@inertiajs/vue3';
 import { ref, computed, watch, onMounted } from 'vue';
+import axios from 'axios';
 
 interface TeamMember {
     id: number;
@@ -63,6 +64,15 @@ interface QuestionData { bank: BankQuestion[] }
 interface Slot { id: number | null; pinned: boolean }
 interface QSelection { regular: Slot[][]; final: Slot[] }
 
+interface RosterPlayer { id: number; name: string }
+interface AttendanceHousehold { id: number; name: string; players: RosterPlayer[] }
+interface AttendanceData {
+    households: AttendanceHousehold[];
+    present: number[];
+    seenByPlayer: Record<number, number[]>;
+    defaultHouseholdId: number | null;
+}
+
 interface Props {
     gameSession: GameSession;
     config: Record<string, any>;
@@ -70,6 +80,7 @@ interface Props {
     waitingPlayers: WaitingPlayer[];
     gameTypes: GameTypeOption[];
     questionData: QuestionData | null;
+    attendanceData: AttendanceData | null;
 }
 
 const props = defineProps<Props>();
@@ -390,14 +401,67 @@ const finalSlotCount = computed(() =>
     gameSlug.value === 'family-feud' ? 5 : Number(settingsForm.settings.final_round_questions ?? 4),
 );
 
+// ---- Attendance: who's playing tonight (household roster) ----
+// Drives the "already seen this question" signal — any question a present player
+// has been served in a past game is flagged and de-prioritised by the picker.
+const attendance = computed(() => props.attendanceData);
+const attendanceHouseholds = computed(() => attendance.value?.households ?? []);
+const hasRoster = computed(() => attendanceHouseholds.value.some((h) => h.players.length));
+const selectedHouseholdId = ref<number | null>(
+    attendance.value?.defaultHouseholdId ?? attendanceHouseholds.value[0]?.id ?? null,
+);
+const householdOptions = computed(() =>
+    attendanceHouseholds.value.map((h) => ({ value: h.id, label: `${h.name} (${h.players.length})` })),
+);
+const activeRoster = computed<RosterPlayer[]>(() =>
+    attendanceHouseholds.value.find((h) => h.id === selectedHouseholdId.value)?.players ?? [],
+);
+const presentIds = ref<Set<number>>(new Set(attendance.value?.present ?? []));
+const presentCount = computed(() => presentIds.value.size);
+
+const saveAttendance = () => {
+    axios.post(route('host.attendance', props.gameSession.id), { player_ids: [...presentIds.value] });
+};
+const togglePresent = (playerId: number) => {
+    const next = new Set(presentIds.value);
+    next.has(playerId) ? next.delete(playerId) : next.add(playerId);
+    presentIds.value = next;
+    saveAttendance();
+};
+const allRosterPresent = computed(() =>
+    activeRoster.value.length > 0 && activeRoster.value.every((p) => presentIds.value.has(p.id)),
+);
+const toggleAllRoster = () => {
+    const next = new Set(presentIds.value);
+    if (allRosterPresent.value) activeRoster.value.forEach((p) => next.delete(p.id));
+    else activeRoster.value.forEach((p) => next.add(p.id));
+    presentIds.value = next;
+    saveAttendance();
+};
+
+// question_id -> how many present players have already seen it
+const groupSeenCounts = computed<Map<number, number>>(() => {
+    const seenByPlayer = attendance.value?.seenByPlayer ?? {};
+    const counts = new Map<number, number>();
+    presentIds.value.forEach((pid) => {
+        (seenByPlayer[pid] ?? []).forEach((qid) => counts.set(qid, (counts.get(qid) ?? 0) + 1));
+    });
+    return counts;
+});
+const groupSeenIds = computed<Set<number>>(() => new Set(groupSeenCounts.value.keys()));
+const seenBy = (id: number | null) => (id == null ? 0 : groupSeenCounts.value.get(id) ?? 0);
+
 // ---- slot grid: regular = rounds x teams, final = N answer-count slots ----
 // Prefer the least-used questions: pick at random among those tied at the lowest
-// times_used, so the library rotates through everything before repeating.
+// times_used, so the library rotates through everything before repeating. When a
+// group is present, questions none of them have seen win over already-seen ones.
 const pickRandom = (pool: { id: number; times_used?: number }[], exclude: Set<number>): number | null => {
     const avail = pool.filter((q) => !exclude.has(q.id));
     if (!avail.length) return null;
-    const min = Math.min(...avail.map((q) => q.times_used ?? 0));
-    const leastUsed = avail.filter((q) => (q.times_used ?? 0) === min);
+    const unseen = avail.filter((q) => !groupSeenIds.value.has(q.id));
+    const pickFrom = unseen.length ? unseen : avail;
+    const min = Math.min(...pickFrom.map((q) => q.times_used ?? 0));
+    const leastUsed = pickFrom.filter((q) => (q.times_used ?? 0) === min);
     return leastUsed[Math.floor(Math.random() * leastUsed.length)].id;
 };
 const usedRegular = () => {
@@ -489,6 +553,12 @@ const slotMeta = (id: number | null) => {
     const q = id != null ? questionById.value.get(id) : null;
     if (!q) return '';
     return `${q.answers_count} answers · used ${q.times_used}×`;
+};
+// Usage count alone — the tiered final slots already state the answer count via
+// their "Needs N answers" hint, so we only append how often it's been played.
+const slotUsed = (id: number | null) => {
+    const q = id != null ? questionById.value.get(id) : null;
+    return q ? `used ${q.times_used}×` : '';
 };
 
 const questionSelectionReady = computed(() => {
@@ -646,6 +716,37 @@ const copyDisplayUrl = () => {
                 </div>
             </Card>
 
+            <!-- Who's playing? (attendance → drives the "already seen" question signal) -->
+            <Card v-if="isPickerGame && attendance" title="Who's playing?">
+                <template #headerActions>
+                    <span class="text-sm text-muted">{{ presentCount }} {{ presentCount === 1 ? 'person' : 'people' }}</span>
+                </template>
+
+                <div v-if="!hasRoster" class="text-sm text-muted">
+                    No roster yet.
+                    <Link :href="route('scorekeeper.home')" class="font-semibold text-primary hover:underline">Add the people you play with</Link>
+                    to a household, then check who's here — we'll flag questions the group has already been asked.
+                </div>
+                <template v-else>
+                    <div class="mb-3 flex flex-wrap items-center gap-2">
+                        <Select v-if="householdOptions.length > 1" v-model="selectedHouseholdId" :options="householdOptions" />
+                        <span class="text-xs text-subtle">Check everyone at the table — questions this group has already been asked get flagged and skipped when filling slots at random.</span>
+                        <Button variant="muted" size="xs" class="ml-auto" @click="toggleAllRoster">{{ allRosterPresent ? 'Clear all' : 'Select all' }}</Button>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button
+                            v-for="p in activeRoster"
+                            :key="p.id"
+                            type="button"
+                            :class="['rounded-full border px-3 py-1.5 text-sm transition', presentIds.has(p.id) ? 'border-primary bg-primary/10 text-body' : 'border-border bg-surface-inset text-muted hover:border-border-strong']"
+                            @click="togglePresent(p.id)"
+                        >
+                            <span v-if="presentIds.has(p.id)" class="mr-1 text-primary">✓</span>{{ p.name }}
+                        </button>
+                    </div>
+                </template>
+            </Card>
+
             <!-- Questions (per-slot picker: America Says + Family Feud) -->
             <Card v-if="isPickerGame" title="Questions">
                 <template #headerActions>
@@ -687,6 +788,7 @@ const copyDisplayUrl = () => {
                                 <span v-else-if="assignedLabels.has(q.id)" class="flex-none whitespace-nowrap rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-semibold text-primary">{{ assignedLabels.get(q.id) }}</span>
                                 <span class="flex-none whitespace-nowrap text-xs text-subtle">{{ q.answers_count }} ans</span>
                                 <span class="flex-none whitespace-nowrap text-xs text-muted" title="Times used in completed games">{{ q.times_used }}× used</span>
+                                <span v-if="seenBy(q.id)" class="flex-none whitespace-nowrap rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(q.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(q.id) }}</span>
                             </button>
                             <p v-if="!activeList.length" class="px-3 py-6 text-center text-sm text-muted">No matching questions.</p>
                         </div>
@@ -717,6 +819,7 @@ const copyDisplayUrl = () => {
                                                 <template v-else>{{ slot.id ? slotMeta(slot.id) : 'Face-off — both teams play' }}</template>
                                             </span>
                                         </span>
+                                        <span v-if="seenBy(slot.id)" class="flex-none rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(slot.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(slot.id) }}</span>
                                         <Button variant="muted" size="xs" class="flex-none" @click.stop="swapRegular(i, j)">⇄ Swap</Button>
                                     </div>
                                 </div>
@@ -744,9 +847,10 @@ const copyDisplayUrl = () => {
                                     <span class="flex-none rounded-md bg-surface-elevated px-2 py-1 text-[10px] font-bold text-info">{{ finalSlotBadge(i) }}</span>
                                     <span class="min-w-0 flex-1">
                                         <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>{{ finalEmptyText(i) }}</template></span>
-                                        <span v-if="finalTiered" class="block text-xs text-subtle">Needs {{ i + 1 }} answer{{ i === 0 ? '' : 's' }}</span>
+                                        <span v-if="finalTiered" class="block text-xs text-subtle">Needs {{ i + 1 }} answer{{ i === 0 ? '' : 's' }}<template v-if="slot.id"> · {{ slotUsed(slot.id) }}</template></span>
                                         <span v-else-if="slot.id" class="block text-xs text-subtle">{{ slotMeta(slot.id) }}</span>
                                     </span>
+                                    <span v-if="seenBy(slot.id)" class="flex-none rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(slot.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(slot.id) }}</span>
                                     <Button v-if="slot.id" variant="muted" size="xs" class="flex-none" @click.stop="swapFinal(i)">⇄ Swap</Button>
                                 </div>
                             </div>

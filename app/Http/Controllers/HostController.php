@@ -44,7 +44,69 @@ class HostController extends Controller
             'waitingPlayers' => $waitingPlayers,
             'gameTypes' => \App\Models\GameType::online()->get(['id', 'name', 'slug']),
             'questionData' => $this->questionSelectionData($gameSession),
+            'attendanceData' => $this->attendanceData($gameSession),
         ]);
+    }
+
+    /**
+     * Data backing the "Who's playing?" setup card: the host's household rosters,
+     * who's currently marked present for this game, and — the whole point — which
+     * questions each roster player has already been served in past completed
+     * games. The picker uses that last map to flag/avoid repeats for tonight's
+     * group. Only built for the bank-backed games (America Says / Family Feud).
+     */
+    protected function attendanceData(GameSession $gameSession): ?array
+    {
+        if (!in_array($gameSession->gameType->slug, ['america-says', 'family-feud'], true)) {
+            return null;
+        }
+
+        $user = auth()->user();
+        $households = $user->households()
+            ->with(['players' => fn ($q) => $q->orderBy('name')])
+            ->get();
+
+        $present = $gameSession->players()->pluck('players.id');
+
+        if ($households->isEmpty()) {
+            return ['households' => [], 'present' => $present->values(), 'seenByPlayer' => (object) [], 'defaultHouseholdId' => null];
+        }
+
+        $rosterIds = $households->flatMap->players->pluck('id');
+
+        // player_id => [question_id, ...] seen across completed games they attended
+        // (excluding this session, which isn't played yet).
+        $seenByPlayer = \DB::table('game_session_players as gsp')
+            ->join('game_sessions as gs', 'gs.id', '=', 'gsp.game_session_id')
+            ->join('session_questions as sq', 'sq.game_session_id', '=', 'gsp.game_session_id')
+            ->where('gs.status', 'completed')
+            ->where('gs.id', '!=', $gameSession->id)
+            ->whereIn('gsp.player_id', $rosterIds)
+            ->select('gsp.player_id', 'sq.question_id')
+            ->distinct()
+            ->get()
+            ->groupBy('player_id')
+            ->map(fn ($rows) => $rows->pluck('question_id')->values());
+
+        // Default the picker to the household that already has attendees, else
+        // the user's remembered household, else their first.
+        $default = $present->isNotEmpty()
+            ? $households->first(fn ($h) => $h->players->pluck('id')->intersect($present)->isNotEmpty())?->id
+            : null;
+        $default ??= $households->contains('id', $user->last_household_id)
+            ? $user->last_household_id
+            : $households->first()->id;
+
+        return [
+            'households' => $households->map(fn ($h) => [
+                'id' => $h->id,
+                'name' => $h->name,
+                'players' => $h->players->map(fn ($p) => ['id' => $p->id, 'name' => $p->name])->values(),
+            ])->values(),
+            'present' => $present->values(),
+            'seenByPlayer' => $seenByPlayer->isEmpty() ? (object) [] : $seenByPlayer,
+            'defaultHouseholdId' => $default,
+        ];
     }
 
     /**
@@ -643,6 +705,26 @@ class HostController extends Controller
             'status' => 'completed',
             'completed_at' => now(),
         ]);
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Record who was present for this game (household roster players). Works at
+     * any status so attendance can be fixed after the fact, not only at setup.
+     */
+    public function setAttendance(Request $request, GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'player_ids' => 'present|array',
+            'player_ids.*' => 'integer|exists:players,id',
+        ]);
+
+        $gameSession->players()->sync($validated['player_ids']);
 
         return response()->json(['success' => true]);
     }
