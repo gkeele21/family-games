@@ -175,13 +175,20 @@ const fetchState = async () => {
 };
 
 const onTimerExpired = () => {
-    // Regular rounds: nothing automatic — the host keeps revealing or hands the
-    // turn over. Final round: the moment the budget hits 0 the team is out of
-    // time, so drop into review automatically (once).
+    // Final round: the moment the budget hits 0 the team is out of time, so drop
+    // into review automatically (once). Regular rounds: the primary's time is up,
+    // so auto-hand the board to the other team for the steal (once) — unless the
+    // primary already cleared it (server will have moved us to recap).
+    // Fire once per timer run (reset by startTimer/resetTimer) so a repeated
+    // @expired can't double-hand the steal and flip control back.
+    if (timerExpiredHandled.value) return;
     timerExpiredHandled.value = true;
     if (isFinal.value && phase.value === 'final_play' && !finalTimeoutFired.value) {
         finalTimeoutFired.value = true;
         finalTimeout();
+    } else if (isAmericaSays && !isFinal.value && !isTiebreaker.value
+        && phase.value === 'question' && !allAnswersRevealed.value) {
+        stealStart();
     }
 };
 
@@ -463,14 +470,20 @@ const otherTeam = computed<Team | null>(() =>
 const roundStepIndex = computed(() => {
     if (phase.value === 'intro') return 0;
     if (phase.value === 'recap') return 3;
+    if (phase.value === 'steal') return 2;
     return timerRunning.value ? 2 : 1; // question phase: idle vs running
 });
 const roundSteps = computed(() => {
     const rn = gameState.value?.round_number ?? 1;
+    const primaryName = primaryTeam.value?.name ?? 'the primary team';
+    const stealName = stealTeam.value?.name ?? 'the other team';
+    const playHint = phase.value === 'steal'
+        ? `${stealName} is stealing — reveal each correct steal (they score). The first wrong steal ends the board.`
+        : `${primaryName} is up: reveal answers as they’re guessed. When their time runs out it hands to the other team to steal.`;
     return [
         { title: 'Round Intro', hint: `Round ${rn} is on the board. Show the question when you’re ready to read it.` },
         { title: 'Question Shown', hint: 'Just the question is on the board — answers still hidden, no clock. Read it aloud, then start the timer.' },
-        { title: 'Team\'s Playing', hint: 'The answer board and clock are up. Reveal answers as they’re guessed. Hand control to the other team to steal. When you’re done, show the scores.' },
+        { title: phase.value === 'steal' ? 'Steal' : 'Team\'s Playing', hint: playHint },
         { title: 'Scores', hint: 'The scoreboard is on the board. Move on to the next question.' },
     ];
 });
@@ -518,6 +531,46 @@ const buzzWrong = async () => {
         stealActive.value = false;
     }
     await axios.post(route('host.buzz.wrong', props.gameSession.id));
+    fetchState();
+};
+
+// ---- America Says smart steal flow --------------------------------------------
+// During the primary team's turn the board only ends on timer-out or a full clear;
+// then control auto-hands to the other team for an untimed steal (they keep going
+// while correct). The first wrong steal ends the board and reveals the misses.
+// Whoever holds the turn is "active": that's the primary during their own turn,
+// and the stealing team once we've handed over. Derive both sides from the phase
+// (2-team game) so labels stay right in either phase.
+const activeTurnTeam = computed<Team | null>(() =>
+    teams.value.find(t => t.id === gameState.value?.active_team_id) ?? null
+);
+const idleTurnTeam = computed<Team | null>(() =>
+    teams.value.find(t => t.id !== gameState.value?.active_team_id) ?? null
+);
+const primaryTeam = computed<Team | null>(() =>
+    phase.value === 'steal' ? idleTurnTeam.value : activeTurnTeam.value
+);
+const stealTeam = computed<Team | null>(() =>
+    phase.value === 'steal' ? activeTurnTeam.value : idleTurnTeam.value
+);
+
+// Hand the board to the other team for the steal (auto on timer-out, or manual).
+const stealStart = async () => {
+    await axios.post(route('host.steal.start', props.gameSession.id));
+    fetchState();
+};
+// The stealing team guessed wrong — end the board, reveal the misses, show scores.
+const stealWrong = async () => {
+    await axios.post(route('host.steal.wrong', props.gameSession.id));
+    fetchState();
+};
+// Correction: the auto-hand to steal was premature — give control back to the
+// primary and return to their (paused) turn so the host can fix things.
+const backToPrimary = async () => {
+    const primaryId = primaryTeam.value?.id;
+    if (!primaryId) return;
+    await axios.post(route('host.control.team', props.gameSession.id), { team_id: primaryId });
+    await axios.post(route('host.question.show', props.gameSession.id));
     fetchState();
 };
 
@@ -703,10 +756,6 @@ const finalStatusList = computed(() =>
 );
 const finalStatusLabel: Record<string, string> = { done: 'Completed', current: 'On now', skipped: 'Skipped', upcoming: 'Up next' };
 
-const giveControlToOther = () => {
-    if (otherTeam.value) selectControllingTeam(otherTeam.value.id);
-};
-
 // Dismiss the "All Answers Revealed" bonus prompt for this question (no sweep).
 const dismissBonus = () => {
     if (currentQuestion.value) bonusDismissedQuestionId.value = currentQuestion.value.id;
@@ -846,16 +895,17 @@ onUnmounted(() => {
                                         <Button v-else-if="isLastQuestion" variant="secondary" size="sm" @click="endGame">End Game</Button>
                                         <Button v-else variant="primary" size="sm" @click="advanceQuestion">Next Question &rarr;</Button>
                                     </template>
+                                    <!-- Steal: the other team is grabbing leftovers -->
+                                    <template v-if="phase === 'steal'">
+                                        <Button variant="danger" size="sm" @click="stealWrong">Wrong steal — end board &rarr;</Button>
+                                        <Button v-if="primaryTeam" variant="secondary" size="sm" @click="backToPrimary">Back to {{ primaryTeam.name }}</Button>
+                                    </template>
                                     <template v-else-if="!timerRunning">
                                         <Button variant="primary" size="sm" @click="startTimer">{{ startTimerLabel }}</Button>
                                     </template>
+                                    <!-- Primary team's turn: reveal their answers; hand to the steal early if they’re done -->
                                     <template v-else>
-                                        <Button v-if="otherTeam" variant="primary" size="sm" @click="giveControlToOther">Give control to {{ otherTeam.name }}</Button>
-                                        <Button
-                                            :variant="revealWithoutPoints ? 'primary' : 'secondary'"
-                                            size="sm"
-                                            @click="revealWithoutPoints = !revealWithoutPoints"
-                                        >{{ revealWithoutPoints ? '✓ Revealing without points' : 'Reveal remaining (no points)' }}</Button>
+                                        <Button v-if="stealTeam" variant="primary" size="sm" @click="stealStart">Hand to {{ stealTeam.name }} to steal &rarr;</Button>
                                         <Button :variant="otherTeam ? 'secondary' : 'primary'" size="sm" @click="endRound">Show Scores &rarr;</Button>
                                     </template>
                                 </div>

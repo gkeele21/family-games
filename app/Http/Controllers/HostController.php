@@ -586,10 +586,50 @@ class HostController extends Controller
             $team->addScore($points);
         }
 
+        // America Says regular round: the moment the last answer goes up, the board
+        // is done — auto-advance to the scoreboard. If the PRIMARY cleared it during
+        // their own timer (phase "question"), that's a sweep, so award the round's
+        // sweep bonus to them. A board cleared during the steal earns no bonus.
+        $this->maybeCompleteAmericaSaysBoard($state, $currentQuestion, $teamId);
+
         return response()->json([
             'success' => true,
             'points' => $points,
         ]);
+    }
+
+    /**
+     * If every answer on an America Says regular-round board is now revealed, mark
+     * it complete and drop the phase to "recap". A primary-phase sweep also banks
+     * the configured sweep bonus for the team that cleared it (reusing the manual
+     * bonus's state key so Reset Round still reverses it).
+     */
+    protected function maybeCompleteAmericaSaysBoard(GameState $state, SessionQuestion $question, ?int $teamId): void
+    {
+        if (($question->segment ?? 'main') !== 'main') {
+            return;
+        }
+
+        $answerCount = $question->question->answers()->count();
+        if ($answerCount === 0 || $question->answerReveals()->count() < $answerCount) {
+            return; // Board not fully revealed yet.
+        }
+
+        $phase = $state->getStateValue('phase', 'question');
+        if ($phase === 'question' && (int) $question->bonus_points > 0 && $teamId) {
+            $bonusKey = "bonus_q{$question->id}";
+            if ($state->getStateValue($bonusKey, null) === null) {
+                $team = Team::find($teamId);
+                if ($team) {
+                    $team->addScore((int) $question->bonus_points);
+                    $state->setStateValue($bonusKey, ['team_id' => $team->id, 'amount' => (int) $question->bonus_points]);
+                }
+            }
+        }
+
+        $question->update(['status' => 'completed']);
+        $state->update(['timer_started_at' => null]);
+        $state->setStateValue('phase', 'recap');
     }
 
     /**
@@ -1142,6 +1182,10 @@ class HostController extends Controller
             $state->update([
                 'current_question_id' => $nextQuestion->id,
                 'round_number' => $newRound,
+                // Make the next board's primary (stamped at init by the rotation)
+                // the active team, so its reveals score for the right side and the
+                // "who's up" flip-flop happens without the host assigning control.
+                'active_team_id' => $nextQuestion->controlling_team_id ?? $state->active_team_id,
                 'state_data' => $stateData,
             ]);
             $nextQuestion->update(['status' => 'active']);
@@ -1517,6 +1561,94 @@ class HostController extends Controller
         $gameSession->gameState?->setStateValue('phase', 'recap');
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * America Says regular round — hand the board to the OTHER team for the steal.
+     * Fired automatically when the primary team's timer runs out (or manually by
+     * the host). The steal is untimed: the stealing team keeps guessing while
+     * correct; the first wrong guess (stealWrong) ends the board. Revealed answers
+     * now score for the stealing team, since it becomes the active/controlling team.
+     */
+    public function stealStart(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $currentQuestion = $state?->currentQuestion;
+        if (!$currentQuestion || ($currentQuestion->segment ?? 'main') !== 'main') {
+            return response()->json(['error' => 'No active regular-round question'], 400);
+        }
+
+        // The stealing team is the one that isn't primary (2-team game).
+        $primaryId = $currentQuestion->controlling_team_id ?? $state->active_team_id;
+        $stealTeam = $gameSession->teams()->where('id', '!=', $primaryId)->orderBy('display_order')->first();
+
+        if ($stealTeam) {
+            // Remember who was primary so the display can label the board and a
+            // manual correction can hand control back.
+            $state->setStateValue("primary_q{$currentQuestion->id}", $primaryId);
+
+            $currentQuestion->update([
+                'controlling_team_id' => $stealTeam->id,
+                'controlling_team_ids' => null,
+                'control_status' => 'team_control',
+            ]);
+            // Stop the clock (the steal is untimed) and make the stealer active so
+            // their reveals score.
+            $state->update(['active_team_id' => $stealTeam->id, 'timer_started_at' => null]);
+        }
+
+        $state->setStateValue('phase', 'steal');
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * America Says regular round — the stealing team guessed wrong, so the board is
+     * over: reveal whatever's still hidden for no points, sound the buzzer, and
+     * drop to the scoreboard.
+     */
+    public function stealWrong(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $currentQuestion = $state?->currentQuestion;
+        if (!$currentQuestion) {
+            return response()->json(['error' => 'No active question'], 400);
+        }
+
+        $state->setStateValue('wrong_buzz', (int) $state->getStateValue('wrong_buzz', 0) + 1);
+        $this->revealRemainingWithoutPoints($currentQuestion);
+        $currentQuestion->update(['status' => 'completed']);
+        $state->setStateValue('phase', 'recap');
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Reveal every not-yet-revealed answer on a question for zero points and no
+     * team — the "show the ones nobody got" board flip at the end of a round.
+     */
+    protected function revealRemainingWithoutPoints(SessionQuestion $question): void
+    {
+        $revealedIds = $question->answerReveals()->pluck('answer_id')->all();
+        $answers = $question->question->answers()->whereNotIn('id', $revealedIds)->get();
+
+        foreach ($answers as $answer) {
+            $question->answerReveals()->create([
+                'answer_id' => $answer->id,
+                'team_id' => null,
+                'revealed_at' => now(),
+                'points_awarded' => 0,
+            ]);
+            $answer->recordReveal();
+        }
     }
 
     // ---- America Says final round ---------------------------------------------

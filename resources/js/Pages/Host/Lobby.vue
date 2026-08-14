@@ -119,6 +119,11 @@ const applyTeamCount = (n: number) => {
     if (count === props.gameSession.teams.length) return;
     router.post(route('games.teams.count', props.gameSession.id), { count }, { preserveScroll: true });
 };
+// America Says is strictly two teams — if a game lands here with a different count
+// (e.g. switched game type), normalise it to 2 once.
+if (props.gameSession.game_type.slug === 'america-says' && props.gameSession.teams.length !== 2) {
+    applyTeamCount(2);
+}
 
 // ---- Team rename (inline, save on blur/Enter) ----
 const renameTeam = (team: Team, event: Event) => {
@@ -653,7 +658,9 @@ const copyDisplayUrl = () => {
             <!-- Teams -->
             <Card title="Teams">
                 <template #headerActions>
-                    <div class="flex items-center gap-3">
+                    <!-- America Says is a fixed head-to-head: exactly two teams, no stepper. -->
+                    <div v-if="gameSlug === 'america-says'" class="text-sm text-muted">Head-to-head · 2 teams</div>
+                    <div v-else class="flex items-center gap-3">
                         <span class="text-sm text-muted">Number of teams</span>
                         <NumberInput :model-value="teamCountInput" :min="1" :max="8" @update:model-value="applyTeamCount" />
                     </div>
