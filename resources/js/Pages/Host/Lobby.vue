@@ -685,7 +685,7 @@ const copyDisplayUrl = () => {
                     <h1 class="text-2xl font-extrabold text-body">Set up your game</h1>
                     <p class="mt-1 text-sm text-muted">Pick a game, name it, set teams &amp; scoring, then start.</p>
                 </div>
-                <div class="flex items-center gap-3">
+                <div class="flex flex-wrap items-center justify-end gap-3">
                     <span v-if="settingsForm.processing" class="text-sm text-muted">Saving…</span>
                     <span v-else-if="justSaved" class="text-sm text-primary">Saved ✓</span>
                     <Button variant="outline" size="md" @click="cancelGame">Cancel</Button>
@@ -722,8 +722,8 @@ const copyDisplayUrl = () => {
 
                 <div class="space-y-3">
                     <div v-for="team in gameSession.teams" :key="team.id" class="rounded-lg border border-border">
-                        <div class="flex items-center justify-between gap-3 p-3">
-                            <div class="flex flex-1 items-center gap-3">
+                        <div class="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="flex min-w-0 flex-1 items-center gap-3">
                                 <input
                                     :value="team.name"
                                     type="text"
@@ -735,7 +735,7 @@ const copyDisplayUrl = () => {
                                 />
                                 <span class="whitespace-nowrap text-sm text-muted">({{ team.members?.length || 0 }} members)</span>
                             </div>
-                            <div class="flex items-center gap-2">
+                            <div class="flex flex-none items-center gap-2">
                                 <Button variant="secondary" size="xs" icon="plus" @click="openAddMember(team.id)">Members</Button>
                                 <Button variant="danger" size="xs" @click="removeTeam(team)">Remove</Button>
                             </div>
@@ -789,19 +789,17 @@ const copyDisplayUrl = () => {
 
             <!-- Rounds & scoring (America Says) -->
             <Card v-if="gameSlug === 'america-says'" title="Rounds & scoring">
-                <template #headerActions>
-                    <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-                        <div class="flex items-center gap-3">
-                            <span class="text-sm text-muted">Rounds</span>
-                            <NumberInput :model-value="roundCountInput" :min="1" :max="8" @update:model-value="applyRoundCount" />
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <span class="text-sm text-muted">Round Timer</span>
-                            <NumberInput v-model="settingsForm.settings.control_timer_seconds" :min="10" :max="60" />
-                            <span class="text-sm text-muted">sec</span>
-                        </div>
+                <div class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-border pb-4">
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm text-muted">Rounds</span>
+                        <NumberInput :model-value="roundCountInput" :min="1" :max="8" @update:model-value="applyRoundCount" />
                     </div>
-                </template>
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm text-muted">Round Timer</span>
+                        <NumberInput v-model="settingsForm.settings.control_timer_seconds" :min="10" :max="60" />
+                        <span class="text-sm text-muted">sec</span>
+                    </div>
+                </div>
 
                 <p class="mb-4 text-sm text-muted">
                     A round plays one question per team ({{ teamsCount }} {{ teamsCount === 1 ? 'team' : 'teams' }}). Each correct answer scores its round's points; sweep the whole board for the bonus.
@@ -810,12 +808,16 @@ const copyDisplayUrl = () => {
 
                 <label class="mb-2 block text-sm font-medium text-body">Points per round</label>
                 <div class="space-y-2">
-                    <div v-for="(round, i) in rounds" :key="i" class="flex flex-wrap items-end gap-x-5 gap-y-2 rounded-lg border border-border bg-surface-inset p-3">
-                        <span class="w-16 self-center font-semibold text-body">Round {{ i + 1 }}</span>
-                        <NumberInput v-model="round.points_per_answer" label="Pts / answer" :min="0" input-class="w-20" />
-                        <NumberInput v-model="round.bonus_points" label="Sweep bonus" :min="0" input-class="w-24" />
-                        <span class="self-center text-xs text-primary">Sweep all {{ answersPerQuestion }} = {{ sweptTotal(round).toLocaleString() }} pts</span>
-                        <Button v-if="rounds.length > 1" variant="ghost" size="xs" class="ml-auto self-center !text-danger" @click="removeRound(i)">Remove</Button>
+                    <div v-for="(round, i) in rounds" :key="i" class="rounded-lg border border-border bg-surface-inset p-3">
+                        <div class="flex items-center justify-between gap-3">
+                            <span class="font-semibold text-body">Round {{ i + 1 }}</span>
+                            <Button v-if="rounds.length > 1" variant="ghost" size="xs" class="!text-danger" @click="removeRound(i)">Remove</Button>
+                        </div>
+                        <div class="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3">
+                            <NumberInput v-model="round.points_per_answer" label="Pts / answer" :min="0" input-class="w-20" />
+                            <NumberInput v-model="round.bonus_points" label="Sweep bonus" :min="0" input-class="w-24" />
+                            <span class="self-center text-xs text-primary">Sweep all {{ answersPerQuestion }} = {{ sweptTotal(round).toLocaleString() }} pts</span>
+                        </div>
                     </div>
                 </div>
             </Card>

@@ -445,9 +445,17 @@ class HostController extends Controller
         } else {
             $query->where('round_number', $currentQuestion->round_number);
         }
-        $roundQuestions = $query->orderBy('display_order')->get();
+        $roundQuestions = $query->orderBy('display_order')->get()->values();
 
-        foreach ($roundQuestions as $sq) {
+        // Regular rounds: rebuild who's primary per board from the rotation (the
+        // same formula as init) so a reset restores the original "who's up",
+        // undoing any steal hand-off or manual control change during play.
+        $isRegular = !in_array($segment, ['final', 'fast_money', 'tiebreaker'], true);
+        $teamsOrdered = $gameSession->teams()->orderBy('display_order')->orderBy('id')->get();
+        $teamCount = max(1, $teamsOrdered->count());
+        $roundIndex = ($currentQuestion->round_number ?? 1) - 1;
+
+        foreach ($roundQuestions as $slot => $sq) {
             // Reverse the points from every reveal on this question, then remove them.
             $reveals = $sq->answerReveals()->get();
             foreach ($reveals->whereNotNull('team_id')->groupBy('team_id') as $teamId => $teamReveals) {
@@ -461,7 +469,7 @@ class HostController extends Controller
             }
             $sq->answerReveals()->delete();
 
-            // Reverse a manually-awarded sweep bonus for this question, if any.
+            // Reverse a sweep bonus (manual or auto-awarded) for this question, if any.
             $bonusKey = "bonus_q{$sq->id}";
             $bonus = $state->getStateValue($bonusKey, null);
             if (is_array($bonus) && !empty($bonus['team_id'])) {
@@ -474,7 +482,16 @@ class HostController extends Controller
                 $state->setStateValue($bonusKey, null);
             }
 
-            $sq->update(['status' => 'pending']);
+            $update = ['status' => 'pending'];
+            if ($isRegular) {
+                // Restore the rotation primary and forget the stashed pre-steal primary.
+                $primary = $teamsOrdered[($slot + $roundIndex) % $teamCount] ?? $teamsOrdered->first();
+                $update['controlling_team_id'] = $primary?->id;
+                $update['controlling_team_ids'] = null;
+                $update['control_status'] = 'team_control';
+                $state->setStateValue("primary_q{$sq->id}", null);
+            }
+            $sq->update($update);
         }
 
         // Reactivate the round's first question so the round replays from the top.
