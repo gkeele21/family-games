@@ -393,6 +393,25 @@ class GameSessionController extends Controller
         return redirect()->route('host.lobby', $gameSession);
     }
 
+    /**
+     * Resume an already-started game that was parked back in the lobby (via Back to
+     * Setup) — flip it live again so the TV display, which gates on 'playing',
+     * follows the host back into the board, then hand off to the game screen. A
+     * completed game is never revived here (its history stays intact).
+     */
+    public function resume(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        if ($gameSession->status === 'lobby' && $gameSession->started_at !== null) {
+            $gameSession->update(['status' => 'playing']);
+        }
+
+        return redirect()->route('host.game', $gameSession);
+    }
+
     public function startGame(GameSession $gameSession, GameInitializationService $initService)
     {
         if ($gameSession->host_user_id !== auth()->id()) {

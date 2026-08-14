@@ -578,7 +578,7 @@ const handleRegularClick = (i: number, j: number) => {
         [a.id, b.id] = [b.id, a.id];
         [a.pinned, b.pinned] = [b.pinned, a.pinned];
     }
-    swapSource.value = null;
+    exitSwapMode(); // one swap completes the action and leaves swap mode
 };
 const regularSlotClass = (i: number, j: number): string => {
     const base = 'flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2';
@@ -621,7 +621,10 @@ const startGame = () => {
 };
 // Return to the live game exactly where it was left — no rebuild, no reset.
 const resumeGame = () => {
-    router.visit(route('host.game', props.gameSession.id));
+    // POST (not visit) so the server flips the game back to 'playing' before the
+    // game screen loads — otherwise the TV display, which gates on 'playing',
+    // stays on the lobby "waiting" screen while you play.
+    router.post(route('games.resume', props.gameSession.id));
 };
 // Explicit, destructive re-start of a game that's already been played.
 const restartGame = () => {

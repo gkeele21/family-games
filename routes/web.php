@@ -44,6 +44,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('/games/{gameSession}/teams/{team}/members/{teamMember}', [GameSessionController::class, 'removeTeamMember'])->name('games.teams.members.remove');
     Route::post('/games/{gameSession}/start', [GameSessionController::class, 'startGame'])->name('games.start');
     Route::post('/games/{gameSession}/back-to-lobby', [GameSessionController::class, 'backToLobby'])->name('games.back-to-lobby');
+    Route::post('/games/{gameSession}/resume', [GameSessionController::class, 'resume'])->name('games.resume');
     Route::patch('/games/{gameSession}/settings', [GameSessionController::class, 'updateSettings'])->name('games.settings.update');
     Route::delete('/games/{gameSession}', [GameSessionController::class, 'destroy'])->name('games.destroy');
 
