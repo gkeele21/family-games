@@ -11,7 +11,7 @@ import Toggle from '@/Components/Form/Toggle.vue';
 import Confirm from '@/Components/Feedback/Confirm.vue';
 import BlankText from '@/Components/BlankText.vue';
 import { Head, Link, useForm, router } from '@inertiajs/vue3';
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import axios from 'axios';
 
 interface TeamMember {
@@ -554,6 +554,47 @@ const swapRegular = (i: number, j: number) => swapSlot({ group: 'regular', round
 const swapFinal = (i: number) => swapSlot({ group: 'final', index: i });
 const shuffleRegular = () => qsel.value.regular.forEach((r, i) => r.forEach((s, j) => { if (!s.pinned) swapRegular(i, j); }));
 const shuffleFinal = () => qsel.value.final.forEach((s, i) => { if (!s.pinned) swapFinal(i); });
+
+// ---- Swap mode: exchange two already-slotted regular questions (reorder by
+// difficulty across rounds). Distinct from per-slot Shuffle (random from bank)
+// and from clicking a bank question (Replace). Regular grid only — the tiered
+// final slots are answer-count-locked, so trading them isn't valid.
+const swapMode = ref(false);
+const swapSource = ref<{ round: number; team: number } | null>(null);
+const toggleSwapMode = () => { swapMode.value = !swapMode.value; swapSource.value = null; };
+const exitSwapMode = () => { swapMode.value = false; swapSource.value = null; };
+const isSwapSource = (i: number, j: number) =>
+    !!swapSource.value && swapSource.value.round === i && swapSource.value.team === j;
+// Every slot click routes through here: assign-target selection normally, or
+// pick source/target while swapping.
+const handleRegularClick = (i: number, j: number) => {
+    if (!swapMode.value) { setRegularActive(i, j); return; }
+    if (!swapSource.value) { swapSource.value = { round: i, team: j }; return; }
+    if (isSwapSource(i, j)) { swapSource.value = null; return; } // clicked source again → deselect
+    const a = qsel.value.regular[swapSource.value.round]?.[swapSource.value.team];
+    const b = qsel.value.regular[i]?.[j];
+    if (a && b) {
+        // Trade the questions; pinned state travels with each question.
+        [a.id, b.id] = [b.id, a.id];
+        [a.pinned, b.pinned] = [b.pinned, a.pinned];
+    }
+    swapSource.value = null;
+};
+const regularSlotClass = (i: number, j: number): string => {
+    const base = 'flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2';
+    if (swapMode.value) {
+        if (isSwapSource(i, j)) return `${base} border-primary bg-primary/10 ring-2 ring-primary`;
+        return swapSource.value
+            ? `${base} border-info bg-info/10 hover:border-info`       // a source is picked → valid target
+            : `${base} border-border-strong bg-surface hover:border-primary`; // awaiting first pick
+    }
+    return isRegularActive(i, j)
+        ? `${base} border-primary bg-primary/10`
+        : `${base} border-border bg-surface hover:border-border-strong`;
+};
+const onKeydown = (e: KeyboardEvent) => { if (e.key === 'Escape' && swapMode.value) exitSwapMode(); };
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 const slotText = (id: number | null) => (id != null ? questionById.value.get(id)?.question_text ?? '(missing)' : null);
 const slotMeta = (id: number | null) => {
     const q = id != null ? questionById.value.get(id) : null;
@@ -827,8 +868,12 @@ const copyDisplayUrl = () => {
                         <div class="mb-2 flex items-center gap-2">
                             <h4 class="text-sm font-semibold text-body">Rounds</h4>
                             <span class="text-xs text-subtle"><template v-if="regularCols > 1">{{ regularRowCount }} × {{ teamsCount }}</template><template v-else>{{ regularRowCount }}</template></span>
-                            <Button variant="muted" size="xs" class="ml-auto" @click="shuffleRegular">Shuffle all</Button>
+                            <Button :variant="swapMode ? 'primary' : 'muted'" size="xs" class="ml-auto" @click="toggleSwapMode">{{ swapMode ? '⇄ Swapping…' : '⇄ Swap' }}</Button>
+                            <Button variant="muted" size="xs" :disabled="swapMode" @click="shuffleRegular">Shuffle all</Button>
                         </div>
+                        <p v-if="swapMode" class="mb-2 rounded-md border border-info/30 bg-info/10 px-2.5 py-1.5 text-xs text-info">
+                            Swapping positions — click a question, then click another to trade their spots. Press Esc or ⇄ Swap to finish.
+                        </p>
                         <div class="space-y-3">
                             <div v-for="(round, i) in qsel.regular" :key="i" class="rounded-lg border border-border bg-surface-inset p-2">
                                 <div class="mb-1.5 px-1 text-xs font-semibold text-muted">{{ regularRowLabel(i) }}</div>
@@ -836,8 +881,8 @@ const copyDisplayUrl = () => {
                                     <div
                                         v-for="(slot, j) in round"
                                         :key="j"
-                                        :class="['flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2', isRegularActive(i, j) ? 'border-primary bg-primary/10' : 'border-border bg-surface hover:border-border-strong']"
-                                        @click="setRegularActive(i, j)"
+                                        :class="regularSlotClass(i, j)"
+                                        @click="handleRegularClick(i, j)"
                                     >
                                         <span v-if="regularCols > 1" class="h-2.5 w-2.5 flex-none rounded-full" :style="{ backgroundColor: teamColor(j) }"></span>
                                         <span class="min-w-0 flex-1">
@@ -848,7 +893,7 @@ const copyDisplayUrl = () => {
                                             </span>
                                         </span>
                                         <span v-if="seenBy(slot.id)" class="flex-none rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(slot.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(slot.id) }}</span>
-                                        <Button variant="muted" size="xs" class="flex-none" @click.stop="swapRegular(i, j)">⇄ Swap</Button>
+                                        <Button v-if="!swapMode" variant="muted" size="xs" class="flex-none" @click.stop="swapRegular(i, j)">⟳ Shuffle</Button>
                                     </div>
                                 </div>
                             </div>
@@ -879,7 +924,7 @@ const copyDisplayUrl = () => {
                                         <span v-else-if="slot.id" class="block text-xs text-subtle">{{ slotMeta(slot.id) }}</span>
                                     </span>
                                     <span v-if="seenBy(slot.id)" class="flex-none rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(slot.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(slot.id) }}</span>
-                                    <Button v-if="slot.id" variant="muted" size="xs" class="flex-none" @click.stop="swapFinal(i)">⇄ Swap</Button>
+                                    <Button v-if="slot.id" variant="muted" size="xs" class="flex-none" @click.stop="swapFinal(i)">⟳ Shuffle</Button>
                                 </div>
                             </div>
                             <p class="mt-2 text-xs text-subtle">{{ finalNote }}</p>

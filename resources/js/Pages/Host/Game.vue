@@ -564,6 +564,9 @@ const stealWrong = async () => {
     await axios.post(route('host.steal.wrong', props.gameSession.id));
     fetchState();
 };
+// The "Wrong Answer" buzzer on the board does double duty: during a steal a wrong
+// guess is terminal, so it ends the board; otherwise it just sounds the cue.
+const onWrongAnswer = () => (phase.value === 'steal' ? stealWrong() : buzzWrong());
 // Correction: the auto-hand to steal was premature — give control back to the
 // primary and return to their (paused) turn so the host can fix things.
 const backToPrimary = async () => {
@@ -895,9 +898,11 @@ onUnmounted(() => {
                                         <Button v-else-if="isLastQuestion" variant="secondary" size="sm" @click="endGame">End Game</Button>
                                         <Button v-else variant="primary" size="sm" @click="advanceQuestion">Next Question &rarr;</Button>
                                     </template>
-                                    <!-- Steal: the other team is grabbing leftovers -->
+                                    <!-- Steal: the other team is grabbing leftovers. Reveal each
+                                         correct steal on the board; a wrong one ends it via the
+                                         board's "Wrong Answer" cell. "Back to primary" undoes an
+                                         early hand-off. -->
                                     <template v-if="phase === 'steal'">
-                                        <Button variant="danger" size="sm" @click="stealWrong">Wrong steal — end board &rarr;</Button>
                                         <Button v-if="primaryTeam" variant="secondary" size="sm" @click="backToPrimary">Back to {{ primaryTeam.name }}</Button>
                                     </template>
                                     <template v-else-if="!timerRunning">
@@ -1320,9 +1325,9 @@ onUnmounted(() => {
                                 <button
                                     v-if="isAmericaSays && !isTiebreaker"
                                     type="button"
-                                    title="Sound the wrong-answer buzzer"
+                                    :title="phase === 'steal' ? 'Wrong steal — ends the board' : 'Sound the wrong-answer buzzer'"
                                     class="hover-glow cursor-pointer rounded-lg border border-danger bg-danger/10 p-4 text-left text-danger transition-all"
-                                    @click="buzzWrong"
+                                    @click="onWrongAnswer"
                                 >
                                     <div class="flex items-center">
                                         <span class="font-semibold">Wrong Answer</span>
