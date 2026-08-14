@@ -16,6 +16,7 @@
     --ans-1:#2f6bff; --ans-2:#1743bd;
     --pts-box:#06123f; --led:#ffd23f; --led-dim:#7a5f16;
     --ink:#f2f7ff; --strike:#ef2b1d;
+    --frame:#ffd23f; /* marquee/board border color — follows the round (JS) */
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
@@ -55,12 +56,29 @@
     font-weight:800;margin-bottom:.25em;opacity:.9}
 
   /* ---- The answer board ------------------------------------------------- */
-  .boardwrap{position:absolute;left:50%;top:24%;transform:translateX(-50%);
-    width:66%;max-width:1080px;z-index:10}
-  .panel{position:relative;border-radius:26px;padding:clamp(10px,1.6vw,22px);
+  .boardwrap{position:absolute;left:50%;top:22%;transform:translateX(-50%);
+    width:68%;max-width:1120px;z-index:10}
+  /* marquee: a ring of chasing round bulbs around the board, like the show's set.
+     The frame color follows the round — gold on neutral / early rounds, blue on
+     triple & Fast Money (mirrors the real board's yellow→blue border change). */
+  .frame{position:relative;padding:clamp(16px,2.1vw,32px);border-radius:34px;
+    background:linear-gradient(180deg, rgba(10,26,94,.55), rgba(5,12,44,.6));
+    box-shadow:0 0 46px color-mix(in srgb, var(--frame) 55%, transparent),
+      inset 0 0 30px rgba(0,0,0,.5)}
+  .bulbs{position:absolute;inset:0;pointer-events:none;z-index:5}
+  .bulb{position:absolute;width:clamp(7px,.95vw,15px);height:clamp(7px,.95vw,15px);
+    border-radius:50%;transform:translate(-50%,-50%);opacity:.3;
+    background:radial-gradient(circle at 36% 30%, #fff, var(--frame) 58%, rgba(0,0,0,.35));
+    box-shadow:0 0 5px var(--frame);animation:bulb 1.5s linear infinite}
+  /* Traveling wave — bulbs light in sequence around the ring (staggered delay). */
+  @keyframes bulb{0%{opacity:.26;box-shadow:0 0 4px var(--frame)}
+    8%{opacity:1;box-shadow:0 0 10px var(--frame),0 0 22px var(--frame)}
+    22%{opacity:.26;box-shadow:0 0 4px var(--frame)}100%{opacity:.26}}
+  .panel{position:relative;border-radius:24px;padding:clamp(10px,1.6vw,22px);
     background:linear-gradient(180deg,var(--board-1),var(--board-2));
-    border:3px solid var(--rim);
-    box-shadow:0 0 40px rgba(75,214,255,.45), inset 0 0 40px rgba(0,0,0,.45), 0 20px 50px rgba(0,0,0,.55)}
+    border:3px solid var(--frame);
+    box-shadow:0 0 30px color-mix(in srgb, var(--frame) 45%, transparent),
+      inset 0 0 40px rgba(0,0,0,.45), 0 20px 50px rgba(0,0,0,.55)}
   /* the amber running-total "pot" clipped into the top rail of the board */
   .pot{position:absolute;top:0;left:50%;transform:translate(-50%,-52%);z-index:3;
     min-width:2.6em;text-align:center;
@@ -68,7 +86,7 @@
     font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:.06em;
     font-size:clamp(30px,3.6vw,64px);color:var(--led);
     background:linear-gradient(180deg,#0a1a52,var(--pts-box));
-    border:3px solid var(--rim);
+    border:3px solid var(--frame);
     text-shadow:0 0 14px rgba(255,210,63,.7);
     box-shadow:0 0 26px rgba(75,214,255,.5), inset 0 0 18px rgba(0,0,0,.6)}
 
@@ -223,9 +241,12 @@
 
   <!-- the answer board -->
   <div class="boardwrap" id="boardwrap">
-    <div class="panel">
-      <div class="pot" id="pot">0</div>
-      <div class="slots" id="slots"></div>
+    <div class="frame">
+      <div class="bulbs" id="bulbs"></div>
+      <div class="panel">
+        <div class="pot" id="pot">0</div>
+        <div class="slots" id="slots"></div>
+      </div>
     </div>
     <div class="strikes" id="strikes"></div>
   </div>
@@ -274,6 +295,10 @@
     <button data-n="5">5</button><button data-n="6">6</button>
     <button data-n="7">7</button><button data-n="8" class="on">8</button></span>
   <span class="sep"></span>
+  <span class="grp"><span>Multiplier:</span>
+    <button data-m="1">1×</button><button data-m="2" class="on">2×</button>
+    <button data-m="3">3× / FM</button></span>
+  <span class="sep"></span>
   <span class="grp"><button id="revealBtn">Reveal next</button>
     <button id="strikeBtn">Strike</button>
     <button id="stealBtn">Steal</button>
@@ -309,6 +334,21 @@
   let controlTeam = 0;      // index into TEAMS with control this round
 
   const el = id => document.getElementById(id);
+
+  // Build the marquee bulb ring once. Positions are % of the frame so they scale
+  // with the responsive board. Delays are staggered in clockwise order so the lit
+  // bulb travels around the ring (the show's lights don't flash in sync).
+  function genBulbs(){
+    const box = el('bulbs'); box.innerHTML='';
+    const E=2.5, F=100-E, nx=16, ny=9, dur=1.5, pts=[];
+    for(let i=0;i<nx;i++) pts.push([E+(F-E)*i/(nx-1), E]);              // top L→R
+    for(let i=1;i<=ny;i++) pts.push([F, E+(F-E)*i/(ny+1)]);            // right T→B
+    for(let i=0;i<nx;i++) pts.push([F-(F-E)*i/(nx-1), F]);            // bottom R→L
+    for(let i=1;i<=ny;i++) pts.push([E, F-(F-E)*i/(ny+1)]);           // left B→T
+    pts.forEach(([x,y],i)=>{ const b=document.createElement('div'); b.className='bulb';
+      b.style.left=x+'%'; b.style.top=y+'%';
+      b.style.animationDelay=(-(i/pts.length)*dur).toFixed(3)+'s'; box.appendChild(b); });
+  }
 
   function pot(){
     const list = ROUNDS[numAnswers].a;
@@ -431,7 +471,12 @@
     if (s==='fastmoney') renderFastMoney();
   }
 
-  function renderAll(){ renderRoundTag(); renderBoard(); renderStrikes(); renderTeams(); renderSteal(); }
+  function renderAll(){
+    // Board border color follows the round: blue on triple / Fast Money, gold otherwise.
+    const m = Number(el('mult').dataset.m || 2);
+    el('board').style.setProperty('--frame', m >= 3 ? '#4bd6ff' : '#ffd23f');
+    renderRoundTag(); renderBoard(); renderStrikes(); renderTeams(); renderSteal();
+  }
 
   // --- controls --------------------------------------------------------------
   document.querySelectorAll('[data-state]').forEach(b=>b.onclick=()=>{
@@ -442,6 +487,10 @@
     document.querySelectorAll('[data-n]').forEach(x=>x.classList.toggle('on', x===b));
     numAnswers = Number(b.dataset.n); openCount=Math.min(openCount,numAnswers); renderAll();
   });
+  document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('[data-m]').forEach(x=>x.classList.toggle('on', x===b));
+    el('mult').dataset.m = b.dataset.m; renderAll();
+  });
   el('revealBtn').onclick=()=>{ if(openCount<numAnswers){openCount++; renderBoard(); renderTeams();} };
   el('strikeBtn').onclick=()=>{ strikes=(strikes%3)+1; renderStrikes(); renderTeams();
     setTimeout(()=>{ if(strikes>=3){/* leave up so you can see 3-strike */} }, 10); };
@@ -449,6 +498,7 @@
   el('resetBtn').onclick=()=>{ openCount=0; strikes=0; steal=false; renderAll(); };
 
   // default: mid-round play with a few answers up and one strike
+  genBulbs();
   el('mult').dataset.m = 2;
   openCount = 4; strikes = 1;
   setState('play');

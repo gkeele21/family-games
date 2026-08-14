@@ -479,6 +479,15 @@ const canShowScores = computed(() =>
     && ['question', 'steal'].includes(phase.value) && !timerRunning.value,
 );
 
+// End Game only needs to appear near the actual finish: once the final answer
+// board's clock is up (if a final round is being played), otherwise once the last
+// regular round's scoreboard is showing. Non-America-Says keeps it always available.
+const canEndGame = computed(() => {
+    if (!isAmericaSays) return true;
+    if (['final_play', 'final_cleared', 'final_review', 'final_result'].includes(phase.value)) return true;
+    return isLastQuestion.value && !finalQueued.value && phase.value === 'recap';
+});
+
 const roundStepIndex = computed(() => {
     if (phase.value === 'intro') return 0;
     if (phase.value === 'recap') return 4;
@@ -841,15 +850,15 @@ onUnmounted(() => {
                     <span class="ml-2 font-normal text-muted">Code: {{ gameSession.invite_code }}</span>
                 </h1>
                 <div class="flex items-center gap-3">
-                    <Button variant="outline" size="md" @click="confirmBackToSetup">Back to Setup</Button>
+                    <Button variant="outline" size="md" @click="confirmBackToSetup">Game Setup</Button>
                     <Button v-if="currentQuestion" variant="danger" size="md" @click="showResetRoundConfirm = true">Reset Round</Button>
                     <Button v-if="currentQuestion && hasPreviousQuestion && !isFinal && !isTiebreaker" variant="primary" size="md" @click="previousQuestion">&larr; Previous</Button>
                     <!-- Global escape to the scoreboard, enabled whenever the clock isn't running. -->
                     <Button v-if="canShowScores" variant="primary" size="md" @click="endRound">Show Scores &rarr;</Button>
                     <!-- America Says advances via its guided Round Steps / Final cards. -->
                     <Button v-if="!isAmericaSays && currentQuestion && !isLastQuestion" variant="primary" size="md" @click="advanceQuestion">Next Question &rarr;</Button>
-                    <!-- Always available so a stalled or abandoned game can be completed. -->
-                    <Button :variant="isLastQuestion ? 'secondary' : 'outline'" size="md" @click="endGame">End Game</Button>
+                    <!-- Only near the finish: the final board's clock, or the last round's scores. -->
+                    <Button v-if="canEndGame" :variant="isLastQuestion ? 'secondary' : 'outline'" size="md" @click="endGame">End Game</Button>
                 </div>
             </div>
         </template>
