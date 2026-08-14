@@ -701,12 +701,46 @@ const copyDisplayUrl = () => {
         </template>
 
         <div class="mx-auto max-w-[1440px] space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-            <!-- Game & name -->
+            <!-- Game & name (+ share / display links) -->
             <Card title="Game">
-                <div class="mb-5">
-                    <GamePicker :game-types="gameTypes" :model-value="gameSlug" @select="changeGame" />
+                <div class="grid gap-5 lg:grid-cols-2">
+                    <!-- Game type -->
+                    <div>
+                        <label class="mb-2 block text-sm font-medium text-muted">Game type</label>
+                        <GamePicker :game-types="gameTypes" :model-value="gameSlug" @select="changeGame" />
+                    </div>
+                    <!-- Share links -->
+                    <div class="space-y-3">
+                        <div>
+                            <label class="mb-1 block text-sm font-medium text-muted">Join link</label>
+                            <div class="flex items-center gap-2">
+                                <span class="min-w-0 flex-1 truncate rounded-lg border border-border bg-surface-inset px-4 py-2 font-mono text-sm text-muted">{{ joinUrl }}</span>
+                                <Button variant="muted" size="md" @click="copyJoinUrl">{{ urlCopied ? 'Copied!' : 'Copy' }}</Button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-sm font-medium text-muted">TV / projector display</label>
+                            <div class="flex items-center gap-2">
+                                <span class="min-w-0 flex-1 truncate rounded-lg border border-info/30 bg-surface-inset px-4 py-2 font-mono text-sm text-info">{{ displayUrl }}</span>
+                                <Button variant="secondary" size="md" @click="copyDisplayUrl">{{ displayUrlCopied ? 'Copied!' : 'Copy' }}</Button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <TextField v-model="settingsForm.name" label="Session name" placeholder="e.g., Sunday Family Night" />
+
+                <!-- Session name + game code on one line -->
+                <div class="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end">
+                    <div class="flex-1">
+                        <TextField v-model="settingsForm.name" label="Session name" placeholder="e.g., Sunday Family Night" />
+                    </div>
+                    <div>
+                        <label class="mb-1 block text-sm font-medium text-muted">Game code</label>
+                        <div class="flex items-center gap-2">
+                            <span class="rounded-lg border border-border bg-surface-inset px-4 py-2 font-mono text-xl font-bold tracking-widest text-body">{{ gameSession.invite_code }}</span>
+                            <Button variant="primary" size="md" @click="copyInviteCode">{{ codeCopied ? 'Copied!' : 'Copy' }}</Button>
+                        </div>
+                    </div>
+                </div>
             </Card>
 
             <!-- Teams -->
@@ -847,7 +881,6 @@ const copyDisplayUrl = () => {
                     <div class="min-w-0">
                         <div class="mb-2 flex items-center gap-2">
                             <h4 class="text-sm font-semibold text-body">Rounds</h4>
-                            <span class="text-xs text-subtle"><template v-if="regularCols > 1">{{ regularRowCount }} × {{ teamsCount }}</template><template v-else>{{ regularRowCount }}</template></span>
                             <Button :variant="swapMode ? 'primary' : 'muted'" size="xs" class="ml-auto" @click="toggleSwapMode">{{ swapMode ? '⇄ Swapping…' : '⇄ Swap' }}</Button>
                             <Button variant="muted" size="xs" :disabled="swapMode" @click="shuffleRegular">Shuffle all</Button>
                         </div>
@@ -968,25 +1001,6 @@ const copyDisplayUrl = () => {
                 <div class="mt-5 flex items-center gap-2 border-t border-border pt-4 text-sm">
                     <Link :href="route('questions.index')" class="font-semibold text-primary hover:underline">Manage question library →</Link>
                     <span class="text-subtle">Oodles cards are pulled at random. Add or edit questions.</span>
-                </div>
-            </Card>
-
-            <!-- Share -->
-            <Card title="Share & display">
-                <label class="mb-1 block text-sm font-medium text-muted">Game code</label>
-                <div class="mb-4 flex items-center gap-3">
-                    <span class="rounded-lg border border-border bg-surface-inset px-6 py-2 font-mono text-2xl font-bold tracking-widest text-body">{{ gameSession.invite_code }}</span>
-                    <Button variant="primary" size="md" @click="copyInviteCode">{{ codeCopied ? 'Copied!' : 'Copy code' }}</Button>
-                </div>
-                <label class="mb-1 block text-sm font-medium text-muted">Join link</label>
-                <div class="mb-4 flex items-center gap-3">
-                    <span class="flex-1 truncate rounded-lg border border-border bg-surface-inset px-4 py-2 font-mono text-sm text-muted">{{ joinUrl }}</span>
-                    <Button variant="muted" size="md" @click="copyJoinUrl">{{ urlCopied ? 'Copied!' : 'Copy' }}</Button>
-                </div>
-                <label class="mb-1 block text-sm font-medium text-muted">TV / projector display</label>
-                <div class="flex items-center gap-3">
-                    <span class="flex-1 truncate rounded-lg border border-info/30 bg-surface-inset px-4 py-2 font-mono text-sm text-info">{{ displayUrl }}</span>
-                    <Button variant="secondary" size="md" @click="copyDisplayUrl">{{ displayUrlCopied ? 'Copied!' : 'Copy' }}</Button>
                 </div>
             </Card>
 

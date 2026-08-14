@@ -1,0 +1,455 @@
+<title>Family Feud — Authentic Board Mockup</title>
+<style>
+  /* =====================================================================
+     Family Feud projector board — a replica of the real show's gameboard.
+     Colors here are intentionally OFF the Keeler palette (same sanctioned
+     exception as the America Says board): bright TV-blue set, cyan-rimmed
+     answer slots, amber LED pot, red strikes. Projector-only, nothing sold.
+     This is the DESIGN MOCKUP that the AmericaSaysDisplay.vue equivalent
+     (FamilyFeudDisplay.vue) will be ported from.
+     ===================================================================== */
+  :root{
+    --set-core:#1e46c8; --set-mid:#0c2178; --set-deep:#050a2e;
+    --board-1:#123bb0; --board-2:#081a5e;
+    --rim:#4bd6ff; --rim-soft:#8fe6ff;
+    --slot-1:#1c50d6; --slot-2:#0b2a86;
+    --ans-1:#2f6bff; --ans-2:#1743bd;
+    --pts-box:#06123f; --led:#ffd23f; --led-dim:#7a5f16;
+    --ink:#f2f7ff; --strike:#ef2b1d;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:#000;font-family:"Arial Narrow","Helvetica Neue",Arial,sans-serif;overflow:hidden}
+
+  .board{position:relative;width:100vw;height:100vh;overflow:hidden;
+    background:
+      radial-gradient(120% 95% at 50% -10%, var(--set-core) 0%, var(--set-mid) 42%, var(--set-deep) 82%),
+      var(--set-deep);}
+  /* concentric stage light rings behind the board */
+  .board::before{content:"";position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(closest-side at 50% 30%, rgba(120,170,255,.30), rgba(120,170,255,0) 70%),
+      repeating-radial-gradient(circle at 50% 30%, rgba(150,200,255,.05) 0 3px, rgba(150,200,255,0) 3px 34px);}
+  /* blue stage-floor glow */
+  .board::after{content:"";position:absolute;left:0;right:0;bottom:0;height:30%;
+    background:linear-gradient(0deg, rgba(60,110,255,.40), rgba(60,110,255,0) 100%);
+    filter:blur(10px);pointer-events:none}
+
+  /* ---- Top bar: survey question banner + round / multiplier ------------- */
+  .topbar{position:absolute;top:3.2%;left:50%;transform:translateX(-50%);
+    width:78%;max-width:1180px;z-index:12;display:flex;flex-direction:column;align-items:center;gap:1.1vh}
+  .roundtag{display:flex;align-items:center;gap:.6em;font-weight:800;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--rim-soft);font-size:clamp(12px,1.4vw,22px);
+    text-shadow:0 2px 8px rgba(0,0,0,.6)}
+  .mult{color:#04102e;background:linear-gradient(180deg,#ffe27a,var(--led));
+    padding:.12em .7em;border-radius:999px;font-weight:900;letter-spacing:.04em;
+    box-shadow:0 0 16px rgba(255,210,63,.6)}
+  .survey{width:100%;text-align:center;color:#fff;font-weight:800;line-height:1.12;
+    text-transform:uppercase;letter-spacing:.01em;font-size:clamp(18px,2.5vw,42px);
+    text-shadow:0 2px 4px rgba(0,0,0,.6);
+    padding:1.1vh 2vw;border-radius:14px;
+    background:linear-gradient(180deg, rgba(10,26,94,.72), rgba(6,16,64,.72));
+    border:2px solid rgba(120,180,255,.35);
+    box-shadow:inset 0 0 30px rgba(60,120,255,.25), 0 10px 30px rgba(0,0,0,.45)}
+  .survey .lead{display:block;font-size:.52em;letter-spacing:.14em;color:var(--rim-soft);
+    font-weight:800;margin-bottom:.25em;opacity:.9}
+
+  /* ---- The answer board ------------------------------------------------- */
+  .boardwrap{position:absolute;left:50%;top:24%;transform:translateX(-50%);
+    width:66%;max-width:1080px;z-index:10}
+  .panel{position:relative;border-radius:26px;padding:clamp(10px,1.6vw,22px);
+    background:linear-gradient(180deg,var(--board-1),var(--board-2));
+    border:3px solid var(--rim);
+    box-shadow:0 0 40px rgba(75,214,255,.45), inset 0 0 40px rgba(0,0,0,.45), 0 20px 50px rgba(0,0,0,.55)}
+  /* the amber running-total "pot" clipped into the top rail of the board */
+  .pot{position:absolute;top:0;left:50%;transform:translate(-50%,-52%);z-index:3;
+    min-width:2.6em;text-align:center;
+    padding:.06em .5em;border-radius:12px;
+    font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:.06em;
+    font-size:clamp(30px,3.6vw,64px);color:var(--led);
+    background:linear-gradient(180deg,#0a1a52,var(--pts-box));
+    border:3px solid var(--rim);
+    text-shadow:0 0 14px rgba(255,210,63,.7);
+    box-shadow:0 0 26px rgba(75,214,255,.5), inset 0 0 18px rgba(0,0,0,.6)}
+
+  .slots{display:grid;grid-template-columns:1fr 1fr;gap:clamp(7px,1vw,14px)}
+  .slots.single{grid-template-columns:1fr;max-width:70%;margin:0 auto}
+  .slot{position:relative;height:clamp(42px,6.4vh,78px);border-radius:12px;
+    perspective:900px}
+  .slot .inner{position:absolute;inset:0;transition:transform .5s cubic-bezier(.2,.7,.2,1);
+    transform-style:preserve-3d}
+  .slot.open .inner{transform:rotateX(180deg)}
+  .face{position:absolute;inset:0;border-radius:12px;backface-visibility:hidden;
+    display:flex;align-items:center;overflow:hidden}
+  /* blank face: big centered number */
+  .blank{justify-content:center;
+    background:linear-gradient(180deg,var(--slot-1),var(--slot-2));
+    border:2px solid rgba(120,190,255,.6);
+    box-shadow:inset 0 2px 0 rgba(255,255,255,.18), inset 0 -6px 14px rgba(0,0,0,.4)}
+  .blank .num{font-weight:900;color:#eaf3ff;font-size:clamp(22px,3vw,44px);
+    text-shadow:0 0 14px rgba(120,190,255,.8),0 2px 4px rgba(0,0,0,.5)}
+  /* revealed face (back of the flip): answer text + points box */
+  .reveal{transform:rotateX(180deg);
+    background:linear-gradient(180deg,var(--ans-1),var(--ans-2));
+    border:2px solid rgba(150,210,255,.75);
+    box-shadow:inset 0 2px 0 rgba(255,255,255,.25)}
+  .reveal .atext{flex:1 1 auto;padding:0 .6em 0 .9em;color:#fff;font-weight:800;
+    text-transform:uppercase;letter-spacing:.02em;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;font-size:clamp(15px,1.9vw,32px);
+    text-shadow:0 2px 4px rgba(0,0,0,.5)}
+  .reveal .apts{flex:0 0 auto;align-self:stretch;min-width:2.1em;display:flex;
+    align-items:center;justify-content:center;color:var(--led);font-weight:900;
+    font-variant-numeric:tabular-nums;font-size:clamp(18px,2.2vw,38px);
+    background:linear-gradient(180deg,#0a1a52,var(--pts-box));
+    border-left:2px solid rgba(150,210,255,.5);
+    text-shadow:0 0 12px rgba(255,210,63,.7)}
+
+  /* ---- Strikes overlay -------------------------------------------------- */
+  .strikes{position:absolute;inset:0;z-index:30;display:none;align-items:center;
+    justify-content:center;gap:clamp(14px,3vw,60px)}
+  .strikes.show{display:flex;animation:pop .25s ease-out}
+  .xmark{font-weight:900;color:#fff;font-size:clamp(90px,18vw,300px);line-height:.8;
+    width:1.05em;height:1.05em;display:flex;align-items:center;justify-content:center;
+    border:.14em solid #fff;border-radius:16px;
+    background:radial-gradient(120% 120% at 50% 30%, #ff5a4d, var(--strike));
+    box-shadow:0 0 50px rgba(239,43,29,.85), inset 0 0 30px rgba(0,0,0,.35);
+    text-shadow:0 4px 10px rgba(0,0,0,.5)}
+  @keyframes pop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+
+  /* ---- Team scoreboards (bottom corners) -------------------------------- */
+  .teams{position:absolute;left:0;right:0;bottom:4.5%;z-index:12;
+    display:flex;justify-content:space-between;padding:0 4vw;pointer-events:none}
+  .team{min-width:20%;text-align:center;padding:1vh 1.6vw;border-radius:16px;
+    background:linear-gradient(180deg, rgba(8,20,72,.85), rgba(5,12,44,.9));
+    border:3px solid var(--tc,#4bd6ff);
+    box-shadow:0 0 26px rgba(0,0,0,.5), inset 0 0 22px rgba(0,0,0,.4)}
+  .team.control{box-shadow:0 0 34px var(--tc), 0 0 26px rgba(0,0,0,.5);
+    animation:glow 1.4s ease-in-out infinite}
+  @keyframes glow{0%,100%{box-shadow:0 0 26px var(--tc),0 0 26px rgba(0,0,0,.5)}
+    50%{box-shadow:0 0 52px var(--tc),0 0 26px rgba(0,0,0,.5)}}
+  .team .tname{font-weight:900;text-transform:uppercase;letter-spacing:.05em;
+    font-size:clamp(15px,1.8vw,30px);color:var(--tc,#fff);
+    text-shadow:0 2px 6px rgba(0,0,0,.6)}
+  .team .tscore{font-weight:900;font-variant-numeric:tabular-nums;color:#fff;
+    font-size:clamp(30px,4vw,68px);line-height:1;text-shadow:0 0 18px rgba(150,200,255,.5)}
+  .team .tstrikes{display:flex;gap:.3em;justify-content:center;margin-top:.3vh;height:1.1em}
+  .team .tstrikes b{color:var(--strike);font-size:clamp(16px,1.7vw,28px);font-weight:900;
+    text-shadow:0 0 8px rgba(239,43,29,.8)}
+
+  /* ---- Steal banner (bottom-right, replaces nothing — floats) ----------- */
+  .stealbar{position:absolute;top:16%;left:50%;transform:translateX(-50%);z-index:22;
+    display:none;font-weight:900;text-transform:uppercase;letter-spacing:.08em;
+    font-size:clamp(20px,2.6vw,46px);padding:.24em 1.1em;border-radius:999px;
+    color:var(--tc,#fff);background:rgba(6,16,64,.82);border:3px solid currentColor;
+    box-shadow:0 0 30px rgba(75,214,255,.5), inset 0 0 14px rgba(0,0,0,.4);
+    animation:steal 1.1s ease-in-out infinite}
+  .stealbar.show{display:block}
+  @keyframes steal{0%,100%{transform:translateX(-50%) scale(1)}50%{transform:translateX(-50%) scale(1.05)}}
+
+  /* ---- Centered overlays (lobby / recap / winner / fast money) ---------- */
+  .center{position:absolute;inset:0;z-index:15;display:none;flex-direction:column;
+    align-items:center;justify-content:center;gap:3.5vh;text-align:center;padding:4vw}
+  .center.show{display:flex}
+  .eyebrow{color:var(--led);font-weight:800;text-transform:uppercase;letter-spacing:.16em;
+    font-size:clamp(16px,2vw,36px);text-shadow:0 2px 8px rgba(0,0,0,.6)}
+  .headline{color:#fff;font-weight:900;text-transform:uppercase;letter-spacing:.03em;
+    font-size:clamp(40px,7vw,120px);text-shadow:0 0 30px rgba(120,190,255,.7),0 4px 10px rgba(0,0,0,.6)}
+  .subhead{color:var(--ink);font-weight:800;text-transform:uppercase;letter-spacing:.1em;
+    font-size:clamp(20px,2.6vw,46px);text-shadow:0 0 16px rgba(120,190,255,.5)}
+  .matchup{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:clamp(14px,2.4vw,40px)}
+  .matchup .m{font-weight:900;text-transform:uppercase;letter-spacing:.03em;
+    font-size:clamp(26px,3.8vw,66px);text-shadow:0 0 16px rgba(120,190,255,.4),0 2px 6px rgba(0,0,0,.6)}
+  .matchup .vs{color:var(--ink);opacity:.7;font-weight:700;font-size:clamp(16px,2vw,34px)}
+  .chips{display:flex;flex-wrap:wrap;gap:clamp(16px,3vw,48px);justify-content:center}
+  .chip{display:flex;flex-direction:column;gap:.4vh;align-items:center;
+    padding:1.6vh 2.6vw;border-radius:18px;background:rgba(6,16,64,.62);
+    border:3px solid var(--tc,#4bd6ff);box-shadow:0 0 24px rgba(75,214,255,.35)}
+  .chip .cn{font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--tc,#fff);
+    font-size:clamp(18px,2vw,34px)}
+  .chip .cp{font-weight:900;color:#fff;font-variant-numeric:tabular-nums;
+    font-size:clamp(34px,4.4vw,74px);text-shadow:0 0 16px rgba(150,200,255,.5)}
+
+  /* Family Feud show lockup (stylized) */
+  .logo{display:inline-flex;flex-direction:column;align-items:center;line-height:1;
+    filter:drop-shadow(0 0 .12em rgba(190,220,255,.8)) drop-shadow(0 .04em .09em rgba(0,0,0,.55))}
+  .logo .w{color:#04102e;background:linear-gradient(180deg,#fff,#dfe9ff);
+    font-weight:900;text-transform:uppercase;border-radius:.12em;
+    padding:.06em .34em;transform:skewX(-8deg)}
+  .logo .w1{font-size:clamp(30px,5vw,80px);letter-spacing:.02em}
+  .logo .w2{font-size:clamp(46px,8vw,132px);letter-spacing:.01em;margin-top:.08em;
+    color:#fff;background:linear-gradient(180deg,#3f7bff,#1743bd);
+    box-shadow:0 0 30px rgba(75,214,255,.5)}
+
+  /* ---- Fast Money board ------------------------------------------------- */
+  .fm{width:min(1100px,86vw);display:flex;flex-direction:column;gap:1.6vh}
+  .fm .fmrow{display:grid;grid-template-columns:1fr auto;gap:clamp(8px,1vw,16px);align-items:stretch}
+  .fm .fmq{display:flex;align-items:center;padding:.8vh 1.2vw;border-radius:10px;
+    color:#fff;font-weight:800;text-transform:uppercase;letter-spacing:.01em;
+    font-size:clamp(13px,1.5vw,26px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    background:linear-gradient(180deg,var(--ans-1),var(--ans-2));
+    border:2px solid rgba(150,210,255,.7);text-shadow:0 2px 4px rgba(0,0,0,.5)}
+  .fm .fmp{min-width:2.4em;display:flex;align-items:center;justify-content:center;
+    border-radius:10px;color:var(--led);font-weight:900;font-variant-numeric:tabular-nums;
+    font-size:clamp(18px,2.2vw,40px);background:linear-gradient(180deg,#0a1a52,var(--pts-box));
+    border:2px solid var(--rim);text-shadow:0 0 12px rgba(255,210,63,.7)}
+  .fm .fmtotal{margin-top:.6vh;display:flex;align-items:center;justify-content:center;gap:.6em;
+    font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#fff;
+    font-size:clamp(22px,3vw,52px)}
+  .fm .fmtotal .n{color:var(--led);font-variant-numeric:tabular-nums;
+    font-size:clamp(34px,4.6vw,80px);text-shadow:0 0 16px rgba(255,210,63,.7)}
+
+  /* ---- demo controls — NOT part of the board ---------------------------- */
+  .controls{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);
+    display:flex;gap:7px;align-items:center;background:rgba(6,12,34,.92);
+    border:1px solid #2a3a7a;border-radius:999px;padding:7px 12px;z-index:60;
+    font-family:system-ui,sans-serif;font-size:12.5px;color:#cdd8ff;flex-wrap:wrap;max-width:96vw}
+  .controls .grp{display:flex;gap:5px;align-items:center}
+  .controls .sep{width:1px;height:20px;background:#2a3a7a;margin:0 3px}
+  .controls button{background:#14226b;color:#eaf1ff;border:1px solid #3a4da0;
+    border-radius:999px;padding:4px 10px;cursor:pointer;font-weight:600}
+  .controls button.on{background:#2f6bff;border-color:#8fe6ff}
+  @media (prefers-reduced-motion: reduce){
+    .slot .inner{transition:none}.team.control,.stealbar{animation:none}
+  }
+</style>
+
+<div class="board" id="board">
+
+  <!-- survey question + round / multiplier -->
+  <div class="topbar" id="topbar">
+    <div class="roundtag"><span id="roundlabel">Round 3</span><span class="mult" id="mult">Double</span></div>
+    <div class="survey"><span class="lead">We surveyed 100 people…</span><span id="survey"></span></div>
+  </div>
+
+  <!-- the answer board -->
+  <div class="boardwrap" id="boardwrap">
+    <div class="panel">
+      <div class="pot" id="pot">0</div>
+      <div class="slots" id="slots"></div>
+    </div>
+    <div class="strikes" id="strikes"></div>
+  </div>
+
+  <!-- steal banner -->
+  <div class="stealbar" id="stealbar"></div>
+
+  <!-- team scoreboards -->
+  <div class="teams" id="teams"></div>
+
+  <!-- ===== centered overlays ===== -->
+  <div class="center" id="lobby">
+    <div class="logo"><span class="w w1">Family</span><span class="w w2">Feud</span></div>
+    <div class="matchup" id="lobbyMatch"></div>
+    <div class="subhead">Waiting to Start</div>
+  </div>
+
+  <div class="center" id="recap">
+    <div class="eyebrow" id="recapEye">End of Round 3 · Scores</div>
+    <div class="chips" id="recapChips"></div>
+  </div>
+
+  <div class="center" id="fastmoney">
+    <div class="eyebrow">Fast Money</div>
+    <div class="fm" id="fmBoard"></div>
+  </div>
+
+  <div class="center" id="winner">
+    <div class="eyebrow">Game Over</div>
+    <div class="headline" id="winName">The Keelers</div>
+    <div class="subhead">Wins!</div>
+    <div class="chips" id="winChips"></div>
+  </div>
+</div>
+
+<div class="controls">
+  <span class="grp"><span>State:</span>
+    <button data-state="lobby">Lobby</button>
+    <button data-state="faceoff">Face-off</button>
+    <button data-state="play" class="on">Play</button>
+    <button data-state="recap">Recap</button>
+    <button data-state="fastmoney">Fast Money</button>
+    <button data-state="winner">Winner</button></span>
+  <span class="sep"></span>
+  <span class="grp"><span>Answers:</span>
+    <button data-n="5">5</button><button data-n="6">6</button>
+    <button data-n="7">7</button><button data-n="8" class="on">8</button></span>
+  <span class="sep"></span>
+  <span class="grp"><button id="revealBtn">Reveal next</button>
+    <button id="strikeBtn">Strike</button>
+    <button id="stealBtn">Steal</button>
+    <button id="resetBtn">Reset round</button></span>
+</div>
+
+<script>
+  // --- demo data -------------------------------------------------------------
+  const TEAMS = [
+    { name: 'The Keelers', color: '#ff5a4d', score: 212 },
+    { name: 'Team Williams', color: '#4bd6ff', score: 168 },
+  ];
+  const MULT = { 1:'', 2:'Double', 3:'Triple' };
+
+  const ROUNDS = {
+    5:{ q:'Name a snack you sneak into a movie theater',
+        a:[['CANDY',38],['SODA',22],['POPCORN',16],['CHIPS',12],['CHOCOLATE BAR',6]] },
+    6:{ q:'Name something you always pack for a beach day',
+        a:[['TOWEL',31],['SUNSCREEN',24],['COOLER',15],['UMBRELLA',12],['SUNGLASSES',9],['CHAIR',5]] },
+    7:{ q:'Name a chore kids will do anything to get out of',
+        a:[['DISHES',27],['TAKING OUT TRASH',21],['LAUNDRY',18],['VACUUMING',13],['MAKING BED',9],['MOWING',7],['CLEAN ROOM',3]] },
+    8:{ q:'Name something people do the moment they wake up',
+        a:[['CHECK PHONE',26],['HIT SNOOZE',19],['USE BATHROOM',15],['DRINK COFFEE',13],
+           ['STRETCH',10],['BRUSH TEETH',8],['CHECK TIME',5],['TURN OFF ALARM',4]] },
+  };
+
+  // --- state -----------------------------------------------------------------
+  let numAnswers = 8;
+  let state = 'play';
+  let openCount = 0;        // how many answers revealed
+  let strikes = 0;          // current-team strikes
+  let steal = false;
+  let controlTeam = 0;      // index into TEAMS with control this round
+
+  const el = id => document.getElementById(id);
+
+  function pot(){
+    const list = ROUNDS[numAnswers].a;
+    let sum = 0;
+    for (let i=0;i<openCount;i++) sum += list[i][1];
+    const m = Number(el('mult').dataset.m || 2);
+    return sum * m;
+  }
+
+  function renderBoard(){
+    const data = ROUNDS[numAnswers];
+    el('survey').textContent = data.q;
+    const slots = el('slots');
+    slots.className = 'slots' + (numAnswers <= 5 ? ' single' : '');
+    slots.innerHTML = '';
+    // Fill column-major so numbers read 1..4 down the left, 5..8 down the right —
+    // like the real two-column board. (Single column when ≤5 answers.)
+    const cols = numAnswers <= 5 ? 1 : 2;
+    const perCol = Math.ceil(numAnswers / cols);
+    const order = [];
+    for (let c=0;c<cols;c++) for (let r=0;r<perCol;r++){ const i=c*perCol+r; if(i<numAnswers) order.push({i, pos:r*cols+c}); }
+    // build in visual position order
+    const cells = new Array(numAnswers);
+    data.a.forEach((ans, i) => {
+      const open = i < openCount;
+      const cell = document.createElement('div');
+      cell.className = 'slot' + (open ? ' open' : '');
+      cell.innerHTML =
+        `<div class="inner">
+           <div class="face blank"><span class="num">${i+1}</span></div>
+           <div class="face reveal"><span class="atext">${ans[0]}</span><span class="apts">${ans[1]}</span></div>
+         </div>`;
+      cells[i] = cell;
+    });
+    // place into grid by column-major position
+    const positioned = [];
+    for (let c=0;c<cols;c++) for (let r=0;r<perCol;r++){ const i=c*perCol+r; if(i<numAnswers) positioned[r*cols+c]=cells[i]; }
+    positioned.forEach(cell => cell && slots.appendChild(cell));
+    el('pot').textContent = pot();
+  }
+
+  function renderStrikes(){
+    const box = el('strikes');
+    box.classList.toggle('show', strikes > 0 && (state==='faceoff'||state==='play'));
+    box.innerHTML = '';
+    for (let i=0;i<strikes;i++){ const x=document.createElement('div'); x.className='xmark'; x.textContent='✕'; box.appendChild(x); }
+  }
+
+  function renderTeams(){
+    const wrap = el('teams');
+    wrap.style.display = (state==='faceoff'||state==='play') ? 'flex' : 'none';
+    wrap.innerHTML = '';
+    TEAMS.forEach((t, idx) => {
+      const d = document.createElement('div');
+      d.className = 'team' + (idx===controlTeam && !steal ? ' control' : '') + (idx!==controlTeam && steal ? ' control' : '');
+      d.style.setProperty('--tc', t.color);
+      const showStrikes = (idx===controlTeam && !steal);
+      d.innerHTML =
+        `<div class="tname">${t.name}</div>
+         <div class="tscore">${t.score}</div>
+         <div class="tstrikes">${showStrikes ? '<b>✕</b>'.repeat(strikes) : ''}</div>`;
+      wrap.appendChild(d);
+    });
+  }
+
+  function renderSteal(){
+    const b = el('stealbar');
+    b.classList.toggle('show', steal && (state==='play'||state==='faceoff'));
+    if (steal){ const t = TEAMS[(controlTeam+1)%TEAMS.length]; b.style.setProperty('--tc', t.color);
+      b.textContent = `${t.name} — Steal!`; }
+  }
+
+  function renderRoundTag(){
+    const m = Number(el('mult').dataset.m || 2);
+    el('roundlabel').textContent = 'Round 3';
+    const mult = el('mult');
+    if (MULT[m]) { mult.style.display=''; mult.textContent = MULT[m]; } else { mult.style.display='none'; }
+  }
+
+  function renderLobby(){
+    const wrap = el('lobbyMatch'); wrap.innerHTML='';
+    TEAMS.forEach((t,i)=>{ if(i>0){const vs=document.createElement('span');vs.className='vs';vs.textContent='vs';wrap.appendChild(vs);}
+      const m=document.createElement('span');m.className='m';m.style.color=t.color;m.textContent=t.name;wrap.appendChild(m);});
+  }
+
+  function renderChips(container){
+    const wrap = el(container); wrap.innerHTML='';
+    [...TEAMS].forEach(t=>{ const c=document.createElement('div');c.className='chip';c.style.setProperty('--tc',t.color);
+      c.innerHTML=`<span class="cn" style="color:${t.color}">${t.name}</span><span class="cp">${t.score}</span>`;wrap.appendChild(c);});
+  }
+
+  function renderFastMoney(){
+    const FM = [
+      ['Name a fruit you put in a smoothie', 42],
+      ['A month people love to get married in', 28],
+      ['Something you find in a junk drawer', 35],
+      ['A place you hate waiting in line', 19],
+      ['Name a popular pizza topping', 47],
+    ];
+    const wrap = el('fmBoard'); wrap.innerHTML=''; let total=0;
+    FM.forEach(([q,p])=>{ total+=p; const r=document.createElement('div');r.className='fmrow';
+      r.innerHTML=`<div class="fmq">${q}</div><div class="fmp">${p}</div>`;wrap.appendChild(r);});
+    const tot=document.createElement('div');tot.className='fmtotal';
+    tot.innerHTML=`Total <span class="n">${total}</span> / 200`;wrap.appendChild(tot);
+  }
+
+  // --- state switching -------------------------------------------------------
+  function setState(s){
+    state = s;
+    ['lobby','recap','fastmoney','winner'].forEach(id=>el(id).classList.toggle('show', id===s));
+    const boardVisible = (s==='faceoff'||s==='play');
+    el('topbar').style.display = boardVisible ? '' : 'none';
+    el('boardwrap').style.display = boardVisible ? '' : 'none';
+    if (s==='faceoff'){ openCount=0; strikes=0; steal=false; }
+    renderAll();
+    // per-state overlay content
+    if (s==='lobby') renderLobby();
+    if (s==='recap'){ el('recapEye').textContent='End of Round 3 · Scores'; renderChips('recapChips'); }
+    if (s==='winner'){ el('winName').textContent=TEAMS[0].name; renderChips('winChips'); }
+    if (s==='fastmoney') renderFastMoney();
+  }
+
+  function renderAll(){ renderRoundTag(); renderBoard(); renderStrikes(); renderTeams(); renderSteal(); }
+
+  // --- controls --------------------------------------------------------------
+  document.querySelectorAll('[data-state]').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('[data-state]').forEach(x=>x.classList.toggle('on', x===b));
+    setState(b.dataset.state);
+  });
+  document.querySelectorAll('[data-n]').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('[data-n]').forEach(x=>x.classList.toggle('on', x===b));
+    numAnswers = Number(b.dataset.n); openCount=Math.min(openCount,numAnswers); renderAll();
+  });
+  el('revealBtn').onclick=()=>{ if(openCount<numAnswers){openCount++; renderBoard(); renderTeams();} };
+  el('strikeBtn').onclick=()=>{ strikes=(strikes%3)+1; renderStrikes(); renderTeams();
+    setTimeout(()=>{ if(strikes>=3){/* leave up so you can see 3-strike */} }, 10); };
+  el('stealBtn').onclick=()=>{ steal=!steal; renderSteal(); renderTeams(); };
+  el('resetBtn').onclick=()=>{ openCount=0; strikes=0; steal=false; renderAll(); };
+
+  // default: mid-round play with a few answers up and one strike
+  el('mult').dataset.m = 2;
+  openCount = 4; strikes = 1;
+  setState('play');
+</script>

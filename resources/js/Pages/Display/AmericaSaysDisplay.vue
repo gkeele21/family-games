@@ -387,6 +387,10 @@ const roundNumber = computed(() => props.gameState?.round_number ?? 1);
 // Steal: the primary's time is up and the other team is grabbing leftovers. The
 // board stays up (untimed) so revealed steals show, with a STEAL banner.
 const isSteal = computed(() => phase.value === 'steal');
+// Keep the board up whenever answers are showing — e.g. after the host pulls an
+// answer back off the scoreboard to fix a mis-score, the round returns to the
+// board (no clock) with the remaining reveals still up.
+const anyRevealed = computed(() => (props.currentQuestion?.answers ?? []).some((a) => a.revealed));
 
 // The team up next on the round intro. The controlling team is the effective
 // holder of the turn; fall back to the active team from state.
@@ -904,7 +908,7 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <div v-if="currentQuestion && (timerStarted || isSteal)" class="as-answers">
+                    <div v-if="currentQuestion && (timerStarted || isSteal || anyRevealed)" class="as-answers">
                         <div
                             v-for="(row, ri) in answerRows"
                             :key="ri"

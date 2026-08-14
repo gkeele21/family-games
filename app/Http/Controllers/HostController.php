@@ -707,6 +707,15 @@ class HostController extends Controller
             $currentQuestion->update(['status' => 'active']);
         }
 
+        // America Says regular round: taking an answer back off while on the
+        // scoreboard (the board auto-advances there once every answer is up) means
+        // the host mis-scored it — drop back to the board so they can re-reveal it
+        // correctly (e.g. in Reveal only). The re-reveal auto-advances again.
+        if (($currentQuestion->segment ?? 'main') === 'main'
+            && $state->getStateValue('phase') === 'recap') {
+            $state->setStateValue('phase', 'question');
+        }
+
         return response()->json(['success' => true]);
     }
 
