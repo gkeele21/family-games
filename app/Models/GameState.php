@@ -61,6 +61,37 @@ class GameState extends Model
         $this->save();
     }
 
+    /**
+     * Round-start score snapshots (America Says). Captures each team's cumulative
+     * score at the moment a round begins — before any of that round's scoring — so
+     * a Reset Round restores exactly that, no matter what was revealed, auto-swept,
+     * or hand-edited during the round. First write per round wins; later boards of
+     * the same round are no-ops. Cleared at game end (see clearRoundScores).
+     */
+    public function snapshotRoundScoresIfAbsent(int $round, array $teamScores): void
+    {
+        $all = $this->getStateValue('round_scores', []);
+        $key = (string) $round;
+        if (array_key_exists($key, $all)) {
+            return;
+        }
+        $all[$key] = $teamScores; // [teamId => score]
+        $this->setStateValue('round_scores', $all);
+    }
+
+    /** The snapshotted [teamId => score] for a round's start, or null if none. */
+    public function roundStartScores(int $round): ?array
+    {
+        $all = $this->getStateValue('round_scores', []);
+        return $all[(string) $round] ?? null;
+    }
+
+    /** Drop all round-start snapshots — called at game end to free the row. */
+    public function clearRoundScores(): void
+    {
+        $this->setStateValue('round_scores', null);
+    }
+
     public function getRemainingSeconds(): ?int
     {
         if (!$this->timer_started_at) {

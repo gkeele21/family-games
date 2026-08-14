@@ -434,6 +434,11 @@ class GameSessionController extends Controller
             'started_at' => now(),
         ]);
 
+        // Fresh start (including a Restart): zero the scoreboard so a replay never
+        // carries the previous game's scores — matches the Restart confirmation's
+        // "wipes scores and progress" promise.
+        $gameSession->teams()->update(['total_score' => 0]);
+
         // Initialize game state based on game type
         $state = $gameSession->gameState;
         $teams = $gameSession->teams()->orderBy('display_order')->get();
@@ -453,6 +458,10 @@ class GameSessionController extends Controller
                 'phase' => 'intro',
             ],
         ]);
+
+        // Snapshot round 1's starting scores (all zero) so Reset Round can restore
+        // them exactly, without recomputing from reveals.
+        $state->snapshotRoundScoresIfAbsent(1, $teams->mapWithKeys(fn ($t) => [$t->id => 0])->all());
 
         return redirect()->route('host.game', $gameSession);
     }

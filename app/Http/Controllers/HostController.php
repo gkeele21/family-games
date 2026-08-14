@@ -455,32 +455,42 @@ class HostController extends Controller
         $teamCount = max(1, $teamsOrdered->count());
         $roundIndex = ($currentQuestion->round_number ?? 1) - 1;
 
+        // Prefer the round-start snapshot: restore the exact scores from before the
+        // round, regardless of reveals, auto-sweeps, or hand-edits during it. Only
+        // when there's no snapshot (older sessions) do we fall back to reversing
+        // each reveal's points.
+        $snapshot = $isRegular ? $state->roundStartScores((int) ($currentQuestion->round_number ?? 1)) : null;
+
         foreach ($roundQuestions as $slot => $sq) {
-            // Reverse the points from every reveal on this question, then remove them.
-            $reveals = $sq->answerReveals()->get();
-            foreach ($reveals->whereNotNull('team_id')->groupBy('team_id') as $teamId => $teamReveals) {
-                $team = Team::find($teamId);
-                if (!$team) {
-                    continue;
+            if (!$snapshot) {
+                // Fallback: reverse the points from every reveal on this question.
+                $reveals = $sq->answerReveals()->get();
+                foreach ($reveals->whereNotNull('team_id')->groupBy('team_id') as $teamId => $teamReveals) {
+                    $team = Team::find($teamId);
+                    if (!$team) {
+                        continue;
+                    }
+                    $team->update([
+                        'total_score' => max(0, $team->total_score - (int) $teamReveals->sum('points_awarded')),
+                    ]);
                 }
-                $team->update([
-                    'total_score' => max(0, $team->total_score - (int) $teamReveals->sum('points_awarded')),
-                ]);
             }
             $sq->answerReveals()->delete();
 
-            // Reverse a sweep bonus (manual or auto-awarded) for this question, if any.
+            // Reverse a sweep bonus (manual or auto-awarded); when restoring from a
+            // snapshot the points are already covered, but always clear the key so
+            // the bonus can be re-earned on replay.
             $bonusKey = "bonus_q{$sq->id}";
             $bonus = $state->getStateValue($bonusKey, null);
-            if (is_array($bonus) && !empty($bonus['team_id'])) {
+            if (!$snapshot && is_array($bonus) && !empty($bonus['team_id'])) {
                 $bonusTeam = Team::find($bonus['team_id']);
                 if ($bonusTeam) {
                     $bonusTeam->update([
                         'total_score' => max(0, $bonusTeam->total_score - (int) ($bonus['amount'] ?? 0)),
                     ]);
                 }
-                $state->setStateValue($bonusKey, null);
             }
+            $state->setStateValue($bonusKey, null);
 
             $update = ['status' => 'pending'];
             if ($isRegular) {
@@ -492,6 +502,15 @@ class HostController extends Controller
                 $state->setStateValue("primary_q{$sq->id}", null);
             }
             $sq->update($update);
+        }
+
+        // Snapshot restore: set each team's score straight back to the round start.
+        if ($snapshot) {
+            foreach ($teamsOrdered as $team) {
+                if (array_key_exists($team->id, $snapshot)) {
+                    $team->update(['total_score' => (int) $snapshot[$team->id]]);
+                }
+            }
         }
 
         // Reactivate the round's first question so the round replays from the top.
@@ -762,6 +781,8 @@ class HostController extends Controller
 
     public function endGame(GameSession $gameSession)
     {
+        // Round snapshots exist only to power Reset Round mid-game; drop them now.
+        $gameSession->gameState?->clearRoundScores();
         $gameSession->update([
             'status' => 'completed',
             'completed_at' => now(),
@@ -1206,10 +1227,23 @@ class HostController extends Controller
                 'state_data' => $stateData,
             ]);
             $nextQuestion->update(['status' => 'active']);
+
+            // Snapshot this round's starting scores (the first board of a new round
+            // is the first time we see it; later boards no-op) so Reset Round can
+            // restore them exactly. Regular rounds only — final/tiebreaker excluded.
+            if (($nextQuestion->segment ?? 'main') === 'main') {
+                $state->snapshotRoundScoresIfAbsent(
+                    (int) $newRound,
+                    $gameSession->teams->mapWithKeys(fn ($t) => [$t->id => (int) $t->total_score])->all(),
+                );
+            }
+
             return response()->json(['success' => true, 'game_complete' => false, 'entering_final' => false]);
         }
 
-        // No more questions - game is complete
+        // No more questions - game is complete. Drop the round snapshots we no
+        // longer need so the state row doesn't carry them forever.
+        $state->clearRoundScores();
         $gameSession->update([
             'status' => 'completed',
             'completed_at' => now(),
