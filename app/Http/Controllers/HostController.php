@@ -709,11 +709,13 @@ class HostController extends Controller
 
         // America Says regular round: taking an answer back off while on the
         // scoreboard (the board auto-advances there once every answer is up) means
-        // the host mis-scored it — drop back to the board so they can re-reveal it
-        // correctly (e.g. in Reveal only). The re-reveal auto-advances again.
+        // the host mis-scored it — drop back to the board state we came from (the
+        // steal, or the primary's turn) so they can re-reveal it correctly (e.g. in
+        // Reveal only). The re-reveal auto-advances again.
         if (($currentQuestion->segment ?? 'main') === 'main'
             && $state->getStateValue('phase') === 'recap') {
-            $state->setStateValue('phase', 'question');
+            $restore = $state->getStateValue('phase_before_recap', 'question');
+            $state->setStateValue('phase', in_array($restore, ['question', 'steal'], true) ? $restore : 'question');
         }
 
         return response()->json(['success' => true]);
@@ -1619,7 +1621,15 @@ class HostController extends Controller
             abort(403);
         }
 
-        $gameSession->gameState?->setStateValue('phase', 'recap');
+        $state = $gameSession->gameState;
+        // Remember which board state we came from so pulling an answer back off the
+        // scoreboard returns there (the steal, or the primary's turn) rather than
+        // always to "Question Shown".
+        $prev = $state?->getStateValue('phase');
+        if (in_array($prev, ['question', 'steal'], true)) {
+            $state?->setStateValue('phase_before_recap', $prev);
+        }
+        $state?->setStateValue('phase', 'recap');
 
         return response()->json(['success' => true]);
     }

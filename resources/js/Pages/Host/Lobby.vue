@@ -715,14 +715,14 @@ const copyDisplayUrl = () => {
                             <label class="mb-1 block text-sm font-medium text-muted">Join link</label>
                             <div class="flex items-center gap-2">
                                 <span class="min-w-0 flex-1 truncate rounded-lg border border-border bg-surface-inset px-4 py-2 font-mono text-sm text-muted">{{ joinUrl }}</span>
-                                <Button variant="muted" size="md" @click="copyJoinUrl">{{ urlCopied ? 'Copied!' : 'Copy' }}</Button>
+                                <Button variant="outline" size="md" @click="copyJoinUrl">{{ urlCopied ? 'Copied!' : 'Copy' }}</Button>
                             </div>
                         </div>
                         <div>
                             <label class="mb-1 block text-sm font-medium text-muted">TV / projector display</label>
                             <div class="flex items-center gap-2">
                                 <span class="min-w-0 flex-1 truncate rounded-lg border border-info/30 bg-surface-inset px-4 py-2 font-mono text-sm text-info">{{ displayUrl }}</span>
-                                <Button variant="secondary" size="md" @click="copyDisplayUrl">{{ displayUrlCopied ? 'Copied!' : 'Copy' }}</Button>
+                                <Button variant="outline" size="md" @click="copyDisplayUrl">{{ displayUrlCopied ? 'Copied!' : 'Copy' }}</Button>
                             </div>
                         </div>
                     </div>
@@ -737,7 +737,7 @@ const copyDisplayUrl = () => {
                         <label class="mb-1 block text-sm font-medium text-muted">Game code</label>
                         <div class="flex items-center gap-2">
                             <span class="rounded-lg border border-border bg-surface-inset px-4 py-2 font-mono text-xl font-bold tracking-widest text-body">{{ gameSession.invite_code }}</span>
-                            <Button variant="primary" size="md" @click="copyInviteCode">{{ codeCopied ? 'Copied!' : 'Copy' }}</Button>
+                            <Button variant="outline" size="md" @click="copyInviteCode">{{ codeCopied ? 'Copied!' : 'Copy' }}</Button>
                         </div>
                     </div>
                 </div>
