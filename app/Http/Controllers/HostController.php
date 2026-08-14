@@ -45,6 +45,10 @@ class HostController extends Controller
             'gameTypes' => \App\Models\GameType::online()->get(['id', 'name', 'slug']),
             'questionData' => $this->questionSelectionData($gameSession),
             'attendanceData' => $this->attendanceData($gameSession),
+            // Whether this game has already been started (and thus has live
+            // progress that a fresh Start would wipe). Drives the lobby's
+            // "Resume vs. Restart" split button.
+            'wasStarted' => $gameSession->started_at !== null,
         ]);
     }
 

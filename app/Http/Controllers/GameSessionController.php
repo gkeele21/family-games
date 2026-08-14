@@ -382,6 +382,12 @@ class GameSessionController extends Controller
             abort(403);
         }
 
+        // A finished game is history — never silently un-complete it back into the
+        // "Active Now" list. Send the host to the setup screen read-only instead.
+        if ($gameSession->status === 'completed') {
+            return redirect()->route('host.lobby', $gameSession);
+        }
+
         $gameSession->update(['status' => 'lobby']);
 
         return redirect()->route('host.lobby', $gameSession);

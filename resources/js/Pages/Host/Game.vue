@@ -272,9 +272,7 @@ const confirmEndGame = async () => {
     window.location.href = route('dashboard');
 };
 
-const showBackToSetupConfirm = ref(false);
 const confirmBackToSetup = async () => {
-    showBackToSetupConfirm.value = false;
     await axios.post(route('games.back-to-lobby', props.gameSession.id));
     window.location.href = route('host.lobby', props.gameSession.id);
 };
@@ -760,7 +758,7 @@ onUnmounted(() => {
                     <span class="ml-2 font-normal text-muted">Code: {{ gameSession.invite_code }}</span>
                 </h1>
                 <div class="flex items-center gap-3">
-                    <Button variant="outline" size="md" @click="showBackToSetupConfirm = true">Back to Setup</Button>
+                    <Button variant="outline" size="md" @click="confirmBackToSetup">Back to Setup</Button>
                     <Button v-if="currentQuestion" variant="danger" size="md" @click="showResetRoundConfirm = true">Reset Round</Button>
                     <Button v-if="currentQuestion && hasPreviousQuestion && !isFinal && !isTiebreaker" variant="primary" size="md" @click="previousQuestion">&larr; Previous</Button>
                     <!-- America Says advances via its guided Round Steps / Final cards. -->
@@ -1376,18 +1374,6 @@ onUnmounted(() => {
             @confirm="confirmEndGame"
             @cancel="showEndConfirm = false"
             @close="showEndConfirm = false"
-        />
-
-        <!-- Back to setup confirm -->
-        <Confirm
-            :show="showBackToSetupConfirm"
-            title="Back to setup?"
-            message="This returns the game to its setup screen so you can change teams, rounds, or questions. When you start again, the questions are rebuilt from your setup."
-            confirm-text="Back to Setup"
-            variant="danger"
-            @confirm="confirmBackToSetup"
-            @cancel="showBackToSetupConfirm = false"
-            @close="showBackToSetupConfirm = false"
         />
     </StandardLayout>
 </template>

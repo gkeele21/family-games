@@ -81,6 +81,7 @@ interface Props {
     gameTypes: GameTypeOption[];
     questionData: QuestionData | null;
     attendanceData: AttendanceData | null;
+    wasStarted: boolean;
 }
 
 const props = defineProps<Props>();
@@ -566,10 +567,26 @@ const questionSelectionReady = computed(() => {
     return qsel.value.regular.length > 0 && qsel.value.regular.every((r) => r.length > 0 && r.every((s) => s.id != null));
 });
 
-// ---- Start / cancel ----
+// ---- Start / resume / restart / cancel ----
+// A fresh start (re)builds questions from setup and begins at round one.
 const startGame = () => {
     if (settingsForm.isDirty) saveSettings(() => router.post(route('games.start', props.gameSession.id)));
     else router.post(route('games.start', props.gameSession.id));
+};
+// Return to the live game exactly where it was left — no rebuild, no reset.
+const resumeGame = () => {
+    router.visit(route('host.game', props.gameSession.id));
+};
+// Explicit, destructive re-start of a game that's already been played.
+const restartGame = () => {
+    askConfirm(
+        {
+            title: 'Restart from setup?',
+            message: 'This wipes the current game — scores and progress — and rebuilds the questions from your setup. This cannot be undone.',
+            confirmText: 'Restart game',
+        },
+        startGame,
+    );
 };
 const cancelGame = () => {
     askConfirm(
@@ -615,7 +632,11 @@ const copyDisplayUrl = () => {
                     <span v-if="settingsForm.processing" class="text-sm text-muted">Saving…</span>
                     <span v-else-if="justSaved" class="text-sm text-primary">Saved ✓</span>
                     <Button variant="outline" size="md" @click="cancelGame">Cancel</Button>
-                    <Button variant="success" size="md" :disabled="!gameSession.teams.length || !questionSelectionReady" @click="startGame">Start Game →</Button>
+                    <template v-if="wasStarted">
+                        <Button variant="danger" size="md" :disabled="!gameSession.teams.length || !questionSelectionReady" @click="restartGame">Restart</Button>
+                        <Button variant="success" size="md" @click="resumeGame">Resume Game →</Button>
+                    </template>
+                    <Button v-else variant="success" size="md" :disabled="!gameSession.teams.length || !questionSelectionReady" @click="startGame">Start Game →</Button>
                 </div>
             </div>
         </template>
@@ -676,6 +697,37 @@ const copyDisplayUrl = () => {
                 </div>
             </Card>
 
+            <!-- Who's playing? (attendance → drives the "already seen" question signal) -->
+            <Card v-if="isPickerGame && attendance" title="Who's playing?">
+                <template #headerActions>
+                    <span class="text-sm text-muted">{{ presentCount }} {{ presentCount === 1 ? 'person' : 'people' }}</span>
+                </template>
+
+                <div v-if="!hasRoster" class="text-sm text-muted">
+                    No roster yet.
+                    <Link :href="route('scorekeeper.home')" class="font-semibold text-primary hover:underline">Add the people you play with</Link>
+                    to a household, then check who's here — we'll flag questions the group has already been asked.
+                </div>
+                <template v-else>
+                    <div class="mb-3 flex flex-wrap items-center gap-2">
+                        <Select v-if="householdOptions.length > 1" v-model="selectedHouseholdId" :options="householdOptions" />
+                        <span class="text-xs text-subtle">Check everyone at the table — questions this group has already been asked get flagged and skipped when filling slots at random.</span>
+                        <Button variant="muted" size="xs" class="ml-auto" @click="toggleAllRoster">{{ allRosterPresent ? 'Clear all' : 'Select all' }}</Button>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button
+                            v-for="p in activeRoster"
+                            :key="p.id"
+                            type="button"
+                            :class="['rounded-full border px-3 py-1.5 text-sm transition', presentIds.has(p.id) ? 'border-primary bg-primary/10 text-body' : 'border-border bg-surface-inset text-muted hover:border-border-strong']"
+                            @click="togglePresent(p.id)"
+                        >
+                            <span v-if="presentIds.has(p.id)" class="mr-1 text-primary">✓</span>{{ p.name }}
+                        </button>
+                    </div>
+                </template>
+            </Card>
+
             <!-- Rounds & scoring (America Says) -->
             <Card v-if="gameSlug === 'america-says'" title="Rounds & scoring">
                 <template #headerActions>
@@ -714,37 +766,6 @@ const copyDisplayUrl = () => {
                 <div class="max-w-xs">
                     <Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" />
                 </div>
-            </Card>
-
-            <!-- Who's playing? (attendance → drives the "already seen" question signal) -->
-            <Card v-if="isPickerGame && attendance" title="Who's playing?">
-                <template #headerActions>
-                    <span class="text-sm text-muted">{{ presentCount }} {{ presentCount === 1 ? 'person' : 'people' }}</span>
-                </template>
-
-                <div v-if="!hasRoster" class="text-sm text-muted">
-                    No roster yet.
-                    <Link :href="route('scorekeeper.home')" class="font-semibold text-primary hover:underline">Add the people you play with</Link>
-                    to a household, then check who's here — we'll flag questions the group has already been asked.
-                </div>
-                <template v-else>
-                    <div class="mb-3 flex flex-wrap items-center gap-2">
-                        <Select v-if="householdOptions.length > 1" v-model="selectedHouseholdId" :options="householdOptions" />
-                        <span class="text-xs text-subtle">Check everyone at the table — questions this group has already been asked get flagged and skipped when filling slots at random.</span>
-                        <Button variant="muted" size="xs" class="ml-auto" @click="toggleAllRoster">{{ allRosterPresent ? 'Clear all' : 'Select all' }}</Button>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        <button
-                            v-for="p in activeRoster"
-                            :key="p.id"
-                            type="button"
-                            :class="['rounded-full border px-3 py-1.5 text-sm transition', presentIds.has(p.id) ? 'border-primary bg-primary/10 text-body' : 'border-border bg-surface-inset text-muted hover:border-border-strong']"
-                            @click="togglePresent(p.id)"
-                        >
-                            <span v-if="presentIds.has(p.id)" class="mr-1 text-primary">✓</span>{{ p.name }}
-                        </button>
-                    </div>
-                </template>
             </Card>
 
             <!-- Questions (per-slot picker: America Says + Family Feud) -->
