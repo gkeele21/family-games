@@ -715,7 +715,7 @@ class HostController extends Controller
         if (($currentQuestion->segment ?? 'main') === 'main'
             && $state->getStateValue('phase') === 'recap') {
             $restore = $state->getStateValue('phase_before_recap', 'question');
-            $state->setStateValue('phase', in_array($restore, ['question', 'steal'], true) ? $restore : 'question');
+            $state->setStateValue('phase', in_array($restore, ['question', 'steal', 'reveal'], true) ? $restore : 'question');
         }
 
         return response()->json(['success' => true]);
@@ -1605,6 +1605,13 @@ class HostController extends Controller
         if ($state) {
             $current = (int) $state->getStateValue('wrong_buzz', 0);
             $state->setStateValue('wrong_buzz', $current + 1);
+
+            // A wrong steal ends the steal but not the board: move to the untimed
+            // "reveal the leftovers" state so the display drops its STEAL banner
+            // while the host reveals the rest (in Reveal only, no scoring).
+            if ($state->getStateValue('phase') === 'steal') {
+                $state->setStateValue('phase', 'reveal');
+            }
         }
 
         return response()->json(['success' => true]);
@@ -1626,7 +1633,7 @@ class HostController extends Controller
         // scoreboard returns there (the steal, or the primary's turn) rather than
         // always to "Question Shown".
         $prev = $state?->getStateValue('phase');
-        if (in_array($prev, ['question', 'steal'], true)) {
+        if (in_array($prev, ['question', 'steal', 'reveal'], true)) {
             $state?->setStateValue('phase_before_recap', $prev);
         }
         $state?->setStateValue('phase', 'recap');

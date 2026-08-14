@@ -476,7 +476,7 @@ const startTimerLabel = computed(() => (timerPaused.value ? 'Resume Timer' : 'Re
 // fix things) without waiting on the auto-advance.
 const canShowScores = computed(() =>
     isAmericaSays && !isFinal.value && !isTiebreaker.value && !!currentQuestion.value
-    && ['question', 'steal'].includes(phase.value) && !timerRunning.value,
+    && ['question', 'steal', 'reveal'].includes(phase.value) && !timerRunning.value,
 );
 
 // End Game only needs to appear near the actual finish: once the final answer
@@ -491,7 +491,7 @@ const canEndGame = computed(() => {
 const roundStepIndex = computed(() => {
     if (phase.value === 'intro') return 0;
     if (phase.value === 'recap') return 4;
-    if (phase.value === 'steal') return 3;
+    if (phase.value === 'steal' || phase.value === 'reveal') return 3;
     return timerRunning.value ? 2 : 1; // question phase: shown (idle) vs playing (running)
 });
 const roundSteps = computed(() => {
@@ -502,7 +502,12 @@ const roundSteps = computed(() => {
         { title: 'Round Intro', hint: `Round ${rn} is on the board. Show the question when you’re ready to read it.` },
         { title: 'Question Shown', hint: 'Just the question is on the board — answers still hidden, no clock. Read it aloud, then start the timer.' },
         { title: 'Primary Team Playing', hint: `${primaryName} is up: reveal answers as they’re guessed. When the timer runs out it hands to the steal.` },
-        { title: 'Steal', hint: `${stealName} is stealing — reveal each correct steal (they score). A wrong answer hands to Reveal only for the leftovers.` },
+        {
+            title: 'Steal',
+            hint: phase.value === 'reveal'
+                ? 'Steal missed — reveal the leftovers (no points). The board ends when every answer is up.'
+                : `${stealName} is stealing — reveal each correct steal (they score). A wrong answer hands to Reveal only for the leftovers.`,
+        },
         { title: 'Scores', hint: 'The scoreboard is on the board. Move on to the next question.' },
     ];
 });
@@ -570,11 +575,13 @@ const activeTurnTeam = computed<Team | null>(() =>
 const idleTurnTeam = computed<Team | null>(() =>
     teams.value.find(t => t.id !== gameState.value?.active_team_id) ?? null
 );
+// The steal team stays "active" through the reveal-leftovers state (phase 'reveal').
+const inStealOrReveal = computed(() => ['steal', 'reveal'].includes(phase.value));
 const primaryTeam = computed<Team | null>(() =>
-    phase.value === 'steal' ? idleTurnTeam.value : activeTurnTeam.value
+    inStealOrReveal.value ? idleTurnTeam.value : activeTurnTeam.value
 );
 const stealTeam = computed<Team | null>(() =>
-    phase.value === 'steal' ? activeTurnTeam.value : idleTurnTeam.value
+    inStealOrReveal.value ? activeTurnTeam.value : idleTurnTeam.value
 );
 
 // Hand the board to the other team for the steal (auto on timer-out, or manual).
@@ -608,7 +615,7 @@ const advancingToScores = ref(false);
 watch(allAnswersRevealed, (all) => {
     if (!all || advancingToScores.value) return;
     if (!isAmericaSays || isFinal.value || isTiebreaker.value) return;
-    if (!['question', 'steal'].includes(phase.value)) return;
+    if (!['question', 'steal', 'reveal'].includes(phase.value)) return;
     advancingToScores.value = true;
     if (timerRunning.value) pauseTimer();
     window.setTimeout(async () => {
@@ -921,11 +928,11 @@ onUnmounted(() => {
                                         <Button v-else-if="isLastQuestion" variant="secondary" size="sm" @click="endGame">End Game</Button>
                                         <Button v-else variant="primary" size="sm" @click="advanceQuestion">Next Question &rarr;</Button>
                                     </template>
-                                    <!-- Steal: reveal each correct steal on the board; a wrong answer
-                                         (board cell) hands to Reveal only for the leftovers. The board
-                                         ends itself once every answer is up. -->
-                                    <template v-else-if="phase === 'steal'">
-                                        <span class="text-sm text-muted">Reveal steals on the board; a wrong answer hands to Reveal only.</span>
+                                    <!-- Steal / reveal-leftovers: reveal each correct steal on the
+                                         board; a wrong answer (board cell) hands to Reveal only for the
+                                         leftovers. The board ends itself once every answer is up. -->
+                                    <template v-else-if="phase === 'steal' || phase === 'reveal'">
+                                        <span class="text-sm text-muted">{{ phase === 'reveal' ? 'Reveal the leftovers (no points).' : 'Reveal steals on the board; a wrong answer hands to Reveal only.' }}</span>
                                     </template>
                                     <!-- Question Shown: start the clock for the primary team. -->
                                     <template v-else-if="!timerRunning">
