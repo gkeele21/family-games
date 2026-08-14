@@ -516,8 +516,10 @@ const teamName = (j: number) => props.gameSession.teams[j]?.name ?? `Team ${j + 
 const teamColor = (j: number) => props.gameSession.teams[j]?.color ?? '#888888';
 const isRegularActive = (i: number, j: number) => activeSlot.value?.group === 'regular' && activeSlot.value.round === i && activeSlot.value.team === j;
 const isFinalActive = (i: number) => activeSlot.value?.group === 'final' && activeSlot.value.index === i;
-const setRegularActive = (i: number, j: number) => { activeSlot.value = { group: 'regular', round: i, team: j }; };
-const setFinalActive = (i: number) => { activeSlot.value = { group: 'final', index: i }; };
+// Clicking a slot arms the bank to fill it; clicking the armed slot again
+// disarms it (bank empties) so the action reads as a clean toggle.
+const setRegularActive = (i: number, j: number) => { activeSlot.value = isRegularActive(i, j) ? null : { group: 'regular', round: i, team: j }; };
+const setFinalActive = (i: number) => { activeSlot.value = isFinalActive(i) ? null : { group: 'final', index: i }; };
 const regularSlotLabel = (i: number, j: number) =>
     regularCols.value > 1 ? `Round ${i + 1} · ${teamName(j)}` : `Round ${i + 1}`;
 const activeSlotLabel = computed(() => {
@@ -589,7 +591,7 @@ const handleRegularClick = (i: number, j: number) => {
     exitSwapMode(); // one swap completes the action and leaves swap mode
 };
 const regularSlotClass = (i: number, j: number): string => {
-    const base = 'flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2';
+    const base = 'flex cursor-pointer items-start gap-2.5 rounded-md border px-2.5 py-2';
     if (swapMode.value) {
         if (isSwapSource(i, j)) return `${base} border-primary bg-primary/10 ring-2 ring-primary`;
         return swapSource.value
@@ -901,9 +903,9 @@ const copyDisplayUrl = () => {
                                         :class="regularSlotClass(i, j)"
                                         @click="handleRegularClick(i, j)"
                                     >
-                                        <span v-if="regularCols > 1" class="h-2.5 w-2.5 flex-none rounded-full" :style="{ backgroundColor: teamColor(j) }"></span>
+                                        <span v-if="regularCols > 1" class="mt-1.5 h-2.5 w-2.5 flex-none rounded-full" :style="{ backgroundColor: teamColor(j) }"></span>
                                         <span class="min-w-0 flex-1">
-                                            <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>— pick a question —</template></span>
+                                            <span :class="['block text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>— pick a question —</template></span>
                                             <span class="block text-xs text-subtle">
                                                 <template v-if="regularCols > 1">{{ teamName(j) }}<template v-if="slot.id"> · {{ slotMeta(slot.id) }}</template></template>
                                                 <template v-else>{{ slot.id ? slotMeta(slot.id) : 'Face-off — both teams play' }}</template>
@@ -931,12 +933,12 @@ const copyDisplayUrl = () => {
                                 <div
                                     v-for="(slot, i) in qsel.final"
                                     :key="i"
-                                    :class="['flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2', isFinalActive(i) ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset hover:border-border-strong']"
+                                    :class="['flex cursor-pointer items-start gap-2.5 rounded-md border px-2.5 py-2', isFinalActive(i) ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset hover:border-border-strong']"
                                     @click="setFinalActive(i)"
                                 >
                                     <span class="flex-none rounded-md bg-surface-elevated px-2 py-1 text-[10px] font-bold text-info">{{ finalSlotBadge(i) }}</span>
                                     <span class="min-w-0 flex-1">
-                                        <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>{{ finalEmptyText(i) }}</template></span>
+                                        <span :class="['block text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>{{ finalEmptyText(i) }}</template></span>
                                         <span v-if="finalTiered" class="block text-xs text-subtle">Needs {{ i + 1 }} answer{{ i === 0 ? '' : 's' }}<template v-if="slot.id"> · {{ slotUsed(slot.id) }}</template></span>
                                         <span v-else-if="slot.id" class="block text-xs text-subtle">{{ slotMeta(slot.id) }}</span>
                                     </span>

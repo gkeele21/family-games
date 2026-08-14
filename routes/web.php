@@ -74,7 +74,6 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/round/intro', [HostController::class, 'roundIntro'])->name('host.round.intro');
     Route::post('/host/{gameSession}/round/end', [HostController::class, 'endRound'])->name('host.round.end');
     Route::post('/host/{gameSession}/steal/start', [HostController::class, 'stealStart'])->name('host.steal.start');
-    Route::post('/host/{gameSession}/steal/wrong', [HostController::class, 'stealWrong'])->name('host.steal.wrong');
     Route::post('/host/{gameSession}/final/show', [HostController::class, 'finalShowQuestion'])->name('host.final.show');
     Route::post('/host/{gameSession}/final/start', [HostController::class, 'finalStart'])->name('host.final.start');
     Route::post('/host/{gameSession}/final/next', [HostController::class, 'finalNext'])->name('host.final.next');

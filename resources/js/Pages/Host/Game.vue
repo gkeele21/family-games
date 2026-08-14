@@ -246,6 +246,7 @@ watch(() => currentQuestion.value?.id, () => {
     revealWithoutPoints.value = false;
     firstControllerId.value = null;
     stealActive.value = false;
+    advancingToScores.value = false;
 });
 
 const revealAnswer = async (answerId: number) => {
@@ -466,31 +467,33 @@ const timerPaused = computed(() => {
     return !timerRunning.value && d > 0 && d < fullTimerDuration.value;
 });
 const startTimerLabel = computed(() => (timerPaused.value ? 'Resume Timer' : 'Reveal Board - Start Timer'));
-// The team that does NOT currently hold the turn — offered as a one-click "steal".
-const otherTeam = computed<Team | null>(() =>
-    teams.value.find(t => t.id !== gameState.value?.active_team_id) ?? null
-);
 
 
 // The four phases of a round, shown as a checklist so the host sees the whole
 // progression (not just the next action). Index of the current phase:
+// Global "Show Scores" escape: available on a live regular-round board whenever the
+// clock isn't running, so the host can jump to the scoreboard at any point (e.g. to
+// fix things) without waiting on the auto-advance.
+const canShowScores = computed(() =>
+    isAmericaSays && !isFinal.value && !isTiebreaker.value && !!currentQuestion.value
+    && ['question', 'steal'].includes(phase.value) && !timerRunning.value,
+);
+
 const roundStepIndex = computed(() => {
     if (phase.value === 'intro') return 0;
-    if (phase.value === 'recap') return 3;
-    if (phase.value === 'steal') return 2;
-    return timerRunning.value ? 2 : 1; // question phase: idle vs running
+    if (phase.value === 'recap') return 4;
+    if (phase.value === 'steal') return 3;
+    return timerRunning.value ? 2 : 1; // question phase: shown (idle) vs playing (running)
 });
 const roundSteps = computed(() => {
     const rn = gameState.value?.round_number ?? 1;
     const primaryName = primaryTeam.value?.name ?? 'the primary team';
     const stealName = stealTeam.value?.name ?? 'the other team';
-    const playHint = phase.value === 'steal'
-        ? `${stealName} is stealing — reveal each correct steal (they score). The first wrong steal ends the board.`
-        : `${primaryName} is up: reveal answers as they’re guessed. When their time runs out it hands to the other team to steal.`;
     return [
         { title: 'Round Intro', hint: `Round ${rn} is on the board. Show the question when you’re ready to read it.` },
         { title: 'Question Shown', hint: 'Just the question is on the board — answers still hidden, no clock. Read it aloud, then start the timer.' },
-        { title: phase.value === 'steal' ? 'Steal' : 'Team\'s Playing', hint: playHint },
+        { title: 'Primary Team Playing', hint: `${primaryName} is up: reveal answers as they’re guessed. When the timer runs out it hands to the steal.` },
+        { title: 'Steal', hint: `${stealName} is stealing — reveal each correct steal (they score). A wrong answer hands to Reveal only for the leftovers.` },
         { title: 'Scores', hint: 'The scoreboard is on the board. Move on to the next question.' },
     ];
 });
@@ -500,25 +503,29 @@ const showQuestion = async () => {
     fetchState();
 };
 
-// A round step is "done" only when it's genuinely finished — importantly, the
-// Team's Playing step (index 2) stays UNchecked until every answer is on the
-// board. That way, if the host jumps to Scores with an answer still hidden, the
-// step reads as incomplete instead of a misleading green check.
+// A round step is "done" only when it's genuinely finished — the board steps
+// (Primary Playing / Steal) stay UNchecked until every answer is on the board, so
+// jumping to Scores with an answer still hidden reads as incomplete, not a
+// misleading green check.
 const stepComplete = (i: number): boolean => {
-    if (i === 2) return allAnswersRevealed.value;
-    return i < roundStepIndex.value;
+    if (i >= roundStepIndex.value) return false;
+    if (i === 2 || i === 3) return allAnswersRevealed.value;
+    return true;
 };
 
-// The steps double as navigation: click an earlier step to jump back to it — e.g.
-// back to Team's Playing from Scores to reveal an answer you missed, then Show
-// Scores again. Each maps to the phase that step represents (reveals are kept).
+// The steps double as navigation: click a step to jump to it (reveals are kept).
+// Steal hands control to the other team; Scores drops to the recap.
 const goToStep = async (i: number) => {
     if (i === roundStepIndex.value) return;
+    if (i === 3) { // Steal → hand control to the other team
+        await stealStart();
+        return;
+    }
     const routeName = i === 0
         ? 'host.round.intro'          // Round Intro → Get Ready
-        : i === 3
+        : i === 4
             ? 'host.round.end'        // Scores → recap
-            : 'host.question.show';   // Question Shown / Team's Playing → board
+            : 'host.question.show';   // Question Shown / Primary Playing → board
     await axios.post(route(routeName, props.gameSession.id));
     fetchState();
 };
@@ -566,14 +573,33 @@ const stealStart = async () => {
     await axios.post(route('host.steal.start', props.gameSession.id));
     fetchState();
 };
-// The stealing team guessed wrong — end the board, reveal the misses, show scores.
-const stealWrong = async () => {
-    await axios.post(route('host.steal.wrong', props.gameSession.id));
-    fetchState();
+// The "Wrong Answer" buzzer on the board: during a steal, a wrong guess ends the
+// steal but NOT the board — it hands control to Reveal only so the host reveals the
+// leftovers (no points). The board then ends when every answer is up. Outside a
+// steal it just sounds the cue.
+const onWrongAnswer = () => {
+    if (phase.value === 'steal') {
+        revealWithoutPoints.value = true;
+    }
+    buzzWrong();
 };
-// The "Wrong Answer" buzzer on the board does double duty: during a steal a wrong
-// guess is terminal, so it ends the board; otherwise it just sounds the cue.
-const onWrongAnswer = () => (phase.value === 'steal' ? stealWrong() : buzzWrong());
+
+// Once every answer is revealed — a primary sweep, a stealer clearing the board, or
+// the leftovers shown in Reveal only — hold 2s so the last reveal registers on the
+// TV, then jump to the scoreboard. Pausing the clock first stops a swept board from
+// ticking on (and from tripping the timer-out steal).
+const advancingToScores = ref(false);
+watch(allAnswersRevealed, (all) => {
+    if (!all || advancingToScores.value) return;
+    if (!isAmericaSays || isFinal.value || isTiebreaker.value) return;
+    if (!['question', 'steal'].includes(phase.value)) return;
+    advancingToScores.value = true;
+    if (timerRunning.value) pauseTimer();
+    window.setTimeout(async () => {
+        await endRound();
+        advancingToScores.value = false;
+    }, 2000);
+});
 
 // ---- America Says final round -------------------------------------------------
 // A single time budget covers all final questions; the leading team plays for a
@@ -811,6 +837,8 @@ onUnmounted(() => {
                     <Button variant="outline" size="md" @click="confirmBackToSetup">Back to Setup</Button>
                     <Button v-if="currentQuestion" variant="danger" size="md" @click="showResetRoundConfirm = true">Reset Round</Button>
                     <Button v-if="currentQuestion && hasPreviousQuestion && !isFinal && !isTiebreaker" variant="primary" size="md" @click="previousQuestion">&larr; Previous</Button>
+                    <!-- Global escape to the scoreboard, enabled whenever the clock isn't running. -->
+                    <Button v-if="canShowScores" variant="primary" size="md" @click="endRound">Show Scores &rarr;</Button>
                     <!-- America Says advances via its guided Round Steps / Final cards. -->
                     <Button v-if="!isAmericaSays && currentQuestion && !isLastQuestion" variant="primary" size="md" @click="advanceQuestion">Next Question &rarr;</Button>
                     <!-- Always available so a stalled or abandoned game can be completed. -->
@@ -877,20 +905,20 @@ onUnmounted(() => {
                                         <Button v-else-if="isLastQuestion" variant="secondary" size="sm" @click="endGame">End Game</Button>
                                         <Button v-else variant="primary" size="sm" @click="advanceQuestion">Next Question &rarr;</Button>
                                     </template>
-                                    <!-- Steal: the other team is grabbing leftovers. Reveal each
-                                         correct steal on the board; a wrong one ends it via the
-                                         board's "Wrong Answer" cell. To undo an early hand-off,
-                                         click the primary team on the scoreboard. -->
+                                    <!-- Steal: reveal each correct steal on the board; a wrong answer
+                                         (board cell) hands to Reveal only for the leftovers. The board
+                                         ends itself once every answer is up. -->
                                     <template v-else-if="phase === 'steal'">
-                                        <span class="text-sm text-muted">Reveal steals on the board; “Wrong Answer” ends it.</span>
+                                        <span class="text-sm text-muted">Reveal steals on the board; a wrong answer hands to Reveal only.</span>
                                     </template>
+                                    <!-- Question Shown: start the clock for the primary team. -->
                                     <template v-else-if="!timerRunning">
                                         <Button variant="primary" size="sm" @click="startTimer">{{ startTimerLabel }}</Button>
                                     </template>
-                                    <!-- Primary team's turn: reveal their answers; hand to the steal early if they’re done -->
+                                    <!-- Primary team's turn: just reveal their answers. Time's up hands
+                                         to the steal; a full sweep jumps to the scores on its own. -->
                                     <template v-else>
-                                        <Button v-if="stealTeam" variant="primary" size="sm" @click="stealStart">Hand to {{ stealTeam.name }} to steal &rarr;</Button>
-                                        <Button :variant="otherTeam ? 'secondary' : 'primary'" size="sm" @click="endRound">Show Scores &rarr;</Button>
+                                        <span class="text-sm text-muted">Reveal {{ primaryTeam?.name ?? 'the team' }}’s answers as they’re guessed.</span>
                                     </template>
                                 </div>
                             </li>
@@ -1246,7 +1274,7 @@ onUnmounted(() => {
 
                             <!-- America Says: all revealed + optional sweep bonus -->
                             <div
-                                v-if="isAmericaSays && !isFinal && !isTiebreaker && allAnswersRevealed && !revealWithoutPoints && bonusDismissedQuestionId !== currentQuestion.id"
+                                v-if="isAmericaSays && !isFinal && !isTiebreaker && phase === 'question' && allAnswersRevealed && !revealWithoutPoints && bonusDismissedQuestionId !== currentQuestion.id"
                                 class="mb-4 rounded-lg border border-success/40 bg-success/10 p-4 text-center"
                             >
                                 <span class="text-xl font-bold text-success">All Answers Revealed!</span>
