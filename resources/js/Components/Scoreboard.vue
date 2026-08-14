@@ -22,17 +22,25 @@ interface Props {
     selectable?: boolean;
     /** Host: show the pencil that opens the score-edit modal. */
     editable?: boolean;
+    /** Host (America Says): show a "reveal only — no points" control sibling to
+     *  the team rows, for manually revealing the board with no team scoring. */
+    showRevealOnly?: boolean;
+    /** Whether reveal-only mode is currently active (highlights that row). */
+    revealOnlyActive?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
     showMembers: false,
     selectable: false,
     editable: false,
+    showRevealOnly: false,
+    revealOnlyActive: false,
 });
 
 const emit = defineEmits<{
     (e: 'select-team', teamId: number): void;
     (e: 'edit-scores'): void;
+    (e: 'reveal-only'): void;
 }>();
 
 const hasControl = (teamId: number): boolean => {
@@ -109,6 +117,22 @@ const onRowClick = (teamId: number) => {
                     </div>
                 </div>
             </div>
+
+            <!-- Reveal-only control: a sibling to the team rows (same size), but
+                 neutral — no team color, no score. Selecting it reveals answers
+                 without awarding any team, for fixing a board manually. -->
+            <button
+                v-if="showRevealOnly"
+                type="button"
+                class="hover-glow w-full cursor-pointer rounded-lg border border-dashed border-border-strong bg-surface-inset p-3 text-left transition-all duration-300"
+                :class="{ 'ring-2 ring-white shadow-[0_0_22px_2px_rgba(255,255,255,0.6)]': revealOnlyActive }"
+                @click="emit('reveal-only')"
+            >
+                <div class="flex items-center justify-between">
+                    <span class="font-semibold" :class="revealOnlyActive ? 'text-body' : 'text-muted'">Reveal only</span>
+                    <span class="text-sm" :class="revealOnlyActive ? 'text-body' : 'text-subtle'">no points</span>
+                </div>
+            </button>
         </div>
     </div>
 </template>

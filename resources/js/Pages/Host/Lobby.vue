@@ -841,7 +841,7 @@ const copyDisplayUrl = () => {
 
                 <div class="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
                     <!-- LEFT: question bank -->
-                    <div class="lg:border-r lg:border-border lg:pr-5">
+                    <div class="min-w-0 lg:border-r lg:border-border lg:pr-5">
                         <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-subtle">
                             Question bank
                             <span v-if="hasActiveSlot" class="ml-1 font-normal normal-case text-muted">— filling <span class="rounded-full border border-primary/50 bg-primary/10 px-2 py-0.5 text-primary">{{ activeSlotLabel }}</span></span>
@@ -862,16 +862,18 @@ const copyDisplayUrl = () => {
                                 v-for="q in activeList"
                                 :key="q.id"
                                 type="button"
-                                :class="['flex w-full items-center gap-3 border-t border-border/60 px-3 py-2.5 text-left first:border-t-0', q.id === activeCurrentId ? 'bg-primary/10' : 'hover:bg-surface-inset']"
+                                :class="['flex w-full flex-col gap-1.5 border-t border-border/60 px-3 py-2.5 text-left first:border-t-0 sm:flex-row sm:items-center sm:gap-3', q.id === activeCurrentId ? 'bg-primary/10' : 'hover:bg-surface-inset']"
                                 @click="assignToActive(q.id)"
                             >
-                                <span class="flex-1 text-sm text-body"><BlankText :text="q.question_text" /></span>
-                                <span v-if="q.round_type === 'final'" class="flex-none rounded border border-info/40 px-1.5 py-0.5 text-[10px] font-bold uppercase text-info">Final</span>
-                                <span v-if="q.id === activeCurrentId" class="flex-none rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Current</span>
-                                <span v-else-if="assignedLabels.has(q.id)" class="flex-none whitespace-nowrap rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-semibold text-primary">{{ assignedLabels.get(q.id) }}</span>
-                                <span class="flex-none whitespace-nowrap text-xs text-subtle">{{ q.answers_count }} ans</span>
-                                <span class="flex-none whitespace-nowrap text-xs text-muted" title="Times used in completed games">{{ q.times_used }}× used</span>
-                                <span v-if="seenBy(q.id)" class="flex-none whitespace-nowrap rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(q.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(q.id) }}</span>
+                                <span class="min-w-0 flex-1 text-sm text-body"><BlankText :text="q.question_text" /></span>
+                                <span class="flex flex-none flex-wrap items-center gap-x-2 gap-y-1 sm:flex-nowrap">
+                                    <span v-if="q.round_type === 'final'" class="flex-none rounded border border-info/40 px-1.5 py-0.5 text-[10px] font-bold uppercase text-info">Final</span>
+                                    <span v-if="q.id === activeCurrentId" class="flex-none rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Current</span>
+                                    <span v-else-if="assignedLabels.has(q.id)" class="flex-none whitespace-nowrap rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-semibold text-primary">{{ assignedLabels.get(q.id) }}</span>
+                                    <span class="flex-none whitespace-nowrap text-xs text-subtle">{{ q.answers_count }} ans</span>
+                                    <span class="flex-none whitespace-nowrap text-xs text-muted" title="Times used in completed games">{{ q.times_used }}× used</span>
+                                    <span v-if="seenBy(q.id)" class="flex-none whitespace-nowrap rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(q.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(q.id) }}</span>
+                                </span>
                             </button>
                             <p v-if="!hasActiveSlot" class="px-3 py-8 text-center text-sm text-muted">Select a slot on the right, then pick its question here.</p>
                             <p v-else-if="!activeList.length" class="px-3 py-6 text-center text-sm text-muted">No matching questions.</p>
@@ -879,7 +881,7 @@ const copyDisplayUrl = () => {
                     </div>
 
                     <!-- RIGHT: slots -->
-                    <div>
+                    <div class="min-w-0">
                         <div class="mb-2 flex items-center gap-2">
                             <h4 class="text-sm font-semibold text-body">Rounds</h4>
                             <span class="text-xs text-subtle"><template v-if="regularCols > 1">{{ regularRowCount }} × {{ teamsCount }}</template><template v-else>{{ regularRowCount }}</template></span>

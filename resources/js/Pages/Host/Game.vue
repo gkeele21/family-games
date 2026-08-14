@@ -827,38 +827,19 @@ onUnmounted(() => {
                     <Scoreboard
                         v-if="!(isAmericaSays && isFinal)"
                         :teams="teams"
-                        :active-team-id="gameState?.active_team_id"
-                        :controlling-team-ids="boardControllingTeamIds"
+                        :active-team-id="revealWithoutPoints ? null : gameState?.active_team_id"
+                        :controlling-team-ids="revealWithoutPoints ? [] : boardControllingTeamIds"
                         :selectable="!isOodles"
                         :editable="true"
+                        :show-reveal-only="isAmericaSays && !!currentQuestion && !isFinal && !isTiebreaker"
+                        :reveal-only-active="revealWithoutPoints"
                         @select-team="selectControllingTeam"
                         @edit-scores="openScoreModal"
+                        @reveal-only="revealWithoutPoints = !revealWithoutPoints"
                     />
                     <p v-if="!isOodles && currentQuestion && !isFinal" class="mt-2 text-center text-xs text-muted">
-                        Click a team to give them the turn
+                        Click a team to give them the turn, or “Reveal only” to reveal without scoring
                     </p>
-
-                    <!-- Reveal-only mode (America Says regular rounds): a selectable
-                         sibling to the team turn — points go to a team, or to nobody.
-                         Lives here so control and reveal-only sit together. -->
-                    <button
-                        v-if="isAmericaSays && currentQuestion && !isFinal"
-                        type="button"
-                        class="mt-3 flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors"
-                        :class="revealWithoutPoints ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset hover:border-border-strong'"
-                        @click="revealWithoutPoints = !revealWithoutPoints"
-                    >
-                        <span
-                            class="flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs font-bold"
-                            :class="revealWithoutPoints ? 'bg-primary text-white' : 'bg-surface-overlay text-muted'"
-                        >
-                            <span v-if="revealWithoutPoints">&check;</span>
-                        </span>
-                        <span>
-                            <span class="block text-sm font-semibold" :class="revealWithoutPoints ? 'text-body' : 'text-muted'">Reveal only — no points</span>
-                            <span class="block text-xs text-subtle">For answers neither team said. Reveals show on the board without scoring.</span>
-                        </span>
-                    </button>
 
                     <!-- Round steps (America Says): the whole phase progression with
                          hints; the current phase is highlighted and carries its action. -->
