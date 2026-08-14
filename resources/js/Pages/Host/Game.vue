@@ -440,6 +440,13 @@ const selectControllingTeam = async (teamId: number) => {
     }
     try {
         await axios.post(route('host.control.team', props.gameSession.id), { team_id: teamId });
+        // If we're mid-steal, handing control on the scoreboard is a correction:
+        // return to that team's turn (leave the steal) so the display and step
+        // checklist follow — otherwise we'd be stuck showing "STEAL" for the wrong
+        // team with no clock.
+        if (phase.value === 'steal') {
+            await axios.post(route('host.question.show', props.gameSession.id));
+        }
         fetchState();
     } catch (error: any) {
         console.error('Failed to set controlling team:', error);
@@ -567,15 +574,6 @@ const stealWrong = async () => {
 // The "Wrong Answer" buzzer on the board does double duty: during a steal a wrong
 // guess is terminal, so it ends the board; otherwise it just sounds the cue.
 const onWrongAnswer = () => (phase.value === 'steal' ? stealWrong() : buzzWrong());
-// Correction: the auto-hand to steal was premature — give control back to the
-// primary and return to their (paused) turn so the host can fix things.
-const backToPrimary = async () => {
-    const primaryId = primaryTeam.value?.id;
-    if (!primaryId) return;
-    await axios.post(route('host.control.team', props.gameSession.id), { team_id: primaryId });
-    await axios.post(route('host.question.show', props.gameSession.id));
-    fetchState();
-};
 
 // ---- America Says final round -------------------------------------------------
 // A single time budget covers all final questions; the leading team plays for a
@@ -900,10 +898,10 @@ onUnmounted(() => {
                                     </template>
                                     <!-- Steal: the other team is grabbing leftovers. Reveal each
                                          correct steal on the board; a wrong one ends it via the
-                                         board's "Wrong Answer" cell. "Back to primary" undoes an
-                                         early hand-off. -->
+                                         board's "Wrong Answer" cell. To undo an early hand-off,
+                                         click the primary team on the scoreboard. -->
                                     <template v-if="phase === 'steal'">
-                                        <Button v-if="primaryTeam" variant="secondary" size="sm" @click="backToPrimary">Back to {{ primaryTeam.name }}</Button>
+                                        <span class="text-sm text-muted">Reveal steals on the board; “Wrong Answer” ends it.</span>
                                     </template>
                                     <template v-else-if="!timerRunning">
                                         <Button variant="primary" size="sm" @click="startTimer">{{ startTimerLabel }}</Button>
