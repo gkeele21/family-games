@@ -92,10 +92,12 @@ watch(() => props.timerStartedAt, () => {
             {{ formattedTime }}
         </div>
 
-        <div v-if="isHost && !hideControls" class="flex gap-2 justify-center" :class="controlsClass">
+        <div v-if="isHost && !hideControls" class="flex flex-wrap gap-2 justify-center" :class="controlsClass">
             <Button v-if="!isRunning && !hideStart" variant="success" :size="size" @click="emit('start')">Start</Button>
             <Button v-if="isRunning" variant="accent" :size="size" @click="emit('pause')">Pause</Button>
             <Button variant="muted" :size="size" @click="emit('reset')">Reset</Button>
+            <!-- Extra host controls (e.g. America Says "End Timer") sit with Pause/Reset. -->
+            <slot name="controls" :size="size" />
         </div>
     </div>
 </template>

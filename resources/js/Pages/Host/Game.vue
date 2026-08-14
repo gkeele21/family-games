@@ -922,12 +922,11 @@ onUnmounted(() => {
                                     <template v-else-if="!timerRunning">
                                         <Button variant="primary" size="sm" @click="startTimer">{{ startTimerLabel }}</Button>
                                     </template>
-                                    <!-- Primary team's turn: reveal their answers. Time's up hands to
-                                         the steal (or use the button to end the clock early); a full
+                                    <!-- Primary team's turn: reveal their answers. Time's up (or the
+                                         "End Timer" button under the clock) hands to the steal; a full
                                          sweep jumps to the scores on its own. -->
                                     <template v-else>
                                         <span class="text-sm text-muted">Reveal {{ primaryTeam?.name ?? 'the team' }}’s answers as they’re guessed.</span>
-                                        <Button v-if="stealTeam && !allAnswersRevealed" variant="primary" size="sm" @click="showTimesUpConfirm = true">Time’s up — {{ stealTeam.name }} steals &rarr;</Button>
                                     </template>
                                 </div>
                             </li>
@@ -1198,7 +1197,17 @@ onUnmounted(() => {
                                     @pause="pauseTimer"
                                     @reset="resetTimer"
                                     @expired="onTimerExpired"
-                                />
+                                >
+                                    <!-- End the primary clock early → hand to the steal (confirmed). -->
+                                    <template #controls="{ size }">
+                                        <Button
+                                            v-if="isAmericaSays && !isFinal && phase === 'question' && timerRunning && stealTeam && !allAnswersRevealed"
+                                            variant="danger"
+                                            :size="size"
+                                            @click="showTimesUpConfirm = true"
+                                        >End Timer</Button>
+                                    </template>
+                                </GameTimer>
                             </div>
 
                             <!-- Oodles: control & actions -->
@@ -1440,7 +1449,7 @@ onUnmounted(() => {
             :show="showTimesUpConfirm"
             title="End the timer?"
             message="This ends the primary team's turn now and hands the board to the other team to steal — the same as the clock running out."
-            confirm-text="Time’s up"
+            confirm-text="End Timer"
             variant="danger"
             @confirm="confirmTimesUp"
             @cancel="showTimesUpConfirm = false"
