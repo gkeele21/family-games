@@ -508,25 +508,31 @@ onMounted(reconcileSlots);
 
 // ---- active slot + assignment ----
 type ActiveSlot = { group: 'regular'; round: number; team: number } | { group: 'final'; index: number };
-const activeSlot = ref<ActiveSlot>({ group: 'regular', round: 0, team: 0 });
+// Starts unset — nothing is armed on load, so browsing the bank can't silently
+// overwrite a slot. The host picks a slot first, which arms the bank to fill it.
+const activeSlot = ref<ActiveSlot | null>(null);
+const hasActiveSlot = computed(() => activeSlot.value !== null);
 const teamName = (j: number) => props.gameSession.teams[j]?.name ?? `Team ${j + 1}`;
 const teamColor = (j: number) => props.gameSession.teams[j]?.color ?? '#888888';
-const isRegularActive = (i: number, j: number) => activeSlot.value.group === 'regular' && activeSlot.value.round === i && activeSlot.value.team === j;
-const isFinalActive = (i: number) => activeSlot.value.group === 'final' && activeSlot.value.index === i;
+const isRegularActive = (i: number, j: number) => activeSlot.value?.group === 'regular' && activeSlot.value.round === i && activeSlot.value.team === j;
+const isFinalActive = (i: number) => activeSlot.value?.group === 'final' && activeSlot.value.index === i;
 const setRegularActive = (i: number, j: number) => { activeSlot.value = { group: 'regular', round: i, team: j }; };
 const setFinalActive = (i: number) => { activeSlot.value = { group: 'final', index: i }; };
 const regularSlotLabel = (i: number, j: number) =>
     regularCols.value > 1 ? `Round ${i + 1} · ${teamName(j)}` : `Round ${i + 1}`;
 const activeSlotLabel = computed(() => {
     const a = activeSlot.value;
+    if (!a) return null;
     return a.group === 'final' ? finalLabel(a.index) : regularSlotLabel(a.round, a.team);
 });
 const activeList = computed<BankQuestion[]>(() => {
     const a = activeSlot.value;
+    if (!a) return [];
     return a.group === 'final' ? finalPoolFor(a.index) : regularPool.value;
 });
 const activeCurrentId = computed(() => {
     const a = activeSlot.value;
+    if (!a) return null;
     return a.group === 'regular' ? (qsel.value.regular[a.round]?.[a.team]?.id ?? null) : (qsel.value.final[a.index]?.id ?? null);
 });
 // Every question already assigned to a slot → its slot label (shown in the bank).
@@ -539,8 +545,10 @@ const assignedLabels = computed(() => {
 const slotOf = (a: ActiveSlot): Slot | undefined =>
     a.group === 'regular' ? qsel.value.regular[a.round]?.[a.team] : qsel.value.final[a.index];
 const assignToActive = (id: number) => {
+    if (!activeSlot.value) return;
     const s = slotOf(activeSlot.value);
     if (s) { s.id = id; s.pinned = true; }
+    activeSlot.value = null; // replace complete → deselect, so the action reads as done (mirrors swap)
 };
 const swapSlot = (a: ActiveSlot) => {
     const s = slotOf(a);
@@ -834,10 +842,11 @@ const copyDisplayUrl = () => {
                     <div class="lg:border-r lg:border-border lg:pr-5">
                         <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-subtle">
                             Question bank
-                            <span class="ml-1 font-normal normal-case text-muted">— filling <span class="rounded-full border border-primary/50 bg-primary/10 px-2 py-0.5 text-primary">{{ activeSlotLabel }}</span></span>
+                            <span v-if="hasActiveSlot" class="ml-1 font-normal normal-case text-muted">— filling <span class="rounded-full border border-primary/50 bg-primary/10 px-2 py-0.5 text-primary">{{ activeSlotLabel }}</span></span>
+                            <span v-else class="ml-1 font-normal normal-case text-muted">— select a slot to choose its question</span>
                         </p>
                         <div class="mb-3 flex flex-wrap items-center gap-2">
-                            <template v-if="activeSlot.group === 'regular'">
+                            <template v-if="activeSlot?.group === 'regular'">
                                 <Select v-if="showSource" v-model="pickSource" :options="pickSourceOptions" allow-empty empty-label="Any source" />
                                 <Select v-if="showType" v-model="pickType" :options="pickTypeOptions" allow-empty empty-label="Any type" />
                                 <Select v-if="pickType === 'final' && answerCountOptions.length" v-model="pickAnswers" :options="answerCountOptions" allow-empty empty-label="Any # answers" />
@@ -862,7 +871,8 @@ const copyDisplayUrl = () => {
                                 <span class="flex-none whitespace-nowrap text-xs text-muted" title="Times used in completed games">{{ q.times_used }}× used</span>
                                 <span v-if="seenBy(q.id)" class="flex-none whitespace-nowrap rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(q.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(q.id) }}</span>
                             </button>
-                            <p v-if="!activeList.length" class="px-3 py-6 text-center text-sm text-muted">No matching questions.</p>
+                            <p v-if="!hasActiveSlot" class="px-3 py-8 text-center text-sm text-muted">Select a slot on the right, then pick its question here.</p>
+                            <p v-else-if="!activeList.length" class="px-3 py-6 text-center text-sm text-muted">No matching questions.</p>
                         </div>
                     </div>
 

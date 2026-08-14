@@ -900,7 +900,7 @@ onUnmounted(() => {
                                          correct steal on the board; a wrong one ends it via the
                                          board's "Wrong Answer" cell. To undo an early hand-off,
                                          click the primary team on the scoreboard. -->
-                                    <template v-if="phase === 'steal'">
+                                    <template v-else-if="phase === 'steal'">
                                         <span class="text-sm text-muted">Reveal steals on the board; “Wrong Answer” ends it.</span>
                                     </template>
                                     <template v-else-if="!timerRunning">
