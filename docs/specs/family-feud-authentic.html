@@ -26,11 +26,28 @@
     background:
       radial-gradient(120% 95% at 50% -10%, var(--set-core) 0%, var(--set-mid) 42%, var(--set-deep) 82%),
       var(--set-deep);}
-  /* concentric stage light rings behind the board */
-  .board::before{content:"";position:absolute;inset:0;pointer-events:none;
+  /* Full back WALL of light bulbs — the whole set is a lit board, not just a ring
+     around the answers. A tiled dot grid is the bulb field; a soft radial mask
+     fades it toward the edges for depth; a slow twinkle makes it breathe. */
+  .board::before{content:"";position:absolute;inset:-2%;pointer-events:none;z-index:0;
+    background-image:radial-gradient(circle,
+      rgba(216,235,255,.95) 0 1.5px,
+      rgba(120,170,255,.5) 2.2px 3.1px,
+      rgba(40,84,196,.14) 3.4px 5px,
+      transparent 5.4px);
+    background-size:44px 44px;
+    -webkit-mask-image:radial-gradient(125% 108% at 50% 34%, #000 38%, rgba(0,0,0,.4) 72%, transparent 100%);
+    mask-image:radial-gradient(125% 108% at 50% 34%, #000 38%, rgba(0,0,0,.4) 72%, transparent 100%);
+    animation:twinkle 4s ease-in-out infinite}
+  @keyframes twinkle{0%,100%{opacity:.6}50%{opacity:.85}}
+  /* Colored light washes drifting across the bulb wall (the set's moving lighting). */
+  .wallglow{position:absolute;inset:0;z-index:0;pointer-events:none;mix-blend-mode:screen;
     background:
-      radial-gradient(closest-side at 50% 30%, rgba(120,170,255,.30), rgba(120,170,255,0) 70%),
-      repeating-radial-gradient(circle at 50% 30%, rgba(150,200,255,.05) 0 3px, rgba(150,200,255,0) 3px 34px);}
+      radial-gradient(32% 26% at 22% 20%, rgba(80,150,255,.55), transparent 70%),
+      radial-gradient(30% 24% at 78% 26%, rgba(150,90,255,.42), transparent 70%),
+      radial-gradient(36% 30% at 60% 80%, rgba(60,120,255,.40), transparent 72%);
+    animation:drift 12s ease-in-out infinite alternate}
+  @keyframes drift{0%{transform:translate3d(-2%,-1%,0) scale(1.02)}100%{transform:translate3d(3%,2%,0) scale(1.08)}}
   /* blue stage-floor glow */
   .board::after{content:"";position:absolute;left:0;right:0;bottom:0;height:30%;
     background:linear-gradient(0deg, rgba(60,110,255,.40), rgba(60,110,255,0) 100%);
@@ -232,6 +249,9 @@
 </style>
 
 <div class="board" id="board">
+
+  <!-- drifting colored light washes over the bulb wall -->
+  <div class="wallglow"></div>
 
   <!-- survey question + round / multiplier -->
   <div class="topbar" id="topbar">

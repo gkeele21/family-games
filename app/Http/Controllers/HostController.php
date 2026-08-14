@@ -1685,6 +1685,28 @@ class HostController extends Controller
         return response()->json(['success' => true]);
     }
 
+    /**
+     * America Says regular round — sync the board phase to the host's Reveal-only
+     * control while a steal is in play. Turning Reveal only ON drops to the untimed
+     * "reveal the leftovers" phase (so the display clears its STEAL banner — nobody
+     * is stealing anymore); turning it OFF returns to the steal.
+     */
+    public function setStealReveal(Request $request, GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $validated = $request->validate(['reveal_only' => 'required|boolean']);
+
+        $state = $gameSession->gameState;
+        if ($state && in_array($state->getStateValue('phase'), ['steal', 'reveal'], true)) {
+            $state->setStateValue('phase', $validated['reveal_only'] ? 'reveal' : 'steal');
+        }
+
+        return response()->json(['success' => true]);
+    }
+
     // ---- America Says final round ---------------------------------------------
     // A single time budget (default 60s) covers all final questions. Each question
     // mirrors a regular round: the plaque is shown first (host reads it) with the

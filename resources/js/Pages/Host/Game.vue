@@ -441,11 +441,11 @@ const selectControllingTeam = async (teamId: number) => {
     }
     try {
         await axios.post(route('host.control.team', props.gameSession.id), { team_id: teamId });
-        // If we're mid-steal, handing control on the scoreboard is a correction:
-        // return to that team's turn (leave the steal) so the display and step
-        // checklist follow — otherwise we'd be stuck showing "STEAL" for the wrong
-        // team with no clock.
-        if (phase.value === 'steal') {
+        // If we're mid-steal (or revealing leftovers), handing control on the
+        // scoreboard is a correction: return to that team's turn so the display and
+        // step checklist follow — otherwise we'd be stuck showing "STEAL"/reveal for
+        // the wrong team with no clock.
+        if (['steal', 'reveal'].includes(phase.value)) {
             await axios.post(route('host.question.show', props.gameSession.id));
         }
         fetchState();
@@ -605,6 +605,18 @@ const onWrongAnswer = () => {
         revealWithoutPoints.value = true;
     }
     buzzWrong();
+};
+
+// The scoreboard's "Reveal only" control. Toggling it also syncs the board phase
+// during a steal so the TV's STEAL banner tracks it: on → reveal (banner off),
+// off → steal (banner back).
+const toggleRevealOnly = async () => {
+    const enabling = !revealWithoutPoints.value;
+    revealWithoutPoints.value = enabling;
+    if (isAmericaSays && !isFinal.value && !isTiebreaker.value && ['steal', 'reveal'].includes(phase.value)) {
+        await axios.post(route('host.steal.reveal', props.gameSession.id), { reveal_only: enabling });
+        fetchState();
+    }
 };
 
 // Once every answer is revealed — a primary sweep, a stealer clearing the board, or
@@ -886,7 +898,7 @@ onUnmounted(() => {
                         :reveal-only-active="revealWithoutPoints"
                         @select-team="selectControllingTeam"
                         @edit-scores="openScoreModal"
-                        @reveal-only="revealWithoutPoints = !revealWithoutPoints"
+                        @reveal-only="toggleRevealOnly"
                     />
                     <p v-if="!isOodles && currentQuestion && !isFinal" class="mt-2 text-center text-xs text-muted">
                         Click a team to give them the turn, or “Reveal only” to reveal without scoring
