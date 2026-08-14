@@ -573,6 +573,13 @@ const stealStart = async () => {
     await axios.post(route('host.steal.start', props.gameSession.id));
     fetchState();
 };
+// Ending the primary's clock early is confirmed so an accidental click doesn't cut
+// their turn short — then it hands to the steal exactly like the timer running out.
+const showTimesUpConfirm = ref(false);
+const confirmTimesUp = () => {
+    showTimesUpConfirm.value = false;
+    stealStart();
+};
 // The "Wrong Answer" buzzer on the board: during a steal, a wrong guess ends the
 // steal but NOT the board — it hands control to Reveal only so the host reveals the
 // leftovers (no points). The board then ends when every answer is up. Outside a
@@ -915,10 +922,12 @@ onUnmounted(() => {
                                     <template v-else-if="!timerRunning">
                                         <Button variant="primary" size="sm" @click="startTimer">{{ startTimerLabel }}</Button>
                                     </template>
-                                    <!-- Primary team's turn: just reveal their answers. Time's up hands
-                                         to the steal; a full sweep jumps to the scores on its own. -->
+                                    <!-- Primary team's turn: reveal their answers. Time's up hands to
+                                         the steal (or use the button to end the clock early); a full
+                                         sweep jumps to the scores on its own. -->
                                     <template v-else>
                                         <span class="text-sm text-muted">Reveal {{ primaryTeam?.name ?? 'the team' }}’s answers as they’re guessed.</span>
+                                        <Button v-if="stealTeam && !allAnswersRevealed" variant="primary" size="sm" @click="showTimesUpConfirm = true">Time’s up — {{ stealTeam.name }} steals &rarr;</Button>
                                     </template>
                                 </div>
                             </li>
@@ -1424,6 +1433,18 @@ onUnmounted(() => {
             @confirm="resetRound"
             @cancel="showResetRoundConfirm = false"
             @close="showResetRoundConfirm = false"
+        />
+
+        <!-- Time's up (end the primary's clock early) confirm -->
+        <Confirm
+            :show="showTimesUpConfirm"
+            title="End the timer?"
+            message="This ends the primary team's turn now and hands the board to the other team to steal — the same as the clock running out."
+            confirm-text="Time’s up"
+            variant="danger"
+            @confirm="confirmTimesUp"
+            @cancel="showTimesUpConfirm = false"
+            @close="showTimesUpConfirm = false"
         />
 
         <!-- End game confirm -->

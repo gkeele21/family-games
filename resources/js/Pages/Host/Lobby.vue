@@ -842,8 +842,10 @@ const copyDisplayUrl = () => {
                 </template>
 
                 <div class="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
-                    <!-- LEFT: question bank -->
-                    <div class="min-w-0 lg:border-r lg:border-border lg:pr-5">
+                    <!-- Question bank — below the slots when stacked on mobile (so arming
+                         a slot grows the list below your viewport, not above it), but the
+                         left column on desktop. -->
+                    <div class="order-2 min-w-0 lg:order-1 lg:border-r lg:border-border lg:pr-5">
                         <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-subtle">
                             Question bank
                             <span v-if="hasActiveSlot" class="ml-1 font-normal normal-case text-muted">— filling <span class="rounded-full border border-primary/50 bg-primary/10 px-2 py-0.5 text-primary">{{ activeSlotLabel }}</span></span>
@@ -882,8 +884,9 @@ const copyDisplayUrl = () => {
                         </div>
                     </div>
 
-                    <!-- RIGHT: slots -->
-                    <div class="min-w-0">
+                    <!-- Slots — first when stacked on mobile so clicking one keeps your
+                         scroll position; right column on desktop. -->
+                    <div class="order-1 min-w-0 lg:order-2">
                         <div class="mb-2 flex items-center gap-2">
                             <h4 class="text-sm font-semibold text-body">Rounds</h4>
                             <span class="text-xs text-subtle"><template v-if="regularCols > 1">{{ regularRowCount }} × {{ teamsCount }}</template><template v-else>{{ regularRowCount }}</template></span>
