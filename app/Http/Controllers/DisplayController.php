@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\BuildsFastMoneyBoard;
 use App\Models\GameSession;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class DisplayController extends Controller
 {
+    use BuildsFastMoneyBoard;
+
     /**
      * Code-entry landing page for the TV display. This is the stable URL you add
      * to an iPhone home screen once: launching it opens chromeless (via the
@@ -84,6 +87,7 @@ class DisplayController extends Controller
 
         $state = $gameSession->gameState;
         $currentQuestion = $state?->currentQuestion;
+        $isFamilyFeud = $gameSession->gameType->slug === 'family-feud';
 
         // For display, we hide unrevealed answers (same as player view)
         $answers = [];
@@ -169,6 +173,20 @@ class DisplayController extends Controller
                 // Monotonic counter bumped by the host's "Wrong" buzzer; the
                 // display plays its incorrect sound each time it advances.
                 'wrong_buzz' => $state?->getStateValue('wrong_buzz'),
+                // Family Feud: the authoritative strike count (the board flashes N
+                // X's and sounds the strike/buzzer cue when it rises), the strike
+                // limit, and the round's point multiplier (rounds 1-2 = 1×, etc.).
+                'strikes' => $isFamilyFeud ? (int) $state?->getStateValue('strikes', 0) : null,
+                'max_strikes' => $isFamilyFeud ? (int) $gameSession->getConfig('max_strikes', 3) : null,
+                // Face-off cues: a buzz-in sounds the buzzer; a wrong face-off
+                // answer flashes a strike X — both bumped as monotonic counters.
+                'faceoff_buzz' => $isFamilyFeud ? (int) $state?->getStateValue('faceoff_buzz', 0) : null,
+                'faceoff_strike' => $isFamilyFeud ? (int) $state?->getStateValue('faceoff_strike', 0) : null,
+                'round_multiplier' => $isFamilyFeud && $currentQuestion
+                    ? $this->feudRoundMultiplier($gameSession, $currentQuestion)
+                    : null,
+                // Family Feud Fast Money board (rows + totals), null unless active.
+                'fast_money' => $isFamilyFeud ? $this->fastMoneyPayload($gameSession, $state) : null,
                 // True on the last regular round's recap, before the final begins.
                 'final_queued' => $finalQueued,
                 // True when the recap follows the last question of the round.
@@ -206,6 +224,20 @@ class DisplayController extends Controller
      * squishes the underscores into a continuous line, so the exact character
      * count stays hidden while hyphens still read correctly.
      */
+    /**
+     * The round multiplier for the current Feud question (stored at init as
+     * points_available), falling back to the config schedule, then 1×.
+     */
+    private function feudRoundMultiplier($gameSession, $currentQuestion): int
+    {
+        $mult = (int) $currentQuestion->points_available;
+        if ($mult > 0) {
+            return $mult;
+        }
+        $schedule = $gameSession->getConfig('round_multipliers', []);
+        return (int) ($schedule[(string) ($currentQuestion->round_number ?? 1)] ?? 1);
+    }
+
     private function obfuscateAnswer(string $text): string
     {
         $words = array_map(function ($word) {

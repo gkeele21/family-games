@@ -81,6 +81,21 @@ interface FinalQuestion {
     is_current: boolean;
 }
 
+// Family Feud Fast Money board (host view — carries each question's survey answers
+// so the host can reveal what the player said).
+interface FmSurveyAnswer { id: number; text: string; points: number }
+interface FmCell { revealed: boolean; text?: string | null; points?: number; duplicate?: boolean }
+interface FmRow { id: number; question: string; p1: FmCell; p2: FmCell; answers: FmSurveyAnswer[] }
+interface FastMoney {
+    rows: FmRow[];
+    target: number;
+    active_player: number;
+    p1_total: number;
+    p2_total: number;
+    combined_total: number;
+    result: 'win' | 'lose' | null;
+}
+
 interface Props {
     gameSession: {
         id: number;
@@ -108,6 +123,7 @@ const hasPreviousQuestion = ref(false);
 const isLastQuestion = ref(false);
 const finalQueued = ref(false);
 const finalQuestions = ref<FinalQuestion[]>([]);
+const fastMoney = ref<FastMoney | null>(null);
 const selectedControllingTeams = ref<number[]>([]);
 const showControlModal = ref(false);
 const selectedAllPlayTeams = ref<number[]>([]);
@@ -119,6 +135,7 @@ let pollInterval: number | null = null;
 
 const isOodles = props.gameSession.game_type.slug === 'oodles';
 const isAmericaSays = props.gameSession.game_type.slug === 'america-says';
+const isFamilyFeud = props.gameSession.game_type.slug === 'family-feud';
 
 // Label for the current question's round/segment (e.g. "Round 2", "Final Round").
 const roundLabel = computed(() => {
@@ -139,6 +156,24 @@ const answerPoints = (answer: Answer): number =>
 const allAnswersRevealed = computed(() => {
     if (!currentQuestion.value) return false;
     return currentQuestion.value.answers.every(a => a.revealed);
+});
+
+// Order the host answer grid to match the display board. Family Feud's TV board
+// runs the top answers DOWN the left column then the rest down the right (1-4
+// left, 5-8 right), so interleave the ranked answers here — the 2-column grid
+// fills row-major, so [a0, a4, a1, a5, …] renders as two stacked columns. Other
+// games keep their natural order.
+const orderedAnswers = computed<Answer[]>(() => {
+    const list = currentQuestion.value?.answers ?? [];
+    if (!isFamilyFeud) return list;
+    const sorted = [...list].sort((a, b) => a.display_order - b.display_order);
+    const half = Math.ceil(sorted.length / 2);
+    const out: Answer[] = [];
+    for (let i = 0; i < half; i++) {
+        out.push(sorted[i]);
+        if (sorted[half + i]) out.push(sorted[half + i]);
+    }
+    return out;
 });
 
 const getControllingTeamName = computed(() => {
@@ -169,6 +204,7 @@ const fetchState = async () => {
         isLastQuestion.value = !!response.data.isLastQuestion;
         finalQueued.value = !!response.data.finalQueued;
         finalQuestions.value = response.data.finalQuestions || [];
+        fastMoney.value = response.data.fastMoney ?? null;
     } catch (error) {
         console.error('Failed to fetch state:', error);
     }
@@ -444,8 +480,9 @@ const selectControllingTeam = async (teamId: number) => {
         // If we're mid-steal (or revealing leftovers), handing control on the
         // scoreboard is a correction: return to that team's turn so the display and
         // step checklist follow — otherwise we'd be stuck showing "STEAL"/reveal for
-        // the wrong team with no clock.
-        if (['steal', 'reveal'].includes(phase.value)) {
+        // the wrong team with no clock. America Says only — Feud resolves the steal
+        // via explicit buttons, and its "show question" goes back to the face-off.
+        if (isAmericaSays && ['steal', 'reveal'].includes(phase.value)) {
             await axios.post(route('host.question.show', props.gameSession.id));
         }
         fetchState();
@@ -818,6 +855,152 @@ const finalStatusList = computed(() =>
 );
 const finalStatusLabel: Record<string, string> = { done: 'Completed', current: 'On now', skipped: 'Skipped', upcoming: 'Up next' };
 
+// ---- Family Feud regular round ------------------------------------------------
+// Feud reuses the guided-flow scaffolding (phase-driven steps, the scoreboard, the
+// answer grid) but scores a POINT POOL rather than per-answer: reveals accrue the
+// answers' survey points, and the whole pool × the round multiplier is awarded once
+// at resolution — to the controlling team if they clear or the steal fails, the
+// stealing team if it succeeds (see docs/family-feud-game-rules.md). Strikes are
+// authoritative state the display flashes; 3 strikes hands to the one-guess steal.
+//
+// Phases (shared with the AS scaffolding where they line up):
+//   intro → faceoff → question (play) → steal/reveal → recap.
+const feudMultiplier = computed(() => {
+    const q = currentQuestion.value;
+    if (!q) return 1;
+    if ((q.points_available ?? 0) > 0) return q.points_available;
+    const sched = props.config?.round_multipliers ?? {};
+    return Number(sched[String(q.round_number ?? 1)] ?? 1);
+});
+// The running pool (survey points of revealed answers) and its multiplied value.
+const feudPool = computed(() =>
+    (currentQuestion.value?.answers ?? []).reduce((sum, a) => sum + (a.revealed ? (a.points ?? 0) : 0), 0)
+);
+const feudPot = computed(() => feudPool.value * feudMultiplier.value);
+const feudStrikes = computed(() => Number(gameState.value?.state_data?.strikes ?? 0));
+const feudMaxStrikes = computed(() => Number(props.config?.max_strikes ?? 3));
+
+const feudStepIndex = computed(() => {
+    switch (phase.value) {
+        case 'intro': return 0;
+        case 'faceoff': return 1;
+        case 'question': return 2;
+        case 'steal':
+        case 'reveal': return 3;
+        case 'recap': return 4;
+        default: return 0;
+    }
+});
+const feudSteps = computed(() => [
+    { title: 'Round Intro', hint: `Round ${gameState.value?.round_number ?? 1} is on the board. Show the question to start the face-off.` },
+    { title: 'Face-Off', hint: 'Mark who buzzed in first, then reveal their answer (or Strike). Get the #1 answer and they choose; otherwise the other team answers and the higher points decides Play or Pass.' },
+    { title: 'Playing', hint: `${primaryTeam.value?.name ?? 'The controlling team'} guesses the board — reveal answers as they’re said. A wrong guess is a Strike; ${feudMaxStrikes.value} strikes hands to the steal. Clearing the board wins the pool.` },
+    { title: 'Steal', hint: `${stealTeam.value?.name ?? 'The other team'} gets ONE guess. A correct steal wins the whole pool; a miss and the original team keeps it.` },
+    { title: 'Scores', hint: 'The pool has been awarded. Move on to the next round.' },
+]);
+const feudStepComplete = (i: number): boolean => i < feudStepIndex.value;
+
+// Steps double as navigation. The steal (step 3) is only reached via strikes / the
+// hand-off, so it isn't a jump target.
+const feudGoToStep = async (i: number) => {
+    if (i === feudStepIndex.value) return;
+    const routeName = i === 0 ? 'host.round.intro'
+        : i === 1 ? 'host.question.show'
+        : i === 2 ? 'host.feud.play'
+        : i === 4 ? 'host.round.end'
+        : null;
+    if (!routeName) return;
+    await axios.post(route(routeName, props.gameSession.id));
+    fetchState();
+};
+
+// Face-off state (who buzzed, whose turn, who decides Play/Pass). Populated once
+// a team buzzes in; the decider is filled once the flow resolves.
+const faceoff = computed<{ buzzed: number | null; turn: number | null; answers: Record<string, number>; decider: number | null } | null>(
+    () => gameState.value?.state_data?.faceoff ?? null
+);
+const faceoffTurnTeam = computed<Team | null>(() => teams.value.find(t => t.id === faceoff.value?.turn) ?? null);
+const faceoffDecider = computed<Team | null>(() => teams.value.find(t => t.id === faceoff.value?.decider) ?? null);
+const feudFaceoffBuzz = async (teamId: number) => {
+    await axios.post(route('host.feud.faceoff.buzz', props.gameSession.id), { team_id: teamId });
+    fetchState();
+};
+
+const feudStrike = async () => {
+    await axios.post(route('host.feud.strike', props.gameSession.id));
+    fetchState();
+};
+const feudClearStrikes = async () => {
+    await axios.post(route('host.feud.clear-strikes', props.gameSession.id));
+    fetchState();
+};
+const feudStartPlay = async () => {
+    await axios.post(route('host.feud.play', props.gameSession.id));
+    fetchState();
+};
+// Play keeps the face-off winner; Pass hands control to the other team. Both then
+// begin the controlling team's turn.
+const feudPlay = async () => { await feudStartPlay(); };
+const feudPass = async () => {
+    const other = idleTurnTeam.value;
+    if (other) {
+        await axios.post(route('host.control.team', props.gameSession.id), { team_id: other.id });
+    }
+    await feudStartPlay();
+};
+const feudResolve = async (outcome: 'clear' | 'steal_success' | 'steal_fail') => {
+    await axios.post(route('host.feud.resolve', props.gameSession.id), { outcome });
+    fetchState();
+};
+
+// Auto-resolve when the controlling team clears the whole board during play — hold
+// 2s so the last reveal lands on the TV, then award the pool and drop to scores.
+const feudResolving = ref(false);
+watch(allAnswersRevealed, (all) => {
+    if (!all || feudResolving.value) return;
+    if (!isFamilyFeud || phase.value !== 'question') return;
+    feudResolving.value = true;
+    window.setTimeout(async () => {
+        await feudResolve('clear');
+        feudResolving.value = false;
+    }, 2000);
+});
+watch(() => currentQuestion.value?.id, () => { feudResolving.value = false; });
+
+// ---- Family Feud Fast Money ---------------------------------------------------
+// Two players play two timed passes over the same 5 questions (Player 1 = 20s,
+// Player 2 = 25s, who can't duplicate). The host reveals each player's answer by
+// clicking the survey answer they matched (or "No match" / "Duplicate" for 0). A
+// combined total ≥ the target wins. Phases: fast_money_intro → _p1 → _p2 → _result.
+const isFastMoney = computed(() =>
+    phase.value.startsWith('fast_money') || currentQuestion.value?.segment === 'fast_money'
+);
+const fmActivePlayer = computed(() => fastMoney.value?.active_player ?? 1);
+
+const fmStartPlayer = async (player: 1 | 2) => {
+    timerExpiredHandled.value = false;
+    await axios.post(route('host.feud.fm.start', props.gameSession.id), { player });
+    fetchState();
+};
+const fmReveal = async (sessionQuestionId: number, opts: { answer_id?: number; duplicate?: boolean } = {}) => {
+    await axios.post(route('host.feud.fm.reveal', props.gameSession.id), {
+        session_question_id: sessionQuestionId,
+        ...opts,
+    });
+    fetchState();
+};
+const fmClear = async (sessionQuestionId: number) => {
+    await axios.post(route('host.feud.fm.clear', props.gameSession.id), { session_question_id: sessionQuestionId });
+    fetchState();
+};
+const fmResult = async () => {
+    await axios.post(route('host.feud.fm.result', props.gameSession.id));
+    fetchState();
+};
+// Whether a given row already has the active player's answer revealed (for Clear).
+const fmActiveRevealed = (row: FmRow): boolean =>
+    (fmActivePlayer.value === 1 ? row.p1.revealed : row.p2.revealed);
+
 // Dismiss the "All Answers Revealed" bonus prompt for this question (no sweep).
 const dismissBonus = () => {
     if (currentQuestion.value) bonusDismissedQuestionId.value = currentQuestion.value.id;
@@ -874,8 +1057,9 @@ onUnmounted(() => {
                     <Button v-if="currentQuestion && hasPreviousQuestion && !isFinal && !isTiebreaker" variant="primary" size="md" @click="previousQuestion">&larr; Previous</Button>
                     <!-- Global escape to the scoreboard, enabled whenever the clock isn't running. -->
                     <Button v-if="canShowScores" variant="primary" size="md" @click="endRound">Show Scores &rarr;</Button>
-                    <!-- America Says advances via its guided Round Steps / Final cards. -->
-                    <Button v-if="!isAmericaSays && currentQuestion && !isLastQuestion" variant="primary" size="md" @click="advanceQuestion">Next Question &rarr;</Button>
+                    <!-- America Says & Family Feud advance via their guided Round Steps /
+                         Final cards; other games use this header button. -->
+                    <Button v-if="!isAmericaSays && !isFamilyFeud && currentQuestion && !isLastQuestion" variant="primary" size="md" @click="advanceQuestion">Next Question &rarr;</Button>
                     <!-- Only near the finish: the final board's clock, or the last round's scores. -->
                     <Button v-if="canEndGame" :variant="isLastQuestion ? 'secondary' : 'outline'" size="md" @click="endGame">End Game</Button>
                 </div>
@@ -955,6 +1139,101 @@ onUnmounted(() => {
                                          sweep jumps to the scores on its own. -->
                                     <template v-else>
                                         <span class="text-sm text-muted">Reveal {{ primaryTeam?.name ?? 'the team' }}’s answers as they’re guessed.</span>
+                                    </template>
+                                </div>
+                            </li>
+                        </ol>
+                    </Card>
+
+                    <!-- Round steps (Family Feud): face-off → play (with strikes) →
+                         steal → scores. Mirrors the America Says checklist but scores
+                         a point pool; the current phase carries its action. -->
+                    <Card v-if="isFamilyFeud && currentQuestion && currentQuestion.segment !== 'fast_money'" title="Round Steps" class="mt-4">
+                        <div class="mb-3 flex flex-wrap items-center gap-2 border-b border-border pb-3">
+                            <span class="text-sm font-medium text-muted">Round {{ gameState?.round_number ?? 1 }}</span>
+                            <span v-if="feudMultiplier > 1" class="rounded-full bg-gold/20 px-2 py-0.5 text-xs font-bold text-gold">{{ feudMultiplier }}&times; points</span>
+                            <span class="ml-auto text-sm font-semibold text-body">Pool: {{ feudPot }}</span>
+                        </div>
+                        <ol class="space-y-2">
+                            <li
+                                v-for="(step, i) in feudSteps"
+                                :key="i"
+                                class="rounded-lg border p-3 transition-all"
+                                :class="[
+                                    i === feudStepIndex ? 'border-border bg-surface-inset ring-2 ring-white shadow-[0_0_18px_2px_rgba(255,255,255,0.45)]' : 'border-border bg-surface-inset',
+                                    i !== feudStepIndex ? 'cursor-pointer hover:border-border-strong' : '',
+                                ]"
+                                @click="i !== feudStepIndex ? feudGoToStep(i) : null"
+                            >
+                                <div class="flex items-center gap-2">
+                                    <span
+                                        class="flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs font-bold"
+                                        :class="feudStepComplete(i) ? 'bg-success text-white' : 'bg-warning text-white'"
+                                    >
+                                        <span v-if="feudStepComplete(i)">&check;</span><span v-else>{{ i + 1 }}</span>
+                                    </span>
+                                    <span class="font-semibold" :class="i === feudStepIndex ? 'text-body' : 'text-muted'">{{ step.title }}</span>
+                                </div>
+                                <p class="mt-1 pl-8 text-xs" :class="i === feudStepIndex ? 'text-body' : 'text-subtle'">{{ step.hint }}</p>
+
+                                <div v-if="i === feudStepIndex" class="mt-3 flex flex-wrap gap-2 pl-8">
+                                    <!-- Round intro → show the question (starts the face-off). -->
+                                    <Button v-if="phase === 'intro'" variant="primary" size="sm" @click="showQuestion">Show Question</Button>
+
+                                    <!-- Face-off. Before a buzz: who buzzed in first?
+                                         After: reveal their answer (or Strike) in the
+                                         answers section — the winner is worked out
+                                         automatically. Play/Pass appears once decided. -->
+                                    <template v-else-if="phase === 'faceoff'">
+                                        <template v-if="faceoffDecider">
+                                            <span class="w-full text-xs text-muted"><span class="font-semibold text-body">{{ faceoffDecider.name }}</span> won the face-off — play or pass?</span>
+                                            <Button variant="primary" size="sm" @click="feudPlay">Play &rarr;</Button>
+                                            <Button variant="secondary" size="sm" @click="feudPass">Pass to {{ idleTurnTeam?.name ?? 'other team' }} &rarr;</Button>
+                                        </template>
+                                        <template v-else-if="faceoff?.buzzed">
+                                            <span class="w-full text-xs text-muted"><span class="font-semibold text-body">{{ faceoffTurnTeam?.name ?? 'The team' }}</span> is up — reveal their answer, or hit Strike in the answers section.</span>
+                                        </template>
+                                        <template v-else>
+                                            <span class="w-full text-xs text-muted">Who buzzed in first?</span>
+                                            <!-- Buzz-in buttons in each team's own color (team colors
+                                                 are the sanctioned inline-style exception). -->
+                                            <button
+                                                v-for="team in teams"
+                                                :key="team.id"
+                                                type="button"
+                                                class="rounded-lg px-3 py-1.5 text-sm font-bold text-white shadow transition-all hover:opacity-90"
+                                                :style="{ backgroundColor: team.color }"
+                                                @click="feudFaceoffBuzz(team.id)"
+                                            >{{ team.name }}</button>
+                                        </template>
+                                    </template>
+
+                                    <!-- Playing: strike tracker (the Strike button lives in the answers section). -->
+                                    <template v-else-if="phase === 'question'">
+                                        <div class="flex w-full items-center gap-2">
+                                            <span class="text-xs text-muted">Strikes:</span>
+                                            <span class="flex gap-1">
+                                                <span
+                                                    v-for="n in feudMaxStrikes"
+                                                    :key="n"
+                                                    class="flex h-6 w-6 items-center justify-center rounded-full border text-sm font-black"
+                                                    :class="n <= feudStrikes ? 'border-danger bg-danger/20 text-danger' : 'border-border text-subtle'"
+                                                >&times;</span>
+                                            </span>
+                                            <Button v-if="feudStrikes > 0" variant="muted" size="xs" class="ml-1" @click="feudClearStrikes">Clear</Button>
+                                        </div>
+                                    </template>
+
+                                    <!-- Steal: one guess. A revealed answer wins the pool; the Strike
+                                         button ends it as a miss — both resolve automatically. -->
+                                    <template v-else-if="phase === 'steal' || phase === 'reveal'">
+                                        <span class="w-full text-xs text-muted">{{ stealTeam?.name ?? 'The other team' }} gets one guess — reveal a correct answer, or hit Strike for a miss.</span>
+                                    </template>
+
+                                    <!-- Scores. -->
+                                    <template v-else-if="phase === 'recap'">
+                                        <Button v-if="isLastQuestion" variant="secondary" size="sm" @click="endGame">End Game</Button>
+                                        <Button v-else variant="primary" size="sm" @click="advanceQuestion">Next Round &rarr;</Button>
                                     </template>
                                 </div>
                             </li>
@@ -1191,8 +1470,79 @@ onUnmounted(() => {
                         </div>
                     </Card>
 
+                    <!-- Fast Money (Family Feud): two timed passes over the same 5
+                         questions. The host starts each player's clock, then reveals
+                         what they said (a survey answer for its points, or No match /
+                         Duplicate for 0), and shows the result vs the target. -->
+                    <Card v-if="isFamilyFeud && isFastMoney" title="Fast Money">
+                        <div class="mb-4 flex flex-wrap items-center gap-3 border-b border-border pb-3">
+                            <span class="text-sm text-muted">Target <span class="font-bold text-body">{{ fastMoney?.target ?? 200 }}</span></span>
+                            <span class="text-sm text-muted">P1 <b class="text-body">{{ fastMoney?.p1_total ?? 0 }}</b></span>
+                            <span class="text-sm text-muted">P2 <b class="text-body">{{ fastMoney?.p2_total ?? 0 }}</b></span>
+                            <span class="ml-auto rounded-full bg-gold/20 px-3 py-1 text-sm font-bold text-gold">Total {{ fastMoney?.combined_total ?? 0 }} / {{ fastMoney?.target ?? 200 }}</span>
+                        </div>
+
+                        <!-- Pass controls -->
+                        <div class="mb-4 flex flex-wrap items-center gap-3">
+                            <template v-if="phase === 'fast_money_intro'">
+                                <span class="text-muted">Two players from the winning team play. Start Player 1 (20s).</span>
+                                <Button variant="primary" size="md" class="ml-auto" @click="fmStartPlayer(1)">Start Player 1 &rarr;</Button>
+                            </template>
+                            <template v-else-if="phase === 'fast_money_p1' || phase === 'fast_money_p2'">
+                                <span class="font-semibold text-body">Player {{ fmActivePlayer }} answering</span>
+                                <GameTimer
+                                    v-if="gameState"
+                                    size="sm"
+                                    :timer-started-at="gameState.timer_started_at"
+                                    :timer-duration="gameState.timer_duration"
+                                    :is-host="true"
+                                    :hide-start="true"
+                                    @pause="pauseTimer"
+                                    @reset="resetTimer"
+                                />
+                                <Button v-if="phase === 'fast_money_p1'" variant="primary" size="md" class="ml-auto" @click="fmStartPlayer(2)">Start Player 2 (25s) &rarr;</Button>
+                                <Button v-else variant="primary" size="md" class="ml-auto" @click="fmResult">Show Result &rarr;</Button>
+                            </template>
+                            <template v-else-if="phase === 'fast_money_result'">
+                                <span class="text-lg font-bold" :class="fastMoney?.result === 'win' ? 'text-success' : 'text-danger'">
+                                    {{ fastMoney?.result === 'win' ? 'Winner! 🎉' : 'Missed the target' }} — {{ fastMoney?.combined_total ?? 0 }} / {{ fastMoney?.target ?? 200 }}
+                                </span>
+                                <Button variant="secondary" size="md" class="ml-auto" @click="endGame">End Game</Button>
+                            </template>
+                        </div>
+
+                        <!-- The 5 questions; reveal the active player's answer on each. -->
+                        <div v-if="phase !== 'fast_money_intro'" class="space-y-3">
+                            <div v-for="(row, ri) in (fastMoney?.rows ?? [])" :key="row.id" class="rounded-lg border border-border bg-surface-inset p-3">
+                                <div class="mb-2 flex items-center gap-2">
+                                    <span class="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-surface-overlay text-xs font-bold text-body">{{ ri + 1 }}</span>
+                                    <span class="font-semibold text-body">{{ row.question }}</span>
+                                </div>
+                                <div class="mb-2 flex flex-wrap gap-2 text-sm">
+                                    <span class="rounded px-2 py-1" :class="row.p1.revealed ? 'bg-surface-overlay text-body' : 'text-subtle'">
+                                        P1: <template v-if="row.p1.revealed">{{ row.p1.text || '—' }} ({{ row.p1.points ?? 0 }})</template><template v-else>—</template>
+                                    </span>
+                                    <span class="rounded px-2 py-1" :class="row.p2.revealed ? (row.p2.duplicate ? 'bg-danger/15 text-danger' : 'bg-surface-overlay text-body') : 'text-subtle'">
+                                        P2: <template v-if="row.p2.revealed">{{ row.p2.duplicate ? 'DUPLICATE' : (row.p2.text || '—') }} ({{ row.p2.points ?? 0 }})</template><template v-else>—</template>
+                                    </span>
+                                </div>
+                                <div v-if="phase === 'fast_money_p1' || phase === 'fast_money_p2'" class="flex flex-wrap items-center gap-1.5">
+                                    <button
+                                        v-for="ans in row.answers"
+                                        :key="ans.id"
+                                        class="rounded-full border border-border bg-surface-overlay px-2.5 py-1 text-xs font-medium text-body transition-all hover:border-primary"
+                                        @click="fmReveal(row.id, { answer_id: ans.id })"
+                                    >{{ ans.text }} <span class="text-muted">{{ ans.points }}</span></button>
+                                    <button class="rounded-full border border-border px-2.5 py-1 text-xs text-muted transition-all hover:border-border-strong" @click="fmReveal(row.id, {})">No match (0)</button>
+                                    <button v-if="fmActivePlayer === 2" class="rounded-full border border-danger px-2.5 py-1 text-xs font-semibold text-danger transition-all hover:bg-danger/10" @click="fmReveal(row.id, { duplicate: true })">Duplicate (0)</button>
+                                    <button v-if="fmActiveRevealed(row)" class="rounded-full px-2.5 py-1 text-xs text-muted underline" @click="fmClear(row.id)">Clear</button>
+                                </div>
+                            </div>
+                        </div>
+                    </Card>
+
                     <!-- Question & Answers -->
-                    <Card>
+                    <Card v-if="!(isFamilyFeud && isFastMoney)">
                         <div v-if="currentQuestion">
                             <!-- Header: question info (left, 2/3) + timer (right, 1/3) -->
                             <div class="mb-6 grid grid-cols-1 items-center gap-4 lg:grid-cols-3">
@@ -1213,8 +1563,10 @@ onUnmounted(() => {
                                         >⇄ Swap</Button>
                                     </div>
                                 </div>
+                                <!-- Family Feud has no clock in the regular rounds (Fast
+                                     Money uses its own timer in the Fast Money card). -->
                                 <GameTimer
-                                    v-if="gameState && !isTiebreaker"
+                                    v-if="gameState && !isTiebreaker && !isFamilyFeud"
                                     size="sm"
                                     :timer-started-at="gameState.timer_started_at"
                                     :timer-duration="gameState.timer_duration"
@@ -1352,7 +1704,7 @@ onUnmounted(() => {
                                  question is live (phase 'final_play'). -->
                             <div v-if="!isOodles" class="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <button
-                                    v-for="answer in currentQuestion.answers"
+                                    v-for="answer in orderedAnswers"
                                     :key="answer.id"
                                     :disabled="(isFinal && phase !== 'final_play' && phase !== 'final_review') || (isTiebreaker && !tiebreakerAnswersActive)"
                                     :title="isTiebreaker && !tiebreakerAnswersActive ? 'Tie-off answer (reveal the board first)' : (answer.revealed ? 'Click to undo' : 'Click to reveal')"
@@ -1384,6 +1736,22 @@ onUnmounted(() => {
                                 >
                                     <div class="flex items-center">
                                         <span class="font-semibold">Wrong Answer</span>
+                                    </div>
+                                </button>
+
+                                <!-- Family Feud: the Strike button, in the next open grid
+                                     cell. Used for a wrong face-off answer, a wrong guess in
+                                     play (3 strikes → steal), and a missed steal. -->
+                                <button
+                                    v-if="isFamilyFeud && ['faceoff', 'question', 'steal', 'reveal'].includes(phase)"
+                                    type="button"
+                                    :title="phase === 'faceoff' ? 'Wrong face-off answer' : (phase === 'question' ? 'Add a strike (wrong guess)' : 'Missed steal')"
+                                    class="hover-glow cursor-pointer rounded-lg border border-danger bg-danger/10 p-4 text-left text-danger transition-all"
+                                    @click="feudStrike"
+                                >
+                                    <div class="flex items-center justify-between">
+                                        <span class="font-semibold">Strike</span>
+                                        <span v-if="phase === 'question'" class="text-lg font-black">{{ feudStrikes }}/{{ feudMaxStrikes }}</span>
                                     </div>
                                 </button>
                             </div>

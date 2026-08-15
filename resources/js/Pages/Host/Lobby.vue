@@ -860,8 +860,15 @@ const copyDisplayUrl = () => {
 
             <!-- Family Feud rules -->
             <Card v-if="gameSlug === 'family-feud'" title="Rules">
-                <div class="max-w-xs">
-                    <Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" />
+                <!-- Strikes, the Fast Money toggle, and its two pass clocks on one
+                     row; the timers only appear when Fast Money is on. -->
+                <div class="flex flex-wrap items-end gap-x-5 gap-y-4">
+                    <div class="w-40"><Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" /></div>
+                    <div class="flex items-center gap-2 pb-2"><Toggle v-model="settingsForm.settings[finalEnabledKey]" :label="finalToggleLabel" /></div>
+                    <template v-if="finalEnabled">
+                        <div class="w-36"><NumberInput v-model="settingsForm.settings.fast_money_player1_seconds" label="Player 1 timer (s)" :min="5" :max="60" /></div>
+                        <div class="w-36"><NumberInput v-model="settingsForm.settings.fast_money_player2_seconds" label="Player 2 timer (s)" :min="5" :max="60" /></div>
+                    </template>
                 </div>
             </Card>
 
@@ -912,12 +919,14 @@ const copyDisplayUrl = () => {
                             </div>
                         </div>
 
-                        <div class="mt-4 flex items-center gap-2 border-t border-border pt-4">
+                        <!-- America Says toggles its Final round here (beside the slots).
+                             Family Feud's Fast Money toggle lives in the Rules card. -->
+                        <div v-if="gameSlug === 'america-says'" class="mt-4 flex items-center gap-2 border-t border-border pt-4">
                             <Toggle v-model="settingsForm.settings[finalEnabledKey]" :label="finalToggleLabel" />
                             <span class="ml-auto text-xs text-subtle">{{ finalHint }}</span>
                         </div>
 
-                        <div v-if="finalEnabled" class="mt-3">
+                        <div v-if="finalEnabled" class="mt-3" :class="{ 'border-t border-border pt-4': gameSlug === 'family-feud' }">
                             <div class="mb-2 flex items-center gap-2">
                                 <h4 class="text-sm font-semibold text-body">{{ finalSectionTitle }}</h4>
                                 <span class="text-xs text-subtle">{{ finalSlotCount }} slots</span>
