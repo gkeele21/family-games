@@ -16,6 +16,19 @@
         <link rel="preconnect" href="https://fonts.bunny.net">
         <link href="https://fonts.bunny.net/css?family=figtree:400,500,600,700,800,900|space-grotesk:400,500,600,700&display=swap" rel="stylesheet" />
 
+        {{-- Google Analytics 4. Page views are sent from the client on every
+             Inertia navigation (see resources/js/analytics.ts), so gtag's own
+             automatic page_view is disabled here to avoid double counting. --}}
+        @if ($gaMeasurementId = config('services.google_analytics.measurement_id'))
+            <script async src="https://www.googletagmanager.com/gtag/js?id={{ $gaMeasurementId }}"></script>
+            <script>
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){dataLayer.push(arguments);}
+                gtag('js', new Date());
+                gtag('config', @json($gaMeasurementId), { send_page_view: false });
+            </script>
+        @endif
+
         <!-- Scripts -->
         @routes
         @vite(['resources/js/app.ts', "resources/js/Pages/{$page['component']}.vue"])
