@@ -93,7 +93,7 @@ class DisplayController extends Controller
         $answers = [];
         if ($currentQuestion) {
             $revealedIds = $currentQuestion->revealedAnswerIds();
-            $answers = $currentQuestion->question->answers->map(function ($answer) use ($revealedIds) {
+            $answers = $currentQuestion->question->answers->map(function ($answer) use ($revealedIds, $currentQuestion) {
                 $revealed = in_array($answer->id, $revealedIds);
                 return [
                     'id' => $answer->id,
@@ -101,6 +101,10 @@ class DisplayController extends Controller
                     'points' => $revealed ? $answer->points : null,
                     'display_order' => $answer->display_order,
                     'revealed' => $revealed,
+                    // Feud pool contribution: the survey points for face-off/primary
+                    // reveals, 0 for a steal reveal (drives the board's "pot" so the
+                    // steal answer lights up but doesn't inflate the total).
+                    'pool_points' => (int) ($currentQuestion->answerReveals->firstWhere('answer_id', $answer->id)?->points_awarded ?? 0),
                 ];
             });
         }
@@ -124,6 +128,15 @@ class DisplayController extends Controller
             $pending = $gameSession->sessionQuestions()->where('status', 'pending');
             $finalQueued = (clone $pending)->where('segment', 'final')->exists()
                 && !(clone $pending)->where('segment', '!=', 'final')->exists();
+        }
+
+        // Family Feud: a team has reached the target (300), so the regular game is
+        // won — the recap turns into a "Team X Wins the game" celebration before
+        // Fast Money (the AS crown-the-leader beat, Feud's equivalent).
+        $feudTargetReached = false;
+        if ($isFamilyFeud && ($currentQuestion?->segment ?? 'main') === 'main') {
+            $target = (int) $gameSession->getConfig('target_score', 300);
+            $feudTargetReached = (int) ($gameSession->teams()->max('total_score') ?? 0) >= $target;
         }
 
         // Get controlling team IDs from state_data if multiple teams
@@ -189,6 +202,9 @@ class DisplayController extends Controller
                 'fast_money' => $isFamilyFeud ? $this->fastMoneyPayload($gameSession, $state) : null,
                 // True on the last regular round's recap, before the final begins.
                 'final_queued' => $finalQueued,
+                // Family Feud: a team hit the target — the recap crowns the game
+                // winner before Fast Money.
+                'feud_target_reached' => $feudTargetReached,
                 // True when the recap follows the last question of the round.
                 'end_of_round' => $endOfRound,
             ],

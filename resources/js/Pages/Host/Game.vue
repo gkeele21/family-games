@@ -24,6 +24,8 @@ interface Answer {
     points: number;
     display_order: number;
     revealed: boolean;
+    // Feud only: what this reveal adds to the pool (0 for a steal reveal).
+    pool_points?: number;
 }
 
 interface GameState {
@@ -84,16 +86,19 @@ interface FinalQuestion {
 // Family Feud Fast Money board (host view — carries each question's survey answers
 // so the host can reveal what the player said).
 interface FmSurveyAnswer { id: number; text: string; points: number }
-interface FmCell { revealed: boolean; text?: string | null; points?: number; duplicate?: boolean }
+// Host cell: captured = recorded (hidden), shown = text on TV, scored = points on TV.
+interface FmCell { captured: boolean; shown: boolean; scored: boolean; answer_id?: number | null; text?: string | null; points?: number }
 interface FmRow { id: number; question: string; p1: FmCell; p2: FmCell; answers: FmSurveyAnswer[] }
 interface FastMoney {
     rows: FmRow[];
     target: number;
     active_player: number;
+    show_previous: boolean;
     p1_total: number;
     p2_total: number;
     combined_total: number;
     result: 'win' | 'lose' | null;
+    duplicate_buzz: number;
 }
 
 interface Props {
@@ -119,9 +124,12 @@ const currentCard = ref<CurrentCard | null>(null);
 const totalCards = ref(0);
 const currentQuestionNumber = ref<number | null>(null);
 const totalQuestions = ref<number | null>(null);
-const hasPreviousQuestion = ref(false);
 const isLastQuestion = ref(false);
 const finalQueued = ref(false);
+// Family Feud: a team has reached the target (300) so regular play is decided,
+// and whether Fast Money is set up to follow. Drive the recap advance button.
+const feudTargetReached = ref(false);
+const feudFastMoneyReady = ref(false);
 const finalQuestions = ref<FinalQuestion[]>([]);
 const fastMoney = ref<FastMoney | null>(null);
 const selectedControllingTeams = ref<number[]>([]);
@@ -200,9 +208,10 @@ const fetchState = async () => {
         totalCards.value = response.data.totalCards || 0;
         currentQuestionNumber.value = response.data.currentQuestionNumber;
         totalQuestions.value = response.data.totalQuestions;
-        hasPreviousQuestion.value = !!response.data.hasPreviousQuestion;
         isLastQuestion.value = !!response.data.isLastQuestion;
         finalQueued.value = !!response.data.finalQueued;
+        feudTargetReached.value = !!response.data.feudTargetReached;
+        feudFastMoneyReady.value = !!response.data.feudFastMoneyReady;
         finalQuestions.value = response.data.finalQuestions || [];
         fastMoney.value = response.data.fastMoney ?? null;
     } catch (error) {
@@ -337,9 +346,9 @@ const nextQuestion = async () => {
         window.location.href = route('dashboard');
     }
     // Reset the per-question clock for the next regular question. Skip it when
-    // crossing into the final round — that already set the full final budget
-    // (e.g. 60s), and resetting would knock it back to the regular timer.
-    if (!response.data.entering_final) {
+    // crossing into the final round or Fast Money — those already set their own
+    // budget, and resetting would knock it back to the regular timer.
+    if (!response.data.entering_final && !response.data.entering_fast_money) {
         await axios.post(route('host.timer.reset', props.gameSession.id));
     }
     fetchState();
@@ -451,17 +460,6 @@ const advanceQuestion = async () => {
     await nextQuestion();
 };
 
-// Step back to the previous question (non-destructive — boards/scores persist).
-const previousQuestion = async () => {
-    try {
-        await axios.post(route('host.question.previous', props.gameSession.id));
-        fetchState();
-    } catch (error: any) {
-        console.error('Failed to go back a question:', error);
-        alert('Error: ' + (error.response?.data?.error || error.message));
-    }
-};
-
 // Clicking a team on the scoreboard hands control (the turn) to that team.
 const selectControllingTeam = async (teamId: number) => {
     // Handing control to a team means you're about to score them — leave
@@ -516,10 +514,14 @@ const canShowScores = computed(() =>
     && ['question', 'steal', 'reveal'].includes(phase.value) && !timerRunning.value,
 );
 
-// End Game only needs to appear near the actual finish: once the final answer
-// board's clock is up (if a final round is being played), otherwise once the last
-// regular round's scoreboard is showing. Non-America-Says keeps it always available.
+// End Game only needs to appear near the actual finish, never during regular play.
+// America Says: once the final answer board's clock is up (if a final is played),
+// otherwise once the last regular round's scoreboard is showing. Family Feud ends
+// via its own controls — the Fast Money card's End Game (after Fast Money is over)
+// or the recap's "Finish Game" when Fast Money is off — so the header button stays
+// hidden. Other games keep it always available.
 const canEndGame = computed(() => {
+    if (isFamilyFeud) return false;
     if (!isAmericaSays) return true;
     if (['final_play', 'final_cleared', 'final_review', 'final_result'].includes(phase.value)) return true;
     return isLastQuestion.value && !finalQueued.value && phase.value === 'recap';
@@ -872,9 +874,14 @@ const feudMultiplier = computed(() => {
     const sched = props.config?.round_multipliers ?? {};
     return Number(sched[String(q.round_number ?? 1)] ?? 1);
 });
-// The running pool (survey points of revealed answers) and its multiplied value.
+// The running pool: each revealed answer's pool contribution (its survey points,
+// or 0 for a steal reveal — the stealer wins only the banked pool). Falls back to
+// survey points if pool_points is absent (older payloads).
 const feudPool = computed(() =>
-    (currentQuestion.value?.answers ?? []).reduce((sum, a) => sum + (a.revealed ? (a.points ?? 0) : 0), 0)
+    (currentQuestion.value?.answers ?? []).reduce(
+        (sum, a) => sum + (a.revealed ? (a.pool_points ?? a.points ?? 0) : 0),
+        0,
+    )
 );
 const feudPot = computed(() => feudPool.value * feudMultiplier.value);
 const feudStrikes = computed(() => Number(gameState.value?.state_data?.strikes ?? 0));
@@ -895,7 +902,9 @@ const feudSteps = computed(() => [
     { title: 'Round Intro', hint: `Round ${gameState.value?.round_number ?? 1} is on the board. Show the question to start the face-off.` },
     { title: 'Face-Off', hint: 'Mark who buzzed in first, then reveal their answer (or Strike). Get the #1 answer and they choose; otherwise the other team answers and the higher points decides Play or Pass.' },
     { title: 'Playing', hint: `${primaryTeam.value?.name ?? 'The controlling team'} guesses the board — reveal answers as they’re said. A wrong guess is a Strike; ${feudMaxStrikes.value} strikes hands to the steal. Clearing the board wins the pool.` },
-    { title: 'Steal', hint: `${stealTeam.value?.name ?? 'The other team'} gets ONE guess. A correct steal wins the whole pool; a miss and the original team keeps it.` },
+    phase.value === 'reveal'
+        ? { title: 'Reveal', hint: 'Steal resolved — reveal the remaining answers on the board (no points). The scores show once the whole board is up.' }
+        : { title: 'Steal', hint: `${stealTeam.value?.name ?? 'The other team'} gets ONE guess. A correct steal wins the whole pool; a miss and the original team keeps it.` },
     { title: 'Scores', hint: 'The pool has been awarded. Move on to the next round.' },
 ]);
 const feudStepComplete = (i: number): boolean => i < feudStepIndex.value;
@@ -952,40 +961,99 @@ const feudResolve = async (outcome: 'clear' | 'steal_success' | 'steal_fail') =>
     await axios.post(route('host.feud.resolve', props.gameSession.id), { outcome });
     fetchState();
 };
+// Drop from the leftover-reveal beat to the scoreboard (award already happened).
+const feudFinishReveal = async () => {
+    await axios.post(route('host.feud.finish-reveal', props.gameSession.id));
+    fetchState();
+};
 
-// Auto-resolve when the controlling team clears the whole board during play — hold
-// 2s so the last reveal lands on the TV, then award the pool and drop to scores.
+// Two auto-advances, both gated on the board being FULLY revealed and each holding
+// 2s so the last answer lands on the TV before the scores show:
+//   • 'question' — the controlling team cleared the board → award the pool ('clear').
+//   • 'reveal'   — a steal resolved and the host has now revealed the leftovers
+//                  (no points) → drop to the scoreboard. We never jump to the
+//                  scores/winner slide until every answer is on the board.
 const feudResolving = ref(false);
-watch(allAnswersRevealed, (all) => {
-    if (!all || feudResolving.value) return;
-    if (!isFamilyFeud || phase.value !== 'question') return;
-    feudResolving.value = true;
-    window.setTimeout(async () => {
-        await feudResolve('clear');
-        feudResolving.value = false;
-    }, 2000);
+watch([allAnswersRevealed, phase], () => {
+    if (!allAnswersRevealed.value || feudResolving.value || !isFamilyFeud) return;
+    if (phase.value === 'question') {
+        feudResolving.value = true;
+        window.setTimeout(async () => {
+            await feudResolve('clear');
+            feudResolving.value = false;
+        }, 2000);
+    } else if (phase.value === 'reveal') {
+        feudResolving.value = true;
+        window.setTimeout(async () => {
+            await feudFinishReveal();
+            feudResolving.value = false;
+        }, 2000);
+    }
 });
 watch(() => currentQuestion.value?.id, () => { feudResolving.value = false; });
 
 // ---- Family Feud Fast Money ---------------------------------------------------
-// Two players play two timed passes over the same 5 questions (Player 1 = 20s,
-// Player 2 = 25s, who can't duplicate). The host reveals each player's answer by
-// clicking the survey answer they matched (or "No match" / "Duplicate" for 0). A
-// combined total ≥ the target wins. Phases: fast_money_intro → _p1 → _p2 → _result.
+// Real-show, capture-then-reveal, per player. Phases: fast_money_intro →
+// p1_capture → p1_reveal → p2_capture → p2_reveal → result. During capture the
+// host records what the player said (hidden on the TV); during reveal the host
+// puts up each answer's text then points, one at a time. A combined total ≥ the
+// target wins. Player 1 = gold, Player 2 = green (matching the info panel + the
+// answer highlights).
 const isFastMoney = computed(() =>
     phase.value.startsWith('fast_money') || currentQuestion.value?.segment === 'fast_money'
 );
 const fmActivePlayer = computed(() => fastMoney.value?.active_player ?? 1);
+const fmRows = computed<FmRow[]>(() => fastMoney.value?.rows ?? []);
+const fmIsCapture = computed(() => phase.value.endsWith('_capture'));
+const fmIsReveal = computed(() => phase.value.endsWith('_reveal'));
+const fmTimerRunning = computed(() => fmIsCapture.value && !!gameState.value?.timer_started_at);
+const fmActiveCell = (row: FmRow): FmCell => (fmActivePlayer.value === 1 ? row.p1 : row.p2);
+
+// Fast Money step checklist (mirrors the regular-round / final steps).
+const fmStepIndex = computed(() => {
+    switch (phase.value) {
+        case 'fast_money_p1_capture': return 0;
+        case 'fast_money_p1_reveal': return 1;
+        case 'fast_money_p2_capture': return 2;
+        case 'fast_money_p2_reveal': return 3;
+        case 'fast_money_result': return 4;
+        default: return 0; // intro
+    }
+});
+const fmSteps = ['Player 1 · Answers', 'Player 1 · Reveal', 'Player 2 · Answers', 'Player 2 · Reveal', 'Result'];
+
+// Capture progress + the reveal cursor (the question we're revealing now).
+const fmAllCaptured = computed(() => fmRows.value.length > 0 && fmRows.value.every(r => fmActiveCell(r).captured));
+const fmAllRevealed = computed(() => fmRows.value.length > 0 && fmRows.value.every(r => fmActiveCell(r).scored));
+// The moment a revealed answer pushes the combined total to the target, the game
+// is won — the host can end it now (winner slide + theme) or keep revealing.
+const fmClinched = computed(() =>
+    fmIsReveal.value && (fastMoney.value?.combined_total ?? 0) >= (fastMoney.value?.target ?? 200)
+);
+// The row currently being revealed = first whose active cell isn't fully scored.
+const fmRevealRow = computed<FmRow | null>(() =>
+    fmRows.value.find(r => !fmActiveCell(r).scored) ?? null
+);
+// Next reveal action for that row: show the answer text, then flip the points.
+const fmRevealPart = computed<'answer' | 'points' | null>(() => {
+    const row = fmRevealRow.value;
+    if (!row) return null;
+    return fmActiveCell(row).shown ? 'points' : 'answer';
+});
 
 const fmStartPlayer = async (player: 1 | 2) => {
     timerExpiredHandled.value = false;
+    // Player 1 kicks off a fresh Fast Money — clear the auto-advance latch.
+    if (player === 1) fmAutoAdvanced.value = false;
     await axios.post(route('host.feud.fm.start', props.gameSession.id), { player });
     fetchState();
 };
-const fmReveal = async (sessionQuestionId: number, opts: { answer_id?: number; duplicate?: boolean } = {}) => {
-    await axios.post(route('host.feud.fm.reveal', props.gameSession.id), {
+// Capture (hidden) what the active player said. A duplicate (P2 tapped P1's answer)
+// isn't stored — the display buzzes so they guess again.
+const fmCapture = async (sessionQuestionId: number, answerId?: number) => {
+    await axios.post(route('host.feud.fm.capture', props.gameSession.id), {
         session_question_id: sessionQuestionId,
-        ...opts,
+        ...(answerId ? { answer_id: answerId } : {}),
     });
     fetchState();
 };
@@ -993,13 +1061,144 @@ const fmClear = async (sessionQuestionId: number) => {
     await axios.post(route('host.feud.fm.clear', props.gameSession.id), { session_question_id: sessionQuestionId });
     fetchState();
 };
+const fmToReveal = async () => {
+    await axios.post(route('host.feud.fm.to-reveal', props.gameSession.id));
+    fetchState();
+};
+// Reveal the current cell's answer text, then (next click) its points.
+const fmRevealNext = async () => {
+    const row = fmRevealRow.value;
+    const part = fmRevealPart.value;
+    if (!row || !part) return;
+    await axios.post(route('host.feud.fm.reveal-cell', props.gameSession.id), {
+        session_question_id: row.id,
+        part,
+    });
+    fetchState();
+};
+const fmNextPlayer = async () => {
+    await axios.post(route('host.feud.fm.next-player', props.gameSession.id));
+    fetchState();
+};
+const fmShowPrevious = async (show: boolean) => {
+    await axios.post(route('host.feud.fm.show-previous', props.gameSession.id), { show });
+    fetchState();
+};
 const fmResult = async () => {
     await axios.post(route('host.feud.fm.result', props.gameSession.id));
     fetchState();
 };
-// Whether a given row already has the active player's answer revealed (for Clear).
-const fmActiveRevealed = (row: FmRow): boolean =>
-    (fmActivePlayer.value === 1 ? row.p1.revealed : row.p2.revealed);
+// Pop back from the winner slide to the reveal board so the host can reveal any
+// answers that weren't shown before the win (crowd-pleaser, purely for show).
+const fmBackToReveal = async () => {
+    await axios.post(route('host.feud.fm.back-to-reveal', props.gameSession.id));
+    fetchState();
+};
+// Is a survey answer the one Player 1 used for this question (highlight + dup)?
+const fmIsP1Answer = (row: FmRow, answerId: number): boolean =>
+    row.p1.captured && row.p1.answer_id === answerId;
+const fmPlayerColorPill = computed(() =>
+    fmActivePlayer.value === 1 ? 'border-gold bg-gold/15 text-gold' : 'border-primary bg-primary/15 text-primary'
+);
+const fmPlayerColorText = computed(() => (fmActivePlayer.value === 1 ? 'text-gold' : 'text-primary'));
+// A capture pill's style: the active player's pick is filled in their color; during
+// Player 2 a pill Player 1 used is flagged gold (tapping it buzzes a duplicate).
+const fmPillClass = (row: FmRow, answerId: number): string => {
+    const cell = fmActiveCell(row);
+    if (cell.captured && cell.answer_id === answerId) return fmPlayerColorPill.value;
+    if (fmActivePlayer.value === 2 && fmIsP1Answer(row, answerId)) return 'border-gold bg-gold/15 text-gold';
+    return 'border-border bg-surface-overlay text-body hover:border-primary';
+};
+// The "No match" pill stands out with a danger outline; once it's the pick it
+// fills in the player's color like the survey pills.
+const fmNoMatchClass = (row: FmRow): string =>
+    (fmActiveCell(row).captured && fmActiveCell(row).answer_id == null)
+        ? fmPlayerColorPill.value
+        : 'border-danger text-danger hover:bg-danger/10';
+// Click a pill to capture it; click the one already captured to take it back off.
+// Changing the pick resets that row's spoken-text draft + "blank OK" so the new
+// answer's prefill shows and the row must be resolved afresh.
+const fmToggleCapture = (row: FmRow, answerId?: number) => {
+    const cell = fmActiveCell(row);
+    const key = fmMissKey(row);
+    delete fmMissDrafts.value[key];
+    delete fmBlankAck.value[key];
+    if (cell.captured && (cell.answer_id ?? null) === (answerId ?? null)) return fmClear(row.id);
+    return fmCapture(row.id, answerId);
+};
+
+// What the player actually SAID, shown on the board at reveal. Every captured cell
+// gets this field: a matched survey answer prefills its canonical text (e.g. "CAR")
+// on capture, which the host can override to the player's own wording (e.g.
+// "AUTOMOBILE") — the matched answer's POINTS still apply; a no-match starts blank
+// (0 pts). Local drafts (keyed by player+question) keep the 1s poll from clobbering
+// in-progress typing; saved on blur.
+const fmIsCaptured = (row: FmRow): boolean => fmActiveCell(row).captured;
+const fmMissDrafts = ref<Record<string, string>>({});
+const fmMissKey = (row: FmRow) => `${fmActivePlayer.value}-${row.id}`;
+const fmMissValue = (row: FmRow): string => fmMissDrafts.value[fmMissKey(row)] ?? (fmActiveCell(row).text ?? '');
+// Rows the host has explicitly OK'd as blank (the player gave nothing usable). This
+// makes a blank a deliberate choice, never a forgotten field. Typing clears it.
+const fmBlankAck = ref<Record<string, boolean>>({});
+const fmBlankAcked = (row: FmRow): boolean => fmBlankAck.value[fmMissKey(row)] === true;
+const fmMissInput = (row: FmRow, v: string) => {
+    fmMissDrafts.value[fmMissKey(row)] = v;
+    if (v.trim()) delete fmBlankAck.value[fmMissKey(row)];
+};
+const fmSaveMiss = async (row: FmRow) => {
+    await axios.post(route('host.feud.fm.miss-text', props.gameSession.id), {
+        session_question_id: row.id,
+        text: fmMissValue(row),
+    });
+    fetchState();
+};
+// Mark a captured cell as intentionally blank: clears its text and satisfies the gate.
+const fmLeaveBlank = async (row: FmRow) => {
+    fmMissInput(row, '');
+    fmBlankAck.value[fmMissKey(row)] = true;
+    await fmSaveMiss(row);
+};
+
+// A captured row is "ready" to reveal once it's resolved: it has the spoken text
+// (prefilled for a matched answer, typed otherwise) OR the host has OK'd it as blank.
+// We can't reveal / move to the next player until every row is resolved, so a blank
+// is always deliberate rather than forgotten.
+const fmRowReady = (row: FmRow): boolean => {
+    if (!fmActiveCell(row).captured) return false;
+    if (fmMissValue(row).trim().length > 0) return true;
+    return fmBlankAcked(row);
+};
+const fmAllReady = computed(() =>
+    fmRows.value.length > 0 && fmRows.value.every(fmRowReady)
+);
+
+// Auto-drop to the celebratory result slide (winner + music, or "so close"). Two triggers:
+//   • a WIN is clinched — the running total crosses the target mid-reveal, so we go
+//     straight to the winner slide once (after ~1s so the clinching points land),
+//     without the host clicking anything, and
+//   • Player 2's board is fully revealed — the loss, OR the last leftover answer
+//     revealed after the host popped back post-win: go to the End Game step at once
+//     (nothing left to land, so no delay).
+// fmAutoAdvanced latches after the first winner-slide drop so the clinch trigger
+// doesn't re-fire when the host goes BACK to reveal leftovers (fmBackToReveal) —
+// the all-revealed trigger takes them the rest of the way.
+const fmResolving = ref(false);
+const fmAutoAdvanced = ref(false);
+const fmDropToResult = (delay: number) => {
+    if (fmResolving.value) return;
+    fmResolving.value = true;
+    window.setTimeout(async () => {
+        fmAutoAdvanced.value = true;
+        await fmResult();
+        fmResolving.value = false;
+    }, delay);
+};
+watch(fmClinched, (clinched) => {
+    if (clinched && fmIsReveal.value && !fmAutoAdvanced.value) fmDropToResult(1000);
+});
+watch([fmAllRevealed, phase], () => {
+    if (phase.value === 'fast_money_p2_reveal' && fmAllRevealed.value) fmDropToResult(0);
+});
 
 // Dismiss the "All Answers Revealed" bonus prompt for this question (no sweep).
 const dismissBonus = () => {
@@ -1054,7 +1253,6 @@ onUnmounted(() => {
                 <div class="flex items-center gap-3">
                     <Button variant="outline" size="md" @click="confirmBackToSetup">Game Setup</Button>
                     <Button v-if="currentQuestion" variant="danger" size="md" @click="showResetRoundConfirm = true">Reset Round</Button>
-                    <Button v-if="currentQuestion && hasPreviousQuestion && !isFinal && !isTiebreaker" variant="primary" size="md" @click="previousQuestion">&larr; Previous</Button>
                     <!-- Global escape to the scoreboard, enabled whenever the clock isn't running. -->
                     <Button v-if="canShowScores" variant="primary" size="md" @click="endRound">Show Scores &rarr;</Button>
                     <!-- America Says & Family Feud advance via their guided Round Steps /
@@ -1072,7 +1270,7 @@ onUnmounted(() => {
                      pass/fail with no scoring, so the Final Round card stands alone. -->
                 <div class="lg:col-span-1">
                     <Scoreboard
-                        v-if="!(isAmericaSays && isFinal)"
+                        v-if="!(isAmericaSays && isFinal) && !(isFamilyFeud && isFastMoney)"
                         :teams="teams"
                         :active-team-id="revealWithoutPoints ? null : gameState?.active_team_id"
                         :controlling-team-ids="revealWithoutPoints ? [] : boardControllingTeamIds"
@@ -1225,20 +1423,122 @@ onUnmounted(() => {
                                     </template>
 
                                     <!-- Steal: one guess. A revealed answer wins the pool; the Strike
-                                         button ends it as a miss — both resolve automatically. -->
-                                    <template v-else-if="phase === 'steal' || phase === 'reveal'">
+                                         button ends it as a miss — both resolve automatically. Then the
+                                         board holds on 'reveal' so the host puts up the un-guessed
+                                         answers (no points) before the scores appear. -->
+                                    <template v-else-if="phase === 'steal'">
                                         <span class="w-full text-xs text-muted">{{ stealTeam?.name ?? 'The other team' }} gets one guess — reveal a correct answer, or hit Strike for a miss.</span>
                                     </template>
+                                    <template v-else-if="phase === 'reveal'">
+                                        <span class="w-full text-xs text-muted">Reveal the remaining answers on the board (no points). The scores show once the whole board is up.</span>
+                                    </template>
 
-                                    <!-- Scores. -->
+                                    <!-- Scores. Regular play is score-driven: once a team hits the
+                                         target (300) the advance goes to Fast Money (or finishes if
+                                         it's off); otherwise it's the next round. The backend routes
+                                         it — this just labels the button. -->
                                     <template v-else-if="phase === 'recap'">
-                                        <Button v-if="isLastQuestion" variant="secondary" size="sm" @click="endGame">End Game</Button>
-                                        <Button v-else variant="primary" size="sm" @click="advanceQuestion">Next Round &rarr;</Button>
+                                        <Button variant="primary" size="sm" @click="advanceQuestion">
+                                            {{ feudTargetReached ? (feudFastMoneyReady ? 'Start Fast Money' : 'Finish Game') : 'Next Round' }} &rarr;
+                                        </Button>
                                     </template>
                                 </div>
                             </li>
                         </ol>
                     </Card>
+
+                    <!-- Fast Money (Family Feud): the team scoreboard is replaced by a
+                         Player 1 / Player 2 control panel (informational — flips only on
+                         Next Player) plus the capture → reveal step checklist. -->
+                    <template v-if="isFamilyFeud && isFastMoney">
+                        <Card title="Fast Money">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div
+                                    class="rounded-lg border-2 p-3 text-center transition-all"
+                                    :class="fmActivePlayer === 1 ? 'border-gold bg-gold/10' : 'border-border bg-surface-inset opacity-60'"
+                                >
+                                    <div class="text-xs font-semibold uppercase tracking-wide text-gold">Player 1</div>
+                                    <div class="mt-1 text-2xl font-black text-body">{{ fastMoney?.p1_total ?? 0 }}</div>
+                                    <div v-if="fmActivePlayer === 1" class="mt-1 text-[10px] font-bold uppercase text-gold">In control</div>
+                                </div>
+                                <div
+                                    class="rounded-lg border-2 p-3 text-center transition-all"
+                                    :class="fmActivePlayer === 2 ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset opacity-60'"
+                                >
+                                    <div class="text-xs font-semibold uppercase tracking-wide text-primary">Player 2</div>
+                                    <div class="mt-1 text-2xl font-black text-body">{{ fastMoney?.p2_total ?? 0 }}</div>
+                                    <div v-if="fmActivePlayer === 2" class="mt-1 text-[10px] font-bold uppercase text-primary">In control</div>
+                                </div>
+                            </div>
+                            <div class="mt-3 flex items-center justify-between border-t border-border pt-3">
+                                <span class="text-sm text-muted">Total</span>
+                                <span class="rounded-full bg-gold/20 px-3 py-1 text-sm font-bold text-gold">{{ fastMoney?.combined_total ?? 0 }}</span>
+                            </div>
+                        </Card>
+
+                        <Card title="Steps" class="mt-4">
+                            <ol class="space-y-2">
+                                <li
+                                    v-for="(step, i) in fmSteps"
+                                    :key="i"
+                                    class="rounded-lg border p-3 transition-all"
+                                    :class="i === fmStepIndex ? 'border-border bg-surface-inset ring-2 ring-white shadow-[0_0_18px_2px_rgba(255,255,255,0.45)]' : 'border-border bg-surface-inset opacity-70'"
+                                >
+                                    <div class="flex items-center gap-2">
+                                        <span
+                                            class="flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs font-bold"
+                                            :class="i < fmStepIndex ? 'bg-success text-white' : (i === fmStepIndex ? 'bg-warning text-white' : 'bg-surface-overlay text-muted')"
+                                        >
+                                            <span v-if="i < fmStepIndex">&check;</span><span v-else>{{ i + 1 }}</span>
+                                        </span>
+                                        <span class="text-sm font-semibold" :class="i === fmStepIndex ? 'text-body' : 'text-muted'">{{ step }}</span>
+                                    </div>
+
+                                    <!-- The action lives on the current step (like the regular rounds). -->
+                                    <div v-if="i === fmStepIndex" class="mt-3 flex flex-wrap gap-2 pl-8">
+                                        <!-- Player 1 answers: start the clock (from the intro), then
+                                             reveal once all five are captured. -->
+                                        <template v-if="phase === 'fast_money_intro'">
+                                            <Button variant="primary" size="sm" @click="fmStartPlayer(1)">Start Timer &rarr;</Button>
+                                        </template>
+                                        <template v-else-if="fmIsCapture">
+                                            <!-- Player 2 bring-out (before the clock): flash P1's board, then start. -->
+                                            <template v-if="!fmTimerRunning">
+                                                <Button v-if="!fastMoney?.show_previous" variant="outline" size="sm" @click="fmShowPrevious(true)">Show Player 1's Answers</Button>
+                                                <Button variant="primary" size="sm" @click="fmStartPlayer(2)">Start Timer &rarr;</Button>
+                                            </template>
+                                            <template v-else>
+                                                <Button v-if="fmAllReady" variant="primary" size="sm" @click="fmToReveal">Reveal Answers &rarr;</Button>
+                                                <span v-else-if="fmAllCaptured" class="text-xs text-danger">Finish each answer — type what they said, or mark it blank — before revealing.</span>
+                                                <span v-else class="text-xs text-muted">Capture each answer on the board, then reveal.</span>
+                                            </template>
+                                        </template>
+                                        <!-- Reveal: answer text, then points, one at a time. When the
+                                             total crosses the target the game auto-drops to the winner
+                                             slide (+ music) after ~2s — no button. If the host popped
+                                             back to reveal leftovers, revealing the last one drops to the
+                                             result (End Game) step on its own. -->
+                                        <template v-else-if="fmIsReveal">
+                                            <Button v-if="fmRevealRow" :variant="fmClinched ? 'secondary' : 'primary'" size="sm" @click="fmRevealNext">
+                                                {{ fmRevealPart === 'points' ? 'Reveal Points' : 'Reveal Answer' }} &rarr;
+                                            </Button>
+                                            <span v-else-if="fmClinched && !fmAutoAdvanced" class="text-xs text-gold">🎉 Target reached — winner slide coming up…</span>
+                                            <template v-else-if="!fmRevealRow">
+                                                <Button v-if="phase === 'fast_money_p1_reveal'" variant="primary" size="sm" @click="fmNextPlayer">Next Player &rarr;</Button>
+                                                <span v-else class="text-xs text-muted">Revealing the result…</span>
+                                            </template>
+                                        </template>
+                                        <!-- Result. The host may pop back to the board to reveal any
+                                             answers that weren't shown before the win, just for fun. -->
+                                        <template v-else-if="phase === 'fast_money_result'">
+                                            <Button v-if="!fmAllRevealed" variant="outline" size="sm" @click="fmBackToReveal">Reveal Remaining Answers &rarr;</Button>
+                                            <Button variant="secondary" size="sm" @click="endGame">End Game</Button>
+                                        </template>
+                                    </div>
+                                </li>
+                            </ol>
+                        </Card>
+                    </template>
 
                     <!-- Final round (America Says): a per-question step checklist that
                          mirrors a regular round — one question at a time flows Get Ready
@@ -1470,74 +1770,126 @@ onUnmounted(() => {
                         </div>
                     </Card>
 
-                    <!-- Fast Money (Family Feud): two timed passes over the same 5
-                         questions. The host starts each player's clock, then reveals
-                         what they said (a survey answer for its points, or No match /
-                         Duplicate for 0), and shows the result vs the target. -->
-                    <Card v-if="isFamilyFeud && isFastMoney" title="Fast Money">
-                        <div class="mb-4 flex flex-wrap items-center gap-3 border-b border-border pb-3">
-                            <span class="text-sm text-muted">Target <span class="font-bold text-body">{{ fastMoney?.target ?? 200 }}</span></span>
-                            <span class="text-sm text-muted">P1 <b class="text-body">{{ fastMoney?.p1_total ?? 0 }}</b></span>
-                            <span class="text-sm text-muted">P2 <b class="text-body">{{ fastMoney?.p2_total ?? 0 }}</b></span>
-                            <span class="ml-auto rounded-full bg-gold/20 px-3 py-1 text-sm font-bold text-gold">Total {{ fastMoney?.combined_total ?? 0 }} / {{ fastMoney?.target ?? 200 }}</span>
+                    <!-- Fast Money (Family Feud): capture-then-reveal, per player.
+                         Capture records what the player said (hidden on the TV); reveal
+                         puts up each answer's text then points, one at a time. -->
+                    <Card v-if="isFamilyFeud && isFastMoney" :title="`Fast Money · Player ${fmActivePlayer}`">
+                        <!-- Intro: the action (Start Timer) lives in the Steps panel. -->
+                        <div v-if="phase === 'fast_money_intro'" class="py-8 text-center text-muted">
+                            Two players from the winning team play. Player 1 answers all 5 questions against the clock, then we reveal them one at a time. Start the timer from the Steps panel.
                         </div>
 
-                        <!-- Pass controls -->
-                        <div class="mb-4 flex flex-wrap items-center gap-3">
-                            <template v-if="phase === 'fast_money_intro'">
-                                <span class="text-muted">Two players from the winning team play. Start Player 1 (20s).</span>
-                                <Button variant="primary" size="md" class="ml-auto" @click="fmStartPlayer(1)">Start Player 1 &rarr;</Button>
-                            </template>
-                            <template v-else-if="phase === 'fast_money_p1' || phase === 'fast_money_p2'">
-                                <span class="font-semibold text-body">Player {{ fmActivePlayer }} answering</span>
-                                <GameTimer
-                                    v-if="gameState"
-                                    size="sm"
-                                    :timer-started-at="gameState.timer_started_at"
-                                    :timer-duration="gameState.timer_duration"
-                                    :is-host="true"
-                                    :hide-start="true"
-                                    @pause="pauseTimer"
-                                    @reset="resetTimer"
-                                />
-                                <Button v-if="phase === 'fast_money_p1'" variant="primary" size="md" class="ml-auto" @click="fmStartPlayer(2)">Start Player 2 (25s) &rarr;</Button>
-                                <Button v-else variant="primary" size="md" class="ml-auto" @click="fmResult">Show Result &rarr;</Button>
-                            </template>
-                            <template v-else-if="phase === 'fast_money_result'">
-                                <span class="text-lg font-bold" :class="fastMoney?.result === 'win' ? 'text-success' : 'text-danger'">
-                                    {{ fastMoney?.result === 'win' ? 'Winner! 🎉' : 'Missed the target' }} — {{ fastMoney?.combined_total ?? 0 }} / {{ fastMoney?.target ?? 200 }}
-                                </span>
-                                <Button variant="secondary" size="md" class="ml-auto" @click="endGame">End Game</Button>
-                            </template>
-                        </div>
+                        <!-- CAPTURE — record the active player's answers (hidden on TV). -->
+                        <template v-else-if="fmIsCapture">
+                            <!-- Bring-out beat: before the clock starts (Player 2). -->
+                            <div v-if="!fmTimerRunning" class="py-8 text-center text-muted">
+                                Bring out <span class="font-semibold text-primary">Player 2</span>. Use the Steps panel to flash Player 1's board while they're turned away, then start the timer.
+                            </div>
 
-                        <!-- The 5 questions; reveal the active player's answer on each. -->
-                        <div v-if="phase !== 'fast_money_intro'" class="space-y-3">
-                            <div v-for="(row, ri) in (fastMoney?.rows ?? [])" :key="row.id" class="rounded-lg border border-border bg-surface-inset p-3">
-                                <div class="mb-2 flex items-center gap-2">
-                                    <span class="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-surface-overlay text-xs font-bold text-body">{{ ri + 1 }}</span>
-                                    <span class="font-semibold text-body">{{ row.question }}</span>
+                            <template v-else>
+                                <!-- Timer (America Says style): size sm, right-aligned in the header. -->
+                                <div class="mb-6 flex items-center justify-end gap-4 lg:grid lg:grid-cols-3">
+                                    <span class="hidden lg:col-span-2 lg:block"></span>
+                                    <GameTimer
+                                        v-if="gameState"
+                                        size="sm"
+                                        :timer-started-at="gameState.timer_started_at"
+                                        :timer-duration="gameState.timer_duration"
+                                        :is-host="true"
+                                        :hide-start="true"
+                                        @pause="pauseTimer"
+                                        @reset="resetTimer"
+                                    />
                                 </div>
-                                <div class="mb-2 flex flex-wrap gap-2 text-sm">
-                                    <span class="rounded px-2 py-1" :class="row.p1.revealed ? 'bg-surface-overlay text-body' : 'text-subtle'">
-                                        P1: <template v-if="row.p1.revealed">{{ row.p1.text || '—' }} ({{ row.p1.points ?? 0 }})</template><template v-else>—</template>
-                                    </span>
-                                    <span class="rounded px-2 py-1" :class="row.p2.revealed ? (row.p2.duplicate ? 'bg-danger/15 text-danger' : 'bg-surface-overlay text-body') : 'text-subtle'">
-                                        P2: <template v-if="row.p2.revealed">{{ row.p2.duplicate ? 'DUPLICATE' : (row.p2.text || '—') }} ({{ row.p2.points ?? 0 }})</template><template v-else>—</template>
-                                    </span>
+
+                                <div class="space-y-3">
+                                    <div v-for="row in fmRows" :key="row.id" class="rounded-lg border border-border bg-surface-inset p-3">
+                                        <div class="mb-2 flex items-center gap-2">
+                                            <span class="min-w-0 flex-1 font-semibold text-body">{{ row.question }}</span>
+                                            <!-- Per-answer status: a green check once solidified; a red flag on a
+                                                 No-match whose words haven't been typed yet. -->
+                                            <span v-if="fmRowReady(row)" class="flex h-5 w-5 flex-none items-center justify-center rounded-full bg-success/20 text-xs font-bold text-success" title="Ready to reveal">&check;</span>
+                                            <span v-else-if="fmIsCaptured(row)" class="flex-none text-xs font-semibold text-danger" title="Type what they said below, or mark it blank">Needs answer</span>
+                                        </div>
+                                        <div class="flex flex-wrap items-center gap-1.5">
+                                            <button
+                                                v-for="ans in row.answers"
+                                                :key="ans.id"
+                                                class="rounded-full border px-2.5 py-1 text-xs font-medium transition-all"
+                                                :class="fmPillClass(row, ans.id)"
+                                                :title="fmActivePlayer === 2 && fmIsP1Answer(row, ans.id) ? 'Player 1 used this — tapping buzzes a duplicate' : 'Click to capture; click again to remove'"
+                                                @click="fmToggleCapture(row, ans.id)"
+                                            >{{ ans.text }} <span class="opacity-60">{{ ans.points }}</span></button>
+                                            <button class="rounded-full border px-2.5 py-1 text-xs font-medium transition-all" :class="fmNoMatchClass(row)" @click="fmToggleCapture(row)">No match</button>
+                                        </div>
+                                        <!-- What the player said (shown on the board at reveal). Prefilled
+                                             from the chip for a matched answer — override it to their exact
+                                             words and the chip's points still apply. A blank is allowed but
+                                             must be confirmed with "Leave blank" so it's never just forgotten. -->
+                                        <div v-if="fmIsCaptured(row)" class="mt-2 flex items-center gap-2">
+                                            <input
+                                                :value="fmMissValue(row)"
+                                                type="text"
+                                                placeholder="What did they say?"
+                                                class="w-full rounded-lg bg-surface-inset text-sm text-body placeholder:text-muted"
+                                                :class="fmRowReady(row)
+                                                    ? 'border-border focus:border-primary focus:ring-primary'
+                                                    : 'border-danger ring-1 ring-danger focus:border-danger focus:ring-danger'"
+                                                @input="fmMissInput(row, ($event.target as HTMLInputElement).value)"
+                                                @blur="fmSaveMiss(row)"
+                                                @keyup.enter="($event.target as HTMLInputElement).blur()"
+                                            />
+                                            <Button v-if="!fmMissValue(row).trim() && !fmBlankAcked(row)" variant="outline" size="sm" class="flex-none" @click="fmLeaveBlank(row)">Leave blank</Button>
+                                            <span v-else-if="!fmMissValue(row).trim()" class="flex-none text-xs font-medium text-muted">Left blank</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div v-if="phase === 'fast_money_p1' || phase === 'fast_money_p2'" class="flex flex-wrap items-center gap-1.5">
-                                    <button
-                                        v-for="ans in row.answers"
-                                        :key="ans.id"
-                                        class="rounded-full border border-border bg-surface-overlay px-2.5 py-1 text-xs font-medium text-body transition-all hover:border-primary"
-                                        @click="fmReveal(row.id, { answer_id: ans.id })"
-                                    >{{ ans.text }} <span class="text-muted">{{ ans.points }}</span></button>
-                                    <button class="rounded-full border border-border px-2.5 py-1 text-xs text-muted transition-all hover:border-border-strong" @click="fmReveal(row.id, {})">No match (0)</button>
-                                    <button v-if="fmActivePlayer === 2" class="rounded-full border border-danger px-2.5 py-1 text-xs font-semibold text-danger transition-all hover:bg-danger/10" @click="fmReveal(row.id, { duplicate: true })">Duplicate (0)</button>
-                                    <button v-if="fmActiveRevealed(row)" class="rounded-full px-2.5 py-1 text-xs text-muted underline" @click="fmClear(row.id)">Clear</button>
+                            </template>
+                        </template>
+
+                        <!-- REVEAL — the current answer is spotlighted; the Reveal Answer /
+                             Reveal Points actions live in the Steps panel. -->
+                        <template v-else-if="fmIsReveal">
+                            <div class="mb-4 flex flex-wrap items-center gap-3 border-b border-border pb-3">
+                                <span class="font-semibold text-body">Player {{ fmActivePlayer }} — reveal answers</span>
+                            </div>
+
+                            <div class="space-y-2">
+                                <div
+                                    v-for="(row, ri) in fmRows"
+                                    :key="row.id"
+                                    class="rounded-lg border p-3 transition-all"
+                                    :class="fmRevealRow && row.id === fmRevealRow.id
+                                        ? 'border-border bg-surface-inset ring-2 ring-white shadow-[0_0_18px_2px_rgba(255,255,255,0.45)]'
+                                        : 'border-border bg-surface-inset opacity-70'"
+                                >
+                                    <div class="flex items-center gap-2">
+                                        <span class="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-surface-overlay text-xs font-bold text-body">{{ ri + 1 }}</span>
+                                        <span class="min-w-0 flex-1 text-sm font-medium text-body">{{ row.question }}</span>
+                                        <!-- Show exactly what the host typed for this cell (the player's
+                                             words — prefilled from the chip, or overridden), never the chip
+                                             label or "No match"; a confirmed blank shows a neutral dash.
+                                             Answer + points start faded; Reveal Answer un-fades the text to
+                                             the player's color, Reveal Points un-fades the points to white. -->
+                                        <span
+                                            class="text-sm font-bold transition-all"
+                                            :class="fmActiveCell(row).shown ? fmPlayerColorText : 'text-subtle opacity-40'"
+                                        >{{ fmActiveCell(row).text || '—' }}</span>
+                                        <span
+                                            class="w-10 text-right text-sm font-black transition-all"
+                                            :class="fmActiveCell(row).scored ? 'text-body' : 'text-subtle opacity-40'"
+                                        >{{ fmActiveCell(row).points ?? 0 }}</span>
+                                    </div>
                                 </div>
                             </div>
+                        </template>
+
+                        <!-- RESULT — End Game lives in the Steps panel. -->
+                        <div v-else-if="phase === 'fast_money_result'" class="flex flex-col items-center gap-3 py-8 text-center">
+                            <p class="text-3xl font-black" :class="fastMoney?.result === 'win' ? 'text-success' : 'text-danger'">
+                                {{ fastMoney?.result === 'win' ? 'Winner! 🎉' : 'Missed the target' }}
+                            </p>
+                            <p class="text-xl font-bold text-body">{{ fastMoney?.combined_total ?? 0 }} points</p>
                         </div>
                     </Card>
 

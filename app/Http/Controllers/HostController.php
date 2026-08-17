@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\BuildsFastMoneyBoard;
 use App\Models\GameSession;
 use App\Models\GameState;
+use App\Models\Question;
 use App\Models\SessionQuestion;
 use App\Models\Team;
 use Illuminate\Http\Request;
@@ -212,7 +213,6 @@ class HostController extends Controller
         // the last question of the session (used to reveal "End Game").
         $currentQuestionNumber = null;
         $totalQuestions = null;
-        $hasPreviousQuestion = false;
         $isLastQuestion = false;
         if (in_array($gameSession->gameType->slug, ['america-says', 'family-feud'], true)) {
             $allQuestions = $gameSession->sessionQuestions()->orderBy('display_order')->get();
@@ -224,13 +224,23 @@ class HostController extends Controller
                 $totalQuestions = $group->count();
                 $pos = $group->search(fn ($q) => $q->id === $currentQuestion->id);
                 $currentQuestionNumber = $pos === false ? null : $pos + 1;
-                $hasPreviousQuestion = $allQuestions
-                    ->contains(fn ($q) => $q->display_order < $currentQuestion->display_order);
                 $isLastQuestion = !$allQuestions
                     ->contains(fn ($q) => $q->display_order > $currentQuestion->display_order);
             } else {
                 $totalQuestions = $allQuestions->count();
             }
+        }
+
+        // Family Feud regular play is score-driven: the first team to the target
+        // (300) ends it and goes to Fast Money. These drive the recap's advance
+        // button — "Start Fast Money" once a team's there, else "Next Round".
+        $feudTargetReached = false;
+        $feudFastMoneyReady = false;
+        if ($gameSession->gameType->slug === 'family-feud') {
+            $target = (int) $gameSession->getConfig('target_score', 300);
+            $feudTargetReached = (int) ($gameSession->teams()->max('total_score') ?? 0) >= $target;
+            $feudFastMoneyReady = $gameSession->sessionQuestions()
+                ->where('segment', 'fast_money')->exists();
         }
 
         // Whether the *next* question crosses into an America Says final round —
@@ -310,6 +320,10 @@ class HostController extends Controller
                     'points' => $answer->points,
                     'display_order' => $answer->display_order,
                     'revealed' => $currentQuestion->answerReveals->contains('answer_id', $answer->id),
+                    // What this reveal contributes to the Feud pool. Equals the survey
+                    // points for face-off/primary reveals, but 0 for a steal reveal
+                    // (the stealer wins only the banked pool, not the steal answer).
+                    'pool_points' => (int) ($currentQuestion->answerReveals->firstWhere('answer_id', $answer->id)?->points_awarded ?? 0),
                 ]),
                 'revealed_answer_ids' => $currentQuestion->revealedAnswerIds(),
             ] : null,
@@ -328,9 +342,10 @@ class HostController extends Controller
             'totalCards' => $gameSession->sessionCards->count(),
             'currentQuestionNumber' => $currentQuestionNumber,
             'totalQuestions' => $totalQuestions,
-            'hasPreviousQuestion' => $hasPreviousQuestion,
             'isLastQuestion' => $isLastQuestion,
             'finalQueued' => $finalQueued,
+            'feudTargetReached' => $feudTargetReached,
+            'feudFastMoneyReady' => $feudFastMoneyReady,
             'finalQuestions' => $finalQuestions,
             // Family Feud Fast Money board (rows + totals + the survey answers the
             // host reveals from). Null unless Fast Money is active.
@@ -558,13 +573,15 @@ class HostController extends Controller
                 // host can re-run and re-declare the winner.
                 $state->setStateValue('phase', 'tiebreaker_intro');
             } elseif ($segment === 'fast_money') {
-                // Replay Fast Money from the top: clear both passes' answers and the
-                // result, park the clock, and land on the intro.
+                // Replay Fast Money from the top: clear both passes' answers, the
+                // result, and the bring-out flags, park the clock, and land on the
+                // intro (Start Player 1).
                 $fm = $state->getStateValue('fast_money');
                 if (is_array($fm)) {
                     $fm['answers'] = [];
                     $fm['active_player'] = 1;
                     $fm['result'] = null;
+                    $fm['show_previous'] = false;
                     $state->setStateValue('fast_money', $fm);
                 }
                 $state->update(['timer_started_at' => null]);
@@ -624,15 +641,22 @@ class HostController extends Controller
         // leave these alone; the pool award is tracked/reversed on its own key.
         if ($gameSession->gameType->slug === 'family-feud'
             && ($currentQuestion->segment ?? 'main') === 'main') {
+            $phase = $state->getStateValue('phase');
+
+            // A steal reveal — the stealing team's single correct guess — lights up
+            // on the board but its survey points do NOT join the pool: the stealer
+            // wins only what the primary team banked (real-Feud rule). We store
+            // points_awarded = 0 so feudPointPool (and the host's running total)
+            // exclude it. Face-off + primary play accrue their points as normal.
+            $stealReveal = in_array($phase, ['steal', 'reveal'], true);
+
             $currentQuestion->answerReveals()->create([
                 'answer_id' => $validated['answer_id'],
                 'team_id' => null,
                 'revealed_at' => now(),
-                'points_awarded' => (int) ($answer->points ?? 0),
+                'points_awarded' => $stealReveal ? 0 : (int) ($answer->points ?? 0),
             ]);
             $answer->recordReveal();
-
-            $phase = $state->getStateValue('phase');
 
             // Face-off: this reveal is the current team's face-off answer — record
             // it and let the flow decide who plays (top answer / higher points).
@@ -647,11 +671,13 @@ class HostController extends Controller
                 }
             }
 
-            // Steal: a revealed answer is a successful steal → the stealing team
-            // wins the whole pool (including this answer). A miss resolves via the
-            // Strike button instead.
+            // Steal: the stealing team's ONE guess. Revealing a correct answer during
+            // the 'steal' phase is a successful steal → they win the banked pool (this
+            // answer contributed 0, per above), which flips us to the 'reveal' beat. A
+            // miss resolves via the Strike button instead. Reveals during 'reveal' are
+            // just the host putting up the leftovers (no points, no re-resolution).
             $stealResolved = false;
-            if (in_array($phase, ['steal', 'reveal'], true)) {
+            if ($phase === 'steal') {
                 $this->feudResolvePool($gameSession, $state, $currentQuestion, 'steal_success');
                 $stealResolved = true;
             }
@@ -1275,11 +1301,58 @@ class HostController extends Controller
             return response()->json(['success' => true, 'card_complete' => true]);
         }
 
-        // For non-card games (Family Feud, America Says), find next question
-        $nextQuestion = $gameSession->sessionQuestions()
-            ->where('status', 'pending')
-            ->orderBy('display_order')
-            ->first();
+        // Family Feud is score-driven, not a fixed round count: after each main
+        // round, the first team to reach the target (300) ends regular play and
+        // its two players go to Fast Money. Until someone gets there we keep
+        // playing main rounds — pulling a fresh question from the bank (a triple-
+        // value round, like the America Says tie-off pull) when the seeded ones
+        // run out — so a close game never stops short of a winner.
+        if ($gameSession->gameType->slug === 'family-feud'
+            && ($currentQuestion?->segment ?? 'main') === 'main') {
+            $target = (int) $gameSession->getConfig('target_score', 300);
+            $topScore = (int) ($gameSession->teams()->max('total_score') ?? 0);
+
+            if ($topScore >= $target) {
+                // A team hit the target — regular play is over. Fast Money if it's
+                // enabled (its two players run the bonus), otherwise the regular
+                // game itself is decisive and we finish.
+                $fastMoneyReady = $gameSession->sessionQuestions()
+                    ->where('segment', 'fast_money')
+                    ->exists();
+                if ($fastMoneyReady) {
+                    return $this->enterFastMoney($gameSession, $state);
+                }
+
+                $state->clearRoundScores();
+                $gameSession->update(['status' => 'completed', 'completed_at' => now()]);
+
+                return response()->json(['success' => true, 'game_complete' => true]);
+            }
+
+            // No winner yet → the next main round: a seeded pending main if one's
+            // left, otherwise a freshly pulled question so play continues.
+            $nextQuestion = $gameSession->sessionQuestions()
+                ->where('segment', 'main')
+                ->where('status', 'pending')
+                ->orderBy('display_order')
+                ->first()
+                ?? $this->addFeudMainRound($gameSession);
+
+            if (!$nextQuestion) {
+                // Bank fully exhausted (no fresh question to pull) — end on the
+                // current standings rather than looping.
+                $state->clearRoundScores();
+                $gameSession->update(['status' => 'completed', 'completed_at' => now()]);
+
+                return response()->json(['success' => true, 'game_complete' => true]);
+            }
+        } else {
+            // For the other non-card game (America Says), walk the seeded list.
+            $nextQuestion = $gameSession->sessionQuestions()
+                ->where('status', 'pending')
+                ->orderBy('display_order')
+                ->first();
+        }
 
         if ($nextQuestion) {
             // Crossing from regular play into the America Says final round: only
@@ -1303,16 +1376,6 @@ class HostController extends Controller
                 }
 
                 return $this->enterFinalRound($gameSession, $state, $teams->first());
-            }
-
-            // Family Feud: crossing from the regular rounds into Fast Money — the
-            // winning team's two players play two timed passes over the same 5
-            // questions for a combined 200. Set it up and land on its intro.
-            $enteringFastMoney = $gameSession->gameType->slug === 'family-feud'
-                && ($nextQuestion->segment ?? 'main') === 'fast_money'
-                && ($currentQuestion?->segment ?? 'main') !== 'fast_money';
-            if ($enteringFastMoney) {
-                return $this->enterFastMoney($gameSession, $state);
             }
 
             $newRound = $nextQuestion->round_number ?? $state->round_number;
@@ -1606,51 +1669,6 @@ class HostController extends Controller
     }
 
     /**
-     * Step back to the previous question. Non-destructive: the question we leave
-     * keeps its reveals/points and is set back to 'pending' so "Next Question"
-     * resumes it, and the previous question is reactivated with its board intact.
-     */
-    public function previousQuestion(GameSession $gameSession)
-    {
-        if ($gameSession->host_user_id !== auth()->id()) {
-            abort(403);
-        }
-
-        $state = $gameSession->gameState;
-        $currentQuestion = $state->currentQuestion;
-
-        if (!$currentQuestion) {
-            return response()->json(['error' => 'No active question'], 400);
-        }
-
-        // Previous question by display order, scoped to the current card for
-        // card-based games (Oodles).
-        $query = $state->current_card_id
-            ? $state->currentCard->sessionQuestions()
-            : $gameSession->sessionQuestions();
-        $previous = $query
-            ->where('display_order', '<', $currentQuestion->display_order)
-            ->orderByDesc('display_order')
-            ->first();
-
-        if (!$previous) {
-            return response()->json(['error' => 'Already at the first question'], 400);
-        }
-
-        $currentQuestion->update(['status' => 'pending']);
-        $previous->update(['status' => 'active']);
-        $state->update([
-            'current_question_id' => $previous->id,
-            'round_number' => $previous->round_number ?? $state->round_number,
-            'active_team_id' => $previous->controlling_team_id ?? $state->active_team_id,
-        ]);
-        // Stepping back shows that question again (guided America Says flow).
-        $state->setStateValue('phase', 'question');
-
-        return response()->json(['success' => true]);
-    }
-
-    /**
      * America Says guided flow — reveal the loaded question on the board.
      * Moves the phase from "intro" (Round N — Get Ready) to "question" so the
      * plaque + blank board appear; the timer stays idle until startTimer.
@@ -1846,8 +1864,61 @@ class HostController extends Controller
         if ($mult > 0) {
             return $mult;
         }
+        return $this->feudRoundMultiplier($gameSession, (int) ($question->round_number ?? 1));
+    }
+
+    /**
+     * The point multiplier for a Feud round. Rounds 1–2 are single, 3 double, 4
+     * triple (the seeded schedule). Because regular play is open-ended — it runs
+     * until a team reaches the target — any round past the schedule (5+, only
+     * reached in a stubborn tie) stays at the highest defined value (triple).
+     */
+    protected function feudRoundMultiplier(GameSession $gameSession, int $round): int
+    {
         $schedule = $gameSession->getConfig('round_multipliers', []);
-        return (int) ($schedule[(string) ($question->round_number ?? 1)] ?? 1);
+        if (isset($schedule[(string) $round])) {
+            return (int) $schedule[(string) $round];
+        }
+        return $schedule ? (int) max($schedule) : 1;
+    }
+
+    /**
+     * Pull a fresh main-round question into a Feud session when the seeded rounds
+     * are used up but no team has reached the target yet. Mirrors the America
+     * Says tie-off pull (pickTiebreakerQuestion): a random unused, non-Final
+     * question, ordered least-used first. The new round takes the next round
+     * number and its multiplier from the schedule (triple, past round 4). Returns
+     * null only when the bank is fully exhausted.
+     */
+    protected function addFeudMainRound(GameSession $gameSession): ?SessionQuestion
+    {
+        $usedIds = $gameSession->sessionQuestions()->pluck('question_id')->all();
+
+        $question = Question::where('game_type_id', $gameSession->game_type_id)
+            ->where('is_active', true)
+            ->where('round_type', '!=', 'final')
+            ->whereNotIn('id', $usedIds)
+            ->orderBy('times_used')
+            ->inRandomOrder()
+            ->first();
+
+        if (!$question) {
+            return null;
+        }
+
+        $nextRound = (int) ($gameSession->sessionQuestions()
+            ->where('segment', 'main')->max('round_number') ?? 0) + 1;
+        $order = (int) $gameSession->sessionQuestions()->max('display_order') + 1;
+
+        return SessionQuestion::create([
+            'game_session_id' => $gameSession->id,
+            'question_id' => $question->id,
+            'display_order' => $order,
+            'round_number' => $nextRound,
+            'status' => 'pending',
+            'segment' => 'main',
+            'points_available' => $this->feudRoundMultiplier($gameSession, $nextRound),
+        ]);
     }
 
     /**
@@ -1947,8 +2018,16 @@ class HostController extends Controller
             // First team nailed the #1 answer — they decide, second team is out.
             $fo['decider'] = $buzzed;
         } elseif ($other && !array_key_exists((string) $other, $fo['answers'])) {
-            // The other team still gets a turn.
+            // The first team missed the top answer, so the OTHER team gets a face-off
+            // turn — move the "up"/control indicator to them so both scoreboards
+            // (host + display) show whose turn it is, not the team that buzzed first.
             $fo['turn'] = $other;
+            $question->update([
+                'controlling_team_id' => $other,
+                'controlling_team_ids' => null,
+                'control_status' => 'team_control',
+            ]);
+            $state->update(['active_team_id' => $other]);
         } else {
             // Both teams have answered — the higher points decides (tie → buzzed).
             $mine = (int) ($fo['answers'][(string) $teamId] ?? 0);
@@ -2002,7 +2081,9 @@ class HostController extends Controller
 
         // Steal: the one guess missed → the steal fails, the original team keeps the
         // pool. (A correct steal resolves on the reveal instead.) Flash the X too.
-        if (in_array($state->getStateValue('phase'), ['steal', 'reveal'], true)) {
+        // Only during the 'steal' guess itself — once we're on the 'reveal' beat the
+        // outcome is settled and the host is just putting up leftovers.
+        if ($state->getStateValue('phase') === 'steal') {
             $state->setStateValue('faceoff_strike', (int) $state->getStateValue('faceoff_strike', 0) + 1);
             $amount = $this->feudResolvePool($gameSession, $state, $currentQuestion, 'steal_fail');
 
@@ -2124,14 +2205,44 @@ class HostController extends Controller
             $state->setStateValue($poolKey, ['team_id' => $winner->id, 'amount' => $amount]);
         }
 
-        // Show the scoreboard (remember where we came from for a mis-score fix).
-        $prev = $state->getStateValue('phase');
+        // Where to next? A clear means the board is already full → straight to the
+        // scoreboard (the caller held the 2s so the last reveal landed). A steal
+        // (success OR fail) leaves un-guessed answers up — pause on a 'reveal' beat
+        // so the host can reveal the leftovers (no points) first. Once the board is
+        // full the front-end holds 2s, then feudFinishReveal drops to the scores.
+        if ($outcome === 'clear') {
+            $prev = $state->getStateValue('phase');
+            if (in_array($prev, ['question', 'steal', 'reveal'], true)) {
+                $state->setStateValue('phase_before_recap', $prev);
+            }
+            $state->setStateValue('phase', 'recap');
+        } else {
+            $state->setStateValue('phase', 'reveal');
+        }
+
+        return $amount;
+    }
+
+    /**
+     * Drop from the leftover-reveal beat to the scoreboard once every answer is up
+     * (the front-end calls this after its 2s hold). The award already happened at
+     * resolution; this only flips the phase — recording where we came from so a
+     * mis-score fix can return to the board.
+     */
+    public function feudFinishReveal(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $prev = $state?->getStateValue('phase');
         if (in_array($prev, ['question', 'steal', 'reveal'], true)) {
             $state->setStateValue('phase_before_recap', $prev);
         }
-        $state->setStateValue('phase', 'recap');
+        $state?->setStateValue('phase', 'recap');
 
-        return $amount;
+        return response()->json(['success' => true]);
     }
 
     /**
@@ -2157,9 +2268,16 @@ class HostController extends Controller
     // passes combine toward a target (200) — reaching it is a win. Fast Money does
     // NOT change team scores; it's a bonus round like the America Says final.
     //
-    // Phases: fast_money_intro → fast_money_p1 → fast_money_p2 → fast_money_result.
+    // Real-show flow is capture-then-reveal, per player. Phases:
+    //   fast_money_intro
+    //   → fast_money_p1_capture  (20s clock; host records what P1 said, hidden)
+    //   → fast_money_p1_reveal   (untimed; reveal each answer's text then points)
+    //   → fast_money_p2_capture  (25s clock; P1's answers can't be duplicated)
+    //   → fast_money_p2_reveal
+    //   → fast_money_result      (win at ≥ target; celebratory slide + confetti)
     // All state lives under state_data.fast_money (answers keyed by session-question
-    // id then player), rebuilt into board rows + totals by fastMoneyPayload().
+    // id then player; each cell carries captured/shown/scored), rebuilt into board
+    // rows + totals by fastMoneyPayload().
 
     /**
      * Enter Fast Money after the last regular round. Sets up the state skeleton and
@@ -2191,6 +2309,10 @@ class HostController extends Controller
             'active_player' => 1,
             'timer1_buzz' => 0,
             'timer2_buzz' => 0,
+            'duplicate_buzz' => 0,
+            // While Player 2 answers, Player 1's board stays hidden on the TV until
+            // the host flashes it to the room (they've turned away).
+            'show_previous' => false,
             'result' => null,
             'answers' => [],
         ];
@@ -2209,9 +2331,10 @@ class HostController extends Controller
     }
 
     /**
-     * Start a Fast Money pass: set the active player, start their clock (20s for
-     * Player 1, 25s for Player 2) and bump the timer-sound counter the display
-     * plays the pass sting off.
+     * Start a player's CAPTURE pass: set the active player, start their clock (20s
+     * for Player 1, 25s for Player 2) and bump the timer-sound counter the display
+     * plays the pass sting off. Capture only records answers (hidden) — the reveal
+     * comes later. For Player 2 this is the "Start Timer" after the bring-out.
      */
     public function fmStartPlayer(Request $request, GameSession $gameSession)
     {
@@ -2231,20 +2354,21 @@ class HostController extends Controller
         $fm['active_player'] = $player;
         $fm["timer{$player}_buzz"] = (int) ($fm["timer{$player}_buzz"] ?? 0) + 1;
         $state->setStateValue('fast_money', $fm);
-        $state->setStateValue('phase', $player === 1 ? 'fast_money_p1' : 'fast_money_p2');
-        // Reveal the board now, start the clock ~1s later (casting-latency grace).
+        $state->setStateValue('phase', "fast_money_p{$player}_capture");
+        // Start the clock ~1s later (casting-latency grace).
         $state->update(['timer_duration' => $seconds, 'timer_started_at' => now()->addSecond()]);
 
         return response()->json(['success' => true]);
     }
 
     /**
-     * Reveal the active player's answer for one Fast Money question. Pass an
-     * answer_id to score its survey points; pass duplicate=true (Player 2 repeated
-     * Player 1) or neither for a 0 — both of which sound the zero-points cue on the
-     * display. Stored per (question, player) under state_data.fast_money.answers.
+     * Capture (record, hidden) the active player's answer for one Fast Money
+     * question. Pass an answer_id for a survey match, or nothing for a "no match"
+     * (0, still captured). If Player 2 taps an answer Player 1 already used for the
+     * SAME question it's a duplicate — NOT captured; we bump duplicate_buzz so the
+     * display sounds the buzzer and the player guesses again.
      */
-    public function fmReveal(Request $request, GameSession $gameSession)
+    public function fmCapture(Request $request, GameSession $gameSession)
     {
         if ($gameSession->host_user_id !== auth()->id()) {
             abort(403);
@@ -2253,7 +2377,6 @@ class HostController extends Controller
         $validated = $request->validate([
             'session_question_id' => 'required|integer',
             'answer_id' => 'nullable|integer|exists:answers,id',
-            'duplicate' => 'nullable|boolean',
         ]);
 
         $state = $gameSession->gameState;
@@ -2272,10 +2395,22 @@ class HostController extends Controller
         }
 
         $player = (int) ($fm['active_player'] ?? 1);
-        $duplicate = (bool) ($validated['duplicate'] ?? false);
-        $entry = ['answer_id' => null, 'text' => null, 'points' => 0, 'duplicate' => $duplicate];
+        $answers = $fm['answers'] ?? [];
+        $key = (string) $sq->id;
 
-        if (!$duplicate && !empty($validated['answer_id'])) {
+        // Duplicate: Player 2 tapped the exact answer Player 1 used for this question.
+        if ($player === 2 && !empty($validated['answer_id'])) {
+            $p1 = $answers[$key]['1'] ?? null;
+            if (is_array($p1) && (int) ($p1['answer_id'] ?? 0) === (int) $validated['answer_id']) {
+                $fm['duplicate_buzz'] = (int) ($fm['duplicate_buzz'] ?? 0) + 1;
+                $state->setStateValue('fast_money', $fm);
+
+                return response()->json(['success' => true, 'duplicate' => true]);
+            }
+        }
+
+        $entry = ['answer_id' => null, 'text' => null, 'points' => 0, 'shown' => false, 'scored' => false];
+        if (!empty($validated['answer_id'])) {
             $answer = $sq->question->answers->firstWhere('id', $validated['answer_id']);
             if ($answer) {
                 $entry['answer_id'] = $answer->id;
@@ -2285,9 +2420,8 @@ class HostController extends Controller
             }
         }
 
-        $answers = $fm['answers'] ?? [];
-        $answers[(string) $sq->id] = ($answers[(string) $sq->id] ?? []);
-        $answers[(string) $sq->id][(string) $player] = $entry;
+        $answers[$key] = $answers[$key] ?? [];
+        $answers[$key][(string) $player] = $entry;
         $fm['answers'] = $answers;
         $state->setStateValue('fast_money', $fm);
 
@@ -2295,7 +2429,8 @@ class HostController extends Controller
     }
 
     /**
-     * Clear the active player's answer for a Fast Money question (host correction).
+     * Clear the active player's captured answer for a Fast Money question (host
+     * correction, during capture).
      */
     public function fmClear(Request $request, GameSession $gameSession)
     {
@@ -2321,8 +2456,155 @@ class HostController extends Controller
     }
 
     /**
+     * Set the words shown on the board for a captured Fast Money cell — what the
+     * player actually SAID. A matched answer prefills its canonical text (on capture)
+     * but the host can override it to the player's own wording here; the matched
+     * answer's POINTS are unaffected. A no-match keeps 0 points. Empty clears it back
+     * to blank. Applies to any captured cell for the active player.
+     */
+    public function fmMissText(Request $request, GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'session_question_id' => 'required|integer',
+            'text' => 'nullable|string|max:120',
+        ]);
+
+        $state = $gameSession->gameState;
+        $fm = $state?->getStateValue('fast_money');
+        if (!is_array($fm)) {
+            return response()->json(['error' => 'Fast Money is not active'], 400);
+        }
+
+        $player = (int) ($fm['active_player'] ?? 1);
+        $key = (string) $validated['session_question_id'];
+        $cell = $fm['answers'][$key][(string) $player] ?? null;
+        if (is_array($cell)) {
+            $fm['answers'][$key][(string) $player]['text'] = ($validated['text'] ?? '') !== '' ? $validated['text'] : null;
+            $state->setStateValue('fast_money', $fm);
+        }
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Move the active player from CAPTURE to REVEAL — stops the clock; the host now
+     * reveals each answer's text then points, one at a time.
+     */
+    public function fmToReveal(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $fm = $state?->getStateValue('fast_money');
+        if (!is_array($fm)) {
+            return response()->json(['error' => 'Fast Money is not active'], 400);
+        }
+
+        $player = (int) ($fm['active_player'] ?? 1);
+        $state->setStateValue('phase', "fast_money_p{$player}_reveal");
+        $state->update(['timer_started_at' => null]);
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Reveal step: `part` = 'answer' types the captured answer's TEXT onto the TV;
+     * 'points' flips its POINTS up (and counts them toward the total). One question
+     * at a time, for the active player.
+     */
+    public function fmRevealCell(Request $request, GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'session_question_id' => 'required|integer',
+            'part' => 'required|in:answer,points',
+        ]);
+
+        $state = $gameSession->gameState;
+        $fm = $state?->getStateValue('fast_money');
+        if (!is_array($fm)) {
+            return response()->json(['error' => 'Fast Money is not active'], 400);
+        }
+
+        $player = (int) ($fm['active_player'] ?? 1);
+        $key = (string) $validated['session_question_id'];
+        if (!isset($fm['answers'][$key][(string) $player])) {
+            return response()->json(['error' => 'Nothing captured for that question'], 400);
+        }
+
+        if ($validated['part'] === 'answer') {
+            $fm['answers'][$key][(string) $player]['shown'] = true;
+        } else {
+            // Points imply the answer is up too (keeps state consistent if skipped).
+            $fm['answers'][$key][(string) $player]['shown'] = true;
+            $fm['answers'][$key][(string) $player]['scored'] = true;
+        }
+        $state->setStateValue('fast_money', $fm);
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Bring out Player 2: flip the active player, land on the (untimed) P2 capture
+     * beat WITHOUT starting the clock, and hide Player 1's board on the TV until the
+     * host flashes it. Called from the end of Player 1's reveal.
+     */
+    public function fmNextPlayer(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $fm = $state?->getStateValue('fast_money');
+        if (!is_array($fm)) {
+            return response()->json(['error' => 'Fast Money is not active'], 400);
+        }
+
+        $fm['active_player'] = 2;
+        $fm['show_previous'] = false;
+        $state->setStateValue('fast_money', $fm);
+        $state->setStateValue('phase', 'fast_money_p2_capture');
+        $state->update(['timer_started_at' => null]);
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Toggle whether Player 1's board is flashed to the room during Player 2's
+     * capture (used when Player 2 has turned away from the TV).
+     */
+    public function fmShowPrevious(Request $request, GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $validated = $request->validate(['show' => 'required|boolean']);
+        $state = $gameSession->gameState;
+        $fm = $state?->getStateValue('fast_money');
+        if (!is_array($fm)) {
+            return response()->json(['error' => 'Fast Money is not active'], 400);
+        }
+
+        $fm['show_previous'] = (bool) $validated['show'];
+        $state->setStateValue('fast_money', $fm);
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
      * Tally the two passes and land on the result (win when the combined total
-     * meets the target). Stops the clock.
+     * meets the target). Stops the clock. Called after Player 2's last reveal.
      */
     public function fmResult(GameSession $gameSession)
     {
@@ -2343,6 +2625,30 @@ class HostController extends Controller
         $state->update(['timer_started_at' => null]);
 
         return response()->json(['success' => true, 'result' => $fm['result']]);
+    }
+
+    /**
+     * Pop back from the celebratory result slide to the (active player's) reveal
+     * board, so the host can reveal any answers that weren't shown before the win
+     * clinched — purely for the crowd. The host returns to the slide via fmResult.
+     */
+    public function fmBackToReveal(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $fm = $state?->getStateValue('fast_money');
+        if (!is_array($fm)) {
+            return response()->json(['error' => 'Fast Money is not active'], 400);
+        }
+
+        $player = (int) ($fm['active_player'] ?? 2);
+        $state->setStateValue('phase', "fast_money_p{$player}_reveal");
+        $state->update(['timer_started_at' => null]);
+
+        return response()->json(['success' => true]);
     }
 
     // ---- America Says final round ---------------------------------------------

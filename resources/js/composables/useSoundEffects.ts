@@ -28,6 +28,7 @@ const SOUND_LIBRARY = {
     },
     'family-feud': {
         intro: 'Intro.m4a',
+        faceOff: 'FaceOff.m4a',
         answerReveal: 'AnswerReveal.m4a',
         strike: 'Strike.m4a',
         buzzer: 'Buzzer.m4a',
@@ -36,6 +37,8 @@ const SOUND_LIBRARY = {
         fastMoneyAnswerReveal: 'FastMoneyAnswerReveal.m4a',
         fastMoneyPointsReveal: 'FastMoneyPointsReveal.m4a',
         fastMoneyZeroPoints: 'FastMoneyZeroPoints.m4a',
+        duplicate: 'DuplicateAnswer.m4a',
+        win: 'Winner.m4a',
     },
 } as const;
 
@@ -108,14 +111,38 @@ export function useSoundEffects<G extends Game>(game: G, options: { volume?: num
 
     const isAvailable = (name: Name): boolean | undefined => available[name];
 
-    const play = (name: Name) => {
+    // timeupdate handlers that stop a clip early (used for stopAt); one per sound.
+    const stopHandlers: Partial<Record<Name, () => void>> = {};
+
+    /**
+     * Play a sound. Options let a single file serve two cues:
+     *   startAt — begin at this offset (seconds) instead of 0
+     *   stopAt  — pause once playback reaches this offset (seconds)
+     * (Currently every Family Feud cue is its own file — Intro.m4a plays in full and
+     * the winner sting is Winner.m4a — but startAt/stopAt remain for future reuse.)
+     */
+    const play = (name: Name, opts: { startAt?: number; stopAt?: number } = {}) => {
         const el = ensureLoaded(name);
         // Take ownership so a still-pending unlock bless won't pause us, and force
         // audible in case that bless hasn't unmuted this element yet.
         primed[name] = true;
         el.muted = false;
+        // Clear any prior stop handler from an earlier play of this sound.
+        if (stopHandlers[name]) { el.removeEventListener('timeupdate', stopHandlers[name]!); stopHandlers[name] = undefined; }
         try {
-            el.currentTime = 0;
+            el.currentTime = opts.startAt ?? 0;
+            if (opts.stopAt != null) {
+                const stopAt = opts.stopAt;
+                const handler = () => {
+                    if (el.currentTime >= stopAt) {
+                        el.pause();
+                        el.removeEventListener('timeupdate', handler);
+                        stopHandlers[name] = undefined;
+                    }
+                };
+                stopHandlers[name] = handler;
+                el.addEventListener('timeupdate', handler);
+            }
             const p = el.play();
             if (p) p.catch((err) => console.warn(`Sound "${name}" was blocked:`, err));
         } catch (e) {

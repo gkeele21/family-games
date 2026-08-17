@@ -17,7 +17,13 @@ class GameTypeSeeder extends Seeder
             'default_config' => [
                 'team_size' => 0, // 0 = unlimited, 1 = individual play
                 'allow_team_selection' => false, // If true, players can pick their team
+                // Regular play is score-driven, not a fixed count: the first team
+                // to target_score wins and goes to Fast Money. rounds_per_game is
+                // just how many main questions we seed up front (1×,1×,2×,3×); if a
+                // tight game exhausts them before anyone hits the target we pull
+                // more questions (triple-value) until someone does.
                 'rounds_per_game' => 4,
+                'target_score' => 300,
                 'face_off_mode' => 'buzzer', // 'buzzer' or 'rotation'
                 'max_strikes' => 3,
                 'steal_mode' => 'one_guess', // 'one_guess' or 'timed'
@@ -34,7 +40,7 @@ class GameTypeSeeder extends Seeder
                 'fast_money_target_score' => 200,
                 'play_or_pass_enabled' => true,
                 'answers_per_question' => 8,
-                'winning_condition' => 'most_points_after_rounds',
+                'winning_condition' => 'first_to_target',
             ],
         ]);
 

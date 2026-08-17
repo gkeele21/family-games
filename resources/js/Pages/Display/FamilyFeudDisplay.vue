@@ -64,16 +64,19 @@ interface Answer {
     points: number | null;
     display_order: number;
     revealed: boolean;
+    // Feud pool contribution (0 for a steal reveal).
+    pool_points?: number;
 }
 
 // Fast Money board the host publishes on gameState. Each of the 5 questions has a
-// cell per player (Player 1, then Player 2 over the SAME questions), hidden until
-// the host reveals it. A duplicate (Player 2 repeated Player 1) scores 0.
+// cell per player (Player 1 left column, Player 2 right column). The host captures
+// answers hidden, then reveals text (shown) then points (scored) one at a time;
+// the display only ever sees text once shown and points once scored.
 interface FastMoneyCell {
-    revealed: boolean;
+    shown: boolean;
+    scored: boolean;
     text?: string | null;
-    points?: number;
-    duplicate?: boolean;
+    points?: number | null;
 }
 interface FastMoneyRow {
     id: number;
@@ -85,13 +88,15 @@ interface FastMoney {
     rows: FastMoneyRow[];
     target: number;
     active_player: number;
+    show_previous: boolean;
     p1_total: number;
     p2_total: number;
     combined_total: number;
     result: 'win' | 'lose' | null;
-    // Monotonic counters the host bumps to fire the FM timer stings.
+    // Monotonic counters the host bumps to fire the FM timer stings + duplicate cue.
     timer1_buzz?: number;
     timer2_buzz?: number;
+    duplicate_buzz?: number;
 }
 
 interface GameState {
@@ -119,6 +124,9 @@ interface GameState {
     faceoff_strike?: number;
     // Fast Money board data (optional; see FastMoney above).
     fast_money?: FastMoney | null;
+    // Family Feud: a team reached the target (300) — the recap becomes the
+    // "Team X Wins the game" celebration before Fast Money.
+    feud_target_reached?: boolean;
 }
 
 interface CurrentQuestion {
@@ -157,6 +165,9 @@ const DOM_ORDER = [0, 4, 1, 5, 2, 6, 3, 7];
 const MULT_LABEL: Record<number, string> = { 1: '', 2: 'Double', 3: 'Triple' };
 
 // --- Theme / start curtain ---------------------------------------------------
+// Intro.m4a is the opening theme; it plays in full on the start curtain. (The
+// Fast Money winner sting is its own clip now — Winner.m4a, played via 'win' —
+// so the theme is no longer truncated to hide a sting in its tail.)
 // Intro.m4a doubles as the theme sting. Loaded as its own <audio> (like the AS
 // theme) so we get its 'ended' event to dismiss the curtain. It routes to the TV
 // on the media channel exactly like the effect clips.
@@ -205,16 +216,19 @@ const startTheme = () => {
         if (done) return;
         done = true;
         if (safety) clearTimeout(safety);
+        t.pause();
         themeSlideOpen.value = false;
     };
+    // The theme plays to its natural end, which dismisses the curtain.
     t.addEventListener('ended', finish, { once: true });
     t.addEventListener('error', finish, { once: true });
     t.currentTime = 0;
     themePrimed = true;
     const p = t.play();
     if (p) p.catch(() => finish());
-    // Safety net if the audio stalls without firing 'ended'/'error'.
-    safety = window.setTimeout(finish, 15000);
+    // Safety net if the audio stalls without firing 'ended'/'error' (Intro.m4a is
+    // ~15.4s; keep this comfortably past that so it never clips a healthy play).
+    safety = window.setTimeout(finish, 20000);
 };
 
 const maybeStartTheme = () => {
@@ -272,7 +286,6 @@ const isFastMoney = computed(() =>
 );
 const fmActivePlayer = computed(() => props.gameState?.fast_money?.active_player ?? 1);
 const isSteal = computed(() => phase.value === 'steal');
-const isReveal = computed(() => phase.value === 'reveal');
 
 // The board (proscenium + slots + survey) is shown during the board phases, once
 // there's a question to show and we're not in Fast Money.
@@ -299,9 +312,14 @@ const sortedAnswers = computed(() => {
 });
 const answerCount = computed(() => Math.min(sortedAnswers.value.length, BOARD_SLOTS));
 
-// The running "pot": sum of revealed answer points × the round multiplier.
+// The running "pot": sum of each revealed answer's pool contribution × the round
+// multiplier. A steal reveal contributes 0 (pool_points), so it lights up on the
+// board without inflating the pot the stealer wins.
 const pot = computed(() => {
-    const sum = sortedAnswers.value.reduce((acc, a) => acc + (a.revealed ? a.points ?? 0 : 0), 0);
+    const sum = sortedAnswers.value.reduce(
+        (acc, a) => acc + (a.revealed ? (a.pool_points ?? a.points ?? 0) : 0),
+        0,
+    );
     return sum * multiplier.value;
 });
 
@@ -355,7 +373,10 @@ let strikeFlashTimer: number | null = null;
 const flashStrikes = (count: number) => {
     if (count <= 0) return;
     strikeFlash.value = Math.min(count, maxStrikes.value);
-    sounds.play(count >= maxStrikes.value ? 'buzzer' : 'strike');
+    // Always the strike cue — even on the third strike that hands to the steal.
+    // The buzzer is the face-off buzz-in sound only; it shouldn't fire when the
+    // board flips to the stealing team.
+    sounds.play('strike');
     if (strikeFlashTimer) clearTimeout(strikeFlashTimer);
     strikeFlashTimer = window.setTimeout(() => { strikeFlash.value = 0; }, 1500);
 };
@@ -364,6 +385,15 @@ const flashStrikes = (count: number) => {
 // face-off (a fresh turn), and clear any lingering flash.
 watch(() => props.currentQuestion?.id, () => { derivedStrikes.value = 0; strikeFlash.value = 0; });
 watch(phase, (now) => { if (now === 'faceoff' || now === 'intro') { derivedStrikes.value = 0; } });
+
+// Face-off lead-in: advancing lands on the round intro ("Get Ready", before the
+// host shows the question) — sound the face-off cue there. Only on a real
+// transition into the intro, and not while the opening theme is up.
+watch(phase, (now, prev) => {
+    if (now === 'intro' && !!prev && prev !== 'intro' && props.status === 'playing' && !themeSlideOpen.value) {
+        sounds.play('faceOff');
+    }
+});
 
 // Authoritative path: flash whenever the published count rises.
 watch(() => props.gameState?.strikes ?? null, (now, prev) => {
@@ -440,16 +470,18 @@ const fastMoney = computed<FastMoney | null>(() => props.gameState?.fast_money ?
 const fmRows = computed(() => fastMoney.value?.rows ?? []);
 const fmTarget = computed(() => fastMoney.value?.target ?? 200);
 const fmCombined = computed(() => fastMoney.value?.combined_total ?? 0);
-const fmP1Total = computed(() => fastMoney.value?.p1_total ?? 0);
-const fmP2Total = computed(() => fastMoney.value?.p2_total ?? 0);
 const fmResult = computed(() => fastMoney.value?.result ?? null);
-// Which player passes are shown: Player 2's column only appears once Player 2 is
-// up (or the result is in), so Player 1's pass reads on its own first.
+// Player 1's column is up except while Player 2 is capturing and the host hasn't
+// flashed it to the room (Player 2 mustn't see it). Player 2's column appears once
+// Player 2 is up (or at the result).
+const fmShowP1 = computed(() =>
+    phase.value !== 'fast_money_p2_capture' || !!fastMoney.value?.show_previous
+);
 const fmShowP2 = computed(() =>
-    fmActivePlayer.value === 2 || phase.value === 'fast_money_result' || fmP2Total.value > 0
+    fmActivePlayer.value === 2 || phase.value === 'fast_money_result'
 );
 
-// A lightweight clock for the Fast Money passes (the only Feud board with a timer).
+// A lightweight clock for the Fast Money capture passes.
 const fmRemaining = ref(0);
 let fmTimerInterval: number | null = null;
 const computeFmRemaining = () => {
@@ -461,38 +493,90 @@ const computeFmRemaining = () => {
 };
 const fmTimerDisplay = computed(() => `0:${String(fmRemaining.value).padStart(2, '0')}`);
 const fmTimerRunning = computed(() =>
-    (phase.value === 'fast_money_p1' || phase.value === 'fast_money_p2') && !!props.gameState?.timer_started_at
+    (phase.value === 'fast_money_p1_capture' || phase.value === 'fast_money_p2_capture')
+    && !!props.gameState?.timer_started_at
 );
 
-// Fast Money reveal cues: when a new cell (either player) is revealed, fire the
-// answer sting then the points (or the zero sting for a 0 / duplicate).
-const fmRevealedKey = computed(() =>
-    fmRows.value.flatMap((r) => [
-        r.p1.revealed ? `${r.id}-1` : '',
-        r.p2.revealed ? `${r.id}-2` : '',
-    ]).filter(Boolean).sort().join(',')
-);
-let fmPrevRevealed = new Set<string>();
-let fmPrevKeyed = false;
-watch(fmRevealedKey, (key) => {
-    const nowKeys = new Set(key ? key.split(',') : []);
-    // Adopt the first non-empty set silently (reconnect / first load).
-    if (!fmPrevKeyed) { fmPrevKeyed = true; fmPrevRevealed = nowKeys; return; }
-    let added: { points: number } | null = null;
-    nowKeys.forEach((k) => {
-        if (fmPrevRevealed.has(k)) return;
-        const [rid, p] = k.split('-');
-        const row = fmRows.value.find((r) => String(r.id) === rid);
-        const cell = row ? (p === '1' ? row.p1 : row.p2) : null;
-        if (cell) added = { points: cell.points ?? 0 };
-    });
-    fmPrevRevealed = nowKeys;
-    if (added) {
-        sounds.play('fastMoneyAnswerReveal');
-        window.setTimeout(() => {
-            sounds.play((added!.points) > 0 ? 'fastMoneyPointsReveal' : 'fastMoneyZeroPoints');
-        }, 600);
+// Typewriter: when an answer is first shown it types onto the board. fmTyped holds
+// how many characters of each cell are currently drawn; a cell already shown on
+// load/reconnect is set to full length (no re-typing).
+const fmCellKey = (rid: number, p: 1 | 2) => `${rid}-${p}`;
+const fmTyped = ref<Record<string, number>>({});
+const fmTypeTimers: Record<string, number> = {};
+const fmStartTypewriter = (key: string, text: string) => {
+    if (fmTypeTimers[key]) window.clearInterval(fmTypeTimers[key]);
+    fmTyped.value = { ...fmTyped.value, [key]: 0 };
+    let i = 0;
+    fmTypeTimers[key] = window.setInterval(() => {
+        i += 1;
+        fmTyped.value = { ...fmTyped.value, [key]: i };
+        if (i >= text.length) { window.clearInterval(fmTypeTimers[key]); delete fmTypeTimers[key]; }
+    }, 45);
+};
+// The text to draw for a cell right now (respecting the typewriter progress).
+const fmText = (rid: number, p: 1 | 2, cell: FastMoneyCell): string => {
+    if (!cell.shown || !cell.text) return '';
+    const n = fmTyped.value[fmCellKey(rid, p)];
+    return n == null ? cell.text : cell.text.slice(0, n);
+};
+
+const cellFor = (rid: string, p: string): FastMoneyCell | null => {
+    const row = fmRows.value.find((r) => String(r.id) === rid);
+    return row ? (p === '1' ? row.p1 : row.p2) : null;
+};
+
+// Which cells' TEXT is shown / whose POINTS are scored (keys "rowId-player").
+const fmShownKeys = computed(() => new Set(
+    fmRows.value.flatMap((r) => [r.p1.shown ? fmCellKey(r.id, 1) : '', r.p2.shown ? fmCellKey(r.id, 2) : '']).filter(Boolean)
+));
+const fmScoredKeys = computed(() => new Set(
+    fmRows.value.flatMap((r) => [r.p1.scored ? fmCellKey(r.id, 1) : '', r.p2.scored ? fmCellKey(r.id, 2) : '']).filter(Boolean)
+));
+
+// Answer shown → type it in + the answer sting. Adopt the first set silently.
+let fmShownPrev = new Set<string>();
+let fmShownInit = false;
+watch(fmShownKeys, (now) => {
+    if (!fmShownInit) {
+        fmShownInit = true; fmShownPrev = now;
+        const full: Record<string, number> = {};
+        now.forEach((k) => { const c = cellFor(...k.split('-') as [string, string]); if (c?.text) full[k] = c.text.length; });
+        fmTyped.value = { ...fmTyped.value, ...full };
+        return;
     }
+    let played = false;
+    now.forEach((k) => {
+        if (fmShownPrev.has(k)) return;
+        const c = cellFor(...k.split('-') as [string, string]);
+        if (c?.text) fmStartTypewriter(k, c.text);
+        // One answer sting per batch — a live reveal adds one cell; flashing Player
+        // 1's whole board during Player 2's turn adds all five, but stings just once.
+        if (!played) { sounds.play('fastMoneyAnswerReveal'); played = true; }
+    });
+    fmShownPrev = now;
+});
+
+// Points scored → the points sting (or the zero sting for a 0 / no match). Skipped
+// while Player 1's board is flashed during Player 2's capture — that's a reveal of
+// the answers only, so it gets the answer sting above and no points sound.
+let fmScoredPrev = new Set<string>();
+let fmScoredInit = false;
+watch(fmScoredKeys, (now) => {
+    if (!fmScoredInit) { fmScoredInit = true; fmScoredPrev = now; return; }
+    const bulkShowP1 = phase.value === 'fast_money_p2_capture';
+    now.forEach((k) => {
+        if (fmScoredPrev.has(k)) return;
+        if (bulkShowP1) return;
+        const c = cellFor(...k.split('-') as [string, string]);
+        sounds.play((c?.points ?? 0) > 0 ? 'fastMoneyPointsReveal' : 'fastMoneyZeroPoints');
+    });
+    fmScoredPrev = now;
+});
+
+// Duplicate: the host tapped an answer Player 1 already used — the duplicate cue
+// sounds so the player guesses again. Monotonic; the first value is adopted silently.
+watch(() => fastMoney.value?.duplicate_buzz ?? null, (now, prev) => {
+    if (now != null && prev != null && now > prev) sounds.play('duplicate');
 });
 
 // Fast Money timer stings: the host bumps a counter to sound each pass's clock.
@@ -511,6 +595,29 @@ const winningTeam = computed<Team | null>(() => {
     return [...props.teams].sort(
         (a, b) => b.total_score - a.total_score || (a.display_order ?? 0) - (b.display_order ?? 0)
     )[0];
+});
+
+// A team reached the target (300): the round recap turns into the "Team X Wins
+// the game" celebration (score chips, no confetti — that's saved for a Fast
+// Money win), mirroring the America Says crown-the-leader beat before its final.
+const gameWon = computed(() => phase.value === 'recap' && !!props.gameState?.feud_target_reached);
+
+// Confetti rains only on a Fast Money win (Feud's "pass the final" moment). Built
+// once so the pieces don't reshuffle on every poll; festive gold/red/blue.
+const CONFETTI_COLORS = ['#ffd23f', '#ef2b1d', '#2a6df4', '#eaf1ff', '#59d0ff'];
+const confettiPieces = Array.from({ length: 60 }, (_, i) => ({
+    left: (i * 37) % 100,
+    delay: -((i * 0.37) % 6),
+    duration: 4.5 + ((i * 13) % 40) / 10,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    size: 8 + (i % 4) * 3,
+    drift: (i % 2 === 0 ? 1 : -1) * (6 + (i % 5) * 3),
+    round: i % 3 === 0,
+}));
+const fmWon = computed(() => phase.value === 'fast_money_result' && fmResult.value === 'win');
+// The winner sting on a Fast Money win (its own clip, cut from the intro's tail).
+watch(fmWon, (won, prev) => {
+    if (won && !prev) sounds.play('win');
 });
 
 onMounted(() => {
@@ -624,9 +731,11 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <!-- steal banner -->
+                <!-- Steal banner — only during the actual one-guess steal. Once it
+                     resolves we drop to the 'reveal' beat (host puts up the leftovers),
+                     so the banner clears rather than implying a steal is still live. -->
                 <div
-                    v-if="(isSteal || isReveal) && stealTeam"
+                    v-if="isSteal && stealTeam"
                     class="ff-stealbar"
                     :style="{ '--tc': stealTeam.color, color: stealTeam.color }"
                 >
@@ -642,44 +751,75 @@ onUnmounted(() => {
                 <div class="ff-subhead">{{ fmTarget }} to Win</div>
             </div>
 
-            <!-- Board: the 5 questions with a column per player, a running total,
-                 the pass clock, and a WIN/LOSE banner on the result. -->
+            <!-- Result: the celebratory winner slide (confetti on a win) once Player 2's
+                 last answer has been revealed. -->
+            <div v-else-if="phase === 'fast_money_result'" class="ff-center show">
+                <div v-if="fmWon" class="ff-confetti" aria-hidden="true">
+                    <span
+                        v-for="(p, pi) in confettiPieces"
+                        :key="pi"
+                        class="ff-confetti-piece"
+                        :class="{ 'ff-confetti-round': p.round }"
+                        :style="{
+                            left: p.left + '%',
+                            backgroundColor: p.color,
+                            width: p.size + 'px',
+                            height: p.size + 'px',
+                            animationDelay: p.delay + 's',
+                            animationDuration: p.duration + 's',
+                            '--ff-drift': p.drift + 'vw',
+                        }"
+                    ></span>
+                </div>
+                <div class="ff-eyebrow">Fast Money</div>
+                <template v-if="fmResult === 'win'">
+                    <div v-if="winningTeam" class="ff-headline" :style="{ color: winningTeam.color }">{{ winningTeam.name }}</div>
+                    <div class="ff-subhead ff-fmwin">Wins Fast Money!</div>
+                </template>
+                <div v-else class="ff-headline ff-fmlose">So Close!</div>
+                <div class="ff-fmresult-score">{{ fmCombined }}</div>
+            </div>
+
+            <!-- Board (capture + reveal): two columns of answers — Player 1 down the
+                 left, Player 2 down the right — each with a points box, and a TOTAL box.
+                 Nothing shows during capture; the reveal types each answer in, then
+                 flips its points up. -->
             <div v-else-if="isFastMoney" class="ff-center show">
                 <div class="ff-eyebrow">
                     Fast Money
-                    <template v-if="phase === 'fast_money_p1'"> · Player 1</template>
-                    <template v-else-if="phase === 'fast_money_p2'"> · Player 2</template>
+                    <template v-if="fmActivePlayer === 1"> · Player 1</template>
+                    <template v-else> · Player 2</template>
                 </div>
                 <div v-if="fmTimerRunning" class="ff-fmtimer" :class="{ 'ff-fmtimer-warn': fmRemaining <= 5 }">{{ fmTimerDisplay }}</div>
 
-                <div class="ff-fm">
-                    <div class="ff-fmhead">
-                        <span></span>
-                        <span class="ff-fmcolh" :class="{ 'ff-fmcolh-on': fmActivePlayer === 1 && phase !== 'fast_money_result' }">P1</span>
-                        <span v-if="fmShowP2" class="ff-fmcolh" :class="{ 'ff-fmcolh-on': fmActivePlayer === 2 && phase !== 'fast_money_result' }">P2</span>
-                    </div>
-                    <div v-for="row in fmRows" :key="row.id" class="ff-fmrow" :class="{ 'ff-fmrow-1col': !fmShowP2 }">
-                        <div class="ff-fmq">{{ row.question }}</div>
-                        <div class="ff-fmp" :class="{ 'ff-fmp-blank': !row.p1.revealed }">
-                            <span v-if="row.p1.revealed" class="ff-fmp-txt">{{ row.p1.text || '—' }}</span>
-                            <span v-if="row.p1.revealed" class="ff-fmp-pts">{{ row.p1.points ?? 0 }}</span>
+                <div class="ff-fm2">
+                    <div class="ff-fm2grid">
+                        <!-- Player 1 column (left) -->
+                        <div class="ff-fm2col">
+                            <div
+                                v-for="row in fmRows"
+                                :key="'p1-' + row.id"
+                                class="ff-fm2cell"
+                                :class="{ 'ff-fm2cell-on': fmShowP1 && row.p1.shown }"
+                            >
+                                <span class="ff-fm2text">{{ fmShowP1 ? fmText(row.id, 1, row.p1) : '' }}</span>
+                                <span class="ff-fm2pts">{{ fmShowP1 && row.p1.scored ? row.p1.points : '' }}</span>
+                            </div>
                         </div>
-                        <div v-if="fmShowP2" class="ff-fmp" :class="{ 'ff-fmp-blank': !row.p2.revealed, 'ff-fmp-dup': row.p2.duplicate }">
-                            <span v-if="row.p2.revealed" class="ff-fmp-txt">{{ row.p2.duplicate ? 'DUPLICATE' : (row.p2.text || '—') }}</span>
-                            <span v-if="row.p2.revealed" class="ff-fmp-pts">{{ row.p2.points ?? 0 }}</span>
+                        <!-- Player 2 column (right) -->
+                        <div class="ff-fm2col">
+                            <div
+                                v-for="row in fmRows"
+                                :key="'p2-' + row.id"
+                                class="ff-fm2cell"
+                                :class="{ 'ff-fm2cell-on': fmShowP2 && row.p2.shown }"
+                            >
+                                <span class="ff-fm2text">{{ fmShowP2 ? fmText(row.id, 2, row.p2) : '' }}</span>
+                                <span class="ff-fm2pts">{{ fmShowP2 && row.p2.scored ? row.p2.points : '' }}</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="ff-fmtotal">
-                        <template v-if="fmShowP2">
-                            <span class="ff-fmsub">P1 {{ fmP1Total }}</span>
-                            <span class="ff-fmsub">P2 {{ fmP2Total }}</span>
-                        </template>
-                        Total <span class="ff-fmn">{{ fmCombined }}</span> / {{ fmTarget }}
-                    </div>
-                </div>
-
-                <div v-if="phase === 'fast_money_result'" class="ff-headline" :class="fmResult === 'win' ? 'ff-fmwin' : 'ff-fmlose'">
-                    {{ fmResult === 'win' ? 'Winner!' : 'So Close!' }}
+                    <div class="ff-fm2total"><span class="ff-fm2totall">TOTAL</span> <span class="ff-fm2totaln">{{ fmCombined }}</span></div>
                 </div>
             </div>
 
@@ -695,7 +835,15 @@ onUnmounted(() => {
 
             <!-- ===================== RECAP (end-of-round scores) ===================== -->
             <div v-else-if="phase === 'recap'" class="ff-center show">
-                <div class="ff-eyebrow">End of Round {{ roundNumber }} &middot; Scores</div>
+                <!-- A team hit the target → crown the game winner (Fast Money is next,
+                     as a bonus). Otherwise just the end-of-round scores. No confetti
+                     here — that's reserved for a Fast Money win. -->
+                <template v-if="gameWon">
+                    <div class="ff-eyebrow">Game Winner</div>
+                    <div v-if="winningTeam" class="ff-headline" :style="{ color: winningTeam.color }">{{ winningTeam.name }}</div>
+                    <div class="ff-subhead">Wins the Game!</div>
+                </template>
+                <div v-else class="ff-eyebrow">End of Round {{ roundNumber }} &middot; Scores</div>
                 <div class="ff-chips">
                     <div
                         v-for="team in orderedTeams"
@@ -1142,6 +1290,32 @@ onUnmounted(() => {
     padding: 4vw;
 }
 .ff-center.show { display: flex; }
+
+/* Fast Money win celebration: confetti raining continuously behind the board. */
+.ff-confetti {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: -1;
+}
+.ff-confetti-piece {
+    position: absolute;
+    top: 0;
+    border-radius: 2px;
+    opacity: 0.92;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.35);
+    animation-name: ff-confetti-fall;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    will-change: transform;
+}
+.ff-confetti-round { border-radius: 50%; }
+@keyframes ff-confetti-fall {
+    0% { transform: translate3d(0, -12vh, 0) rotate(0deg); }
+    100% { transform: translate3d(var(--ff-drift, 0), 112vh, 0) rotate(720deg); }
+}
+
 .ff-eyebrow {
     color: var(--led);
     font-weight: 800;
@@ -1265,108 +1439,112 @@ onUnmounted(() => {
 .ff-l2 { font-size: clamp(34px, 5.8vw, 100px); margin-top: -.02em; }
 
 /* ---- Fast Money board ------------------------------------------------- */
-.ff-fm {
-    width: min(1100px, 90vw);
+/* Fast Money board — a replica of the real show's Fast Money screen: the two
+   columns of answers sit inside a big glossy BLUE panel, each answer/points cell
+   a BLACK box with white text, and a black TOTAL box bottom-right. Cells sit
+   empty (black) until the host reveals them. */
+.ff-fm2 {
+    width: min(1180px, 94vw);
     display: flex;
     flex-direction: column;
-    gap: clamp(5px, 1vh, 11px);
+    gap: clamp(10px, 1.6vh, 22px);
+    padding: clamp(16px, 2.4vw, 44px);
+    border-radius: clamp(16px, 1.8vw, 30px);
+    /* glossy blue set panel: bright sheen up top over a deep TV-blue body */
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, .30) 0%, rgba(255, 255, 255, 0) 24%),
+        radial-gradient(130% 100% at 50% 26%, #46a2ff 0%, #1f79ea 46%, #0f55c6 100%);
+    border: clamp(5px, .6vw, 11px) solid #0a2a63;
+    box-shadow:
+        0 0 0 2px rgba(150, 200, 255, .55),
+        0 22px 54px rgba(0, 0, 0, .58),
+        inset 0 2px 7px rgba(255, 255, 255, .55),
+        inset 0 -12px 34px rgba(3, 18, 58, .6);
 }
-/* Two point columns (P1 / P2) beside each question; drops to one until P2 is up. */
-.ff-fmhead,
-.ff-fmrow {
+.ff-fm2grid {
     display: grid;
-    grid-template-columns: 1fr clamp(150px, 20vw, 280px) clamp(150px, 20vw, 280px);
-    gap: clamp(6px, .8vw, 14px);
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(10px, 1.4vw, 26px);
+}
+.ff-fm2col {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(6px, 1vh, 13px);
+}
+.ff-fm2cell {
+    display: grid;
+    grid-template-columns: 1fr clamp(52px, 4.2vw, 92px);
+    gap: clamp(5px, .5vw, 10px);
     align-items: stretch;
 }
-.ff-fmhead.ff-fmrow-1col,
-.ff-fmrow.ff-fmrow-1col { grid-template-columns: 1fr clamp(150px, 20vw, 280px); }
-.ff-fmhead {
-    align-items: end;
-    padding: 0 0 .2vh;
-    grid-template-columns: 1fr clamp(150px, 20vw, 280px) clamp(150px, 20vw, 280px);
-}
-.ff-fmcolh {
-    text-align: center;
-    font-weight: 900;
-    letter-spacing: .1em;
-    color: var(--rim-soft);
-    font-size: clamp(13px, 1.4vw, 22px);
-}
-.ff-fmcolh-on { color: var(--led); text-shadow: 0 0 12px rgba(255, 210, 63, .7); }
-.ff-fmq {
+.ff-fm2text {
     display: flex;
     align-items: center;
-    padding: .7vh 1.1vw;
-    border-radius: 10px;
+    min-width: 0;
+    min-height: clamp(38px, 5.4vh, 64px);
+    padding: 0 .7em;
+    border-radius: 6px;
+    background: #000;
+    border: 2px solid #b8c6d8;
     color: #fff;
-    font-weight: 800;
+    font-weight: 900;
     text-transform: uppercase;
     letter-spacing: .01em;
-    font-size: clamp(12px, 1.4vw, 24px);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    background: linear-gradient(180deg, #2f6bff, #1743bd);
-    border: 2px solid rgba(150, 210, 255, .7);
-    text-shadow: 0 2px 4px rgba(0, 0, 0, .5);
+    font-size: clamp(14px, 1.7vw, 32px);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
 }
-.ff-fmp {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: .4em;
-    padding: 0 .6em;
-    border-radius: 10px;
-    background: linear-gradient(180deg, #0a1a52, #06123f);
-    border: 2px solid #4bd6ff;
-}
-/* Unrevealed cell reads as an empty slot (no glow). */
-.ff-fmp-blank { background: rgba(8, 18, 63, .5); border-color: rgba(75, 214, 255, .3); }
-.ff-fmp-dup { border-color: var(--strike); }
-.ff-fmp-txt {
-    flex: 1 1 auto;
-    min-width: 0;
-    color: #fff;
-    font-weight: 800;
-    text-transform: uppercase;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: clamp(12px, 1.3vw, 22px);
-    text-shadow: 0 2px 3px rgba(0, 0, 0, .6);
-}
-.ff-fmp-dup .ff-fmp-txt { color: var(--strike); }
-.ff-fmp-pts {
-    flex: 0 0 auto;
-    color: var(--led);
-    font-weight: 900;
-    font-variant-numeric: tabular-nums;
-    font-size: clamp(18px, 2.1vw, 38px);
-    text-shadow: 0 0 12px rgba(255, 210, 63, .7);
-}
-.ff-fmtotal {
-    margin-top: .6vh;
+.ff-fm2pts {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: .7em;
+    border-radius: 6px;
+    background: #000;
+    border: 2px solid #b8c6d8;
+    color: #fff;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(18px, 2.2vw, 40px);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+}
+/* A revealed cell brightens its hairline rim. */
+.ff-fm2cell-on .ff-fm2text,
+.ff-fm2cell-on .ff-fm2pts {
+    border-color: #fff;
+}
+.ff-fm2total {
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    gap: .6em;
+    padding: .22em .8em;
+    border-radius: 6px;
+    background: #000;
+    border: 2px solid #b8c6d8;
+}
+.ff-fm2totall {
     font-weight: 900;
     text-transform: uppercase;
-    letter-spacing: .06em;
+    letter-spacing: .08em;
     color: #fff;
-    font-size: clamp(20px, 2.6vw, 46px);
+    font-size: clamp(18px, 2.2vw, 40px);
 }
-.ff-fmsub {
-    font-size: clamp(13px, 1.5vw, 26px);
-    color: var(--rim-soft);
-    letter-spacing: .04em;
-}
-.ff-fmn {
-    color: var(--led);
+.ff-fm2totaln {
+    color: #fff;
+    font-weight: 900;
     font-variant-numeric: tabular-nums;
-    font-size: clamp(30px, 4vw, 70px);
-    text-shadow: 0 0 16px rgba(255, 210, 63, .7);
+    font-size: clamp(28px, 3.6vw, 64px);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+}
+/* Result slide score. */
+.ff-fmresult-score {
+    color: var(--led);
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(40px, 6vw, 110px);
+    text-shadow: 0 0 26px rgba(255, 210, 63, .7);
 }
 /* Fast Money pass clock. */
 .ff-fmtimer {
@@ -1458,5 +1636,6 @@ onUnmounted(() => {
 @media (prefers-reduced-motion: reduce) {
     .ff-inner { transition: none; }
     .ff-stealbar, .ff-scorewrap.ctrl .ff-scorebox { animation: none; }
+    .ff-confetti-piece { animation: none; display: none; }
 }
 </style>

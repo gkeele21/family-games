@@ -302,22 +302,18 @@ const qsel = computed(() => settingsForm.settings.question_selection as QSelecti
 // Per-game slot shape. Regular grid = rows (rounds) × cols (America Says: one
 // per team; Family Feud: one face-off per round). Final section = America Says'
 // 4 answer-count tiers, or Family Feud's 5 flat Fast Money slots.
+// Family Feud is played like the real show — first to 300 wins — so the round
+// count isn't a setting: we always pre-pick the standard four (single, single,
+// double, triple), and a game that stays tight past them pulls extra questions
+// automatically at play time.
+const FF_ROUNDS = 4;
 const regularCols = computed(() => (gameSlug.value === 'family-feud' ? 1 : teamsCount.value));
 const regularRowCount = computed(() =>
-    gameSlug.value === 'family-feud'
-        ? Math.max(1, Math.min(8, Number(settingsForm.settings.rounds_per_game) || 4))
-        : rounds.value.length,
+    gameSlug.value === 'family-feud' ? FF_ROUNDS : rounds.value.length,
 );
-const regularRowLabel = (i: number) => `Round ${i + 1}`;
-
-// Family Feud rounds stepper (America Says gets its count from Rounds & scoring).
-const ffRoundsInput = ref(regularRowCount.value);
-watch(regularRowCount, (n) => (ffRoundsInput.value = n));
-const applyFfRounds = (n: number) => {
-    const target = Math.max(1, Math.min(8, Number(n) || 1));
-    ffRoundsInput.value = target;
-    settingsForm.settings.rounds_per_game = target;
-};
+const ffRoundMultiplier = (i: number) => (i < 2 ? '×1' : i === 2 ? '×2' : '×3');
+const regularRowLabel = (i: number) =>
+    gameSlug.value === 'family-feud' ? `Round ${i + 1} · ${ffRoundMultiplier(i)}` : `Round ${i + 1}`;
 
 // Final-section config, driven by game.
 const finalEnabledKey = computed(() => (gameSlug.value === 'family-feud' ? 'fast_money_enabled' : 'final_round_enabled'));
@@ -875,10 +871,7 @@ const copyDisplayUrl = () => {
             <!-- Questions (per-slot picker: America Says + Family Feud) -->
             <Card v-if="isPickerGame" title="Questions">
                 <template #headerActions>
-                    <div v-if="gameSlug === 'family-feud'" class="flex items-center gap-3">
-                        <span class="text-sm text-muted">Rounds</span>
-                        <NumberInput :model-value="ffRoundsInput" :min="1" :max="8" @update:model-value="applyFfRounds" />
-                    </div>
+                    <span v-if="gameSlug === 'family-feud'" class="text-sm text-muted">First to 300 · 1×/1×/2×/3×</span>
                     <span v-else class="text-sm text-muted">{{ rounds.length }} rounds × {{ teamsCount }} {{ teamsCount === 1 ? 'team' : 'teams' }}</span>
                 </template>
 
