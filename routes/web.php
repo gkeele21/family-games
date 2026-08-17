@@ -44,6 +44,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('/games/{gameSession}/teams/{team}/members/{teamMember}', [GameSessionController::class, 'removeTeamMember'])->name('games.teams.members.remove');
     Route::post('/games/{gameSession}/start', [GameSessionController::class, 'startGame'])->name('games.start');
     Route::post('/games/{gameSession}/back-to-lobby', [GameSessionController::class, 'backToLobby'])->name('games.back-to-lobby');
+    Route::post('/games/{gameSession}/resume', [GameSessionController::class, 'resume'])->name('games.resume');
     Route::patch('/games/{gameSession}/settings', [GameSessionController::class, 'updateSettings'])->name('games.settings.update');
     Route::delete('/games/{gameSession}', [GameSessionController::class, 'destroy'])->name('games.destroy');
 
@@ -72,6 +73,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/question/show', [HostController::class, 'showQuestion'])->name('host.question.show');
     Route::post('/host/{gameSession}/round/intro', [HostController::class, 'roundIntro'])->name('host.round.intro');
     Route::post('/host/{gameSession}/round/end', [HostController::class, 'endRound'])->name('host.round.end');
+    Route::post('/host/{gameSession}/steal/start', [HostController::class, 'stealStart'])->name('host.steal.start');
+    Route::post('/host/{gameSession}/steal/reveal', [HostController::class, 'setStealReveal'])->name('host.steal.reveal');
     Route::post('/host/{gameSession}/final/show', [HostController::class, 'finalShowQuestion'])->name('host.final.show');
     Route::post('/host/{gameSession}/final/start', [HostController::class, 'finalStart'])->name('host.final.start');
     Route::post('/host/{gameSession}/final/next', [HostController::class, 'finalNext'])->name('host.final.next');

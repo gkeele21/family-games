@@ -223,7 +223,10 @@ class GameInitializationService
         $config = $gameSession->settings ?? $gameSession->gameType->default_config;
 
         // A round plays one question per team, so questions per round = team count.
-        $teamCount = max(1, $gameSession->teams()->count());
+        // America Says is a 2-team game; teams are ordered so we can rotate who is
+        // "primary" (fills the board first, the other steals) board by board.
+        $teamsOrdered = $gameSession->teams()->orderBy('display_order')->orderBy('id')->get();
+        $teamCount = max(1, $teamsOrdered->count());
 
         // Build the per-round scoring plan. When the host has configured
         // round_scoring (from the setup screen), use it. Otherwise fall back to
@@ -259,6 +262,12 @@ class GameInitializationService
                     break 2; // Nothing left to assign.
                 }
 
+                // Who's primary on this board? The first board of each round flips
+                // team (Round 1 → Team A, Round 2 → Team B, …), and the second board
+                // is the other team — so within a round each team gets one board and
+                // the "who starts" alternates round to round.
+                $primaryTeam = $teamsOrdered[($slot + $roundIndex) % $teamCount] ?? $teamsOrdered->first();
+
                 $usedIds[] = $question->id;
                 $order++;
                 SessionQuestion::create([
@@ -270,6 +279,8 @@ class GameInitializationService
                     'segment' => 'main',
                     'points_available' => $round['points_per_answer'],
                     'bonus_points' => $round['bonus_points'],
+                    'controlling_team_id' => $primaryTeam?->id,
+                    'control_status' => 'team_control',
                 ]);
             }
         }

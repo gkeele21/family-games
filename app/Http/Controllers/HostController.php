@@ -45,6 +45,10 @@ class HostController extends Controller
             'gameTypes' => \App\Models\GameType::online()->get(['id', 'name', 'slug']),
             'questionData' => $this->questionSelectionData($gameSession),
             'attendanceData' => $this->attendanceData($gameSession),
+            // Whether this game has already been started (and thus has live
+            // progress that a fresh Start would wipe). Drives the lobby's
+            // "Resume vs. Restart" split button.
+            'wasStarted' => $gameSession->started_at !== null,
         ]);
     }
 
@@ -441,36 +445,72 @@ class HostController extends Controller
         } else {
             $query->where('round_number', $currentQuestion->round_number);
         }
-        $roundQuestions = $query->orderBy('display_order')->get();
+        $roundQuestions = $query->orderBy('display_order')->get()->values();
 
-        foreach ($roundQuestions as $sq) {
-            // Reverse the points from every reveal on this question, then remove them.
-            $reveals = $sq->answerReveals()->get();
-            foreach ($reveals->whereNotNull('team_id')->groupBy('team_id') as $teamId => $teamReveals) {
-                $team = Team::find($teamId);
-                if (!$team) {
-                    continue;
+        // Regular rounds: rebuild who's primary per board from the rotation (the
+        // same formula as init) so a reset restores the original "who's up",
+        // undoing any steal hand-off or manual control change during play.
+        $isRegular = !in_array($segment, ['final', 'fast_money', 'tiebreaker'], true);
+        $teamsOrdered = $gameSession->teams()->orderBy('display_order')->orderBy('id')->get();
+        $teamCount = max(1, $teamsOrdered->count());
+        $roundIndex = ($currentQuestion->round_number ?? 1) - 1;
+
+        // Prefer the round-start snapshot: restore the exact scores from before the
+        // round, regardless of reveals, auto-sweeps, or hand-edits during it. Only
+        // when there's no snapshot (older sessions) do we fall back to reversing
+        // each reveal's points.
+        $snapshot = $isRegular ? $state->roundStartScores((int) ($currentQuestion->round_number ?? 1)) : null;
+
+        foreach ($roundQuestions as $slot => $sq) {
+            if (!$snapshot) {
+                // Fallback: reverse the points from every reveal on this question.
+                $reveals = $sq->answerReveals()->get();
+                foreach ($reveals->whereNotNull('team_id')->groupBy('team_id') as $teamId => $teamReveals) {
+                    $team = Team::find($teamId);
+                    if (!$team) {
+                        continue;
+                    }
+                    $team->update([
+                        'total_score' => max(0, $team->total_score - (int) $teamReveals->sum('points_awarded')),
+                    ]);
                 }
-                $team->update([
-                    'total_score' => max(0, $team->total_score - (int) $teamReveals->sum('points_awarded')),
-                ]);
             }
             $sq->answerReveals()->delete();
 
-            // Reverse a manually-awarded sweep bonus for this question, if any.
+            // Reverse a sweep bonus (manual or auto-awarded); when restoring from a
+            // snapshot the points are already covered, but always clear the key so
+            // the bonus can be re-earned on replay.
             $bonusKey = "bonus_q{$sq->id}";
             $bonus = $state->getStateValue($bonusKey, null);
-            if (is_array($bonus) && !empty($bonus['team_id'])) {
+            if (!$snapshot && is_array($bonus) && !empty($bonus['team_id'])) {
                 $bonusTeam = Team::find($bonus['team_id']);
                 if ($bonusTeam) {
                     $bonusTeam->update([
                         'total_score' => max(0, $bonusTeam->total_score - (int) ($bonus['amount'] ?? 0)),
                     ]);
                 }
-                $state->setStateValue($bonusKey, null);
             }
+            $state->setStateValue($bonusKey, null);
 
-            $sq->update(['status' => 'pending']);
+            $update = ['status' => 'pending'];
+            if ($isRegular) {
+                // Restore the rotation primary and forget the stashed pre-steal primary.
+                $primary = $teamsOrdered[($slot + $roundIndex) % $teamCount] ?? $teamsOrdered->first();
+                $update['controlling_team_id'] = $primary?->id;
+                $update['controlling_team_ids'] = null;
+                $update['control_status'] = 'team_control';
+                $state->setStateValue("primary_q{$sq->id}", null);
+            }
+            $sq->update($update);
+        }
+
+        // Snapshot restore: set each team's score straight back to the round start.
+        if ($snapshot) {
+            foreach ($teamsOrdered as $team) {
+                if (array_key_exists($team->id, $snapshot)) {
+                    $team->update(['total_score' => (int) $snapshot[$team->id]]);
+                }
+            }
         }
 
         // Reactivate the round's first question so the round replays from the top.
@@ -582,10 +622,51 @@ class HostController extends Controller
             $team->addScore($points);
         }
 
+        // America Says regular round: if the PRIMARY sweeps the whole board during
+        // their own timer (phase "question"), bank the round's sweep bonus for them.
+        // The host screen handles the 2s "see the last answer" beat and the jump to
+        // the scoreboard; a board cleared during the steal earns no bonus.
+        $this->maybeAwardSweepBonus($state, $currentQuestion, $teamId);
+
         return response()->json([
             'success' => true,
             'points' => $points,
         ]);
+    }
+
+    /**
+     * Award the round's sweep bonus when the primary team clears the entire board
+     * during their own turn (phase "question"). Reuses the manual bonus's state key
+     * so Reset Round still reverses it. No phase/board changes — the host screen
+     * drives the delayed jump to the scoreboard.
+     */
+    protected function maybeAwardSweepBonus(GameState $state, SessionQuestion $question, ?int $teamId): void
+    {
+        if (($question->segment ?? 'main') !== 'main' || !$teamId) {
+            return;
+        }
+        if ((int) $question->bonus_points <= 0) {
+            return;
+        }
+        if ($state->getStateValue('phase', 'question') !== 'question') {
+            return; // Only a primary-turn sweep earns the bonus.
+        }
+
+        $answerCount = $question->question->answers()->count();
+        if ($answerCount === 0 || $question->answerReveals()->count() < $answerCount) {
+            return; // Board not fully revealed yet.
+        }
+
+        $bonusKey = "bonus_q{$question->id}";
+        if ($state->getStateValue($bonusKey, null) !== null) {
+            return; // Already awarded.
+        }
+
+        $team = Team::find($teamId);
+        if ($team) {
+            $team->addScore((int) $question->bonus_points);
+            $state->setStateValue($bonusKey, ['team_id' => $team->id, 'amount' => (int) $question->bonus_points]);
+        }
     }
 
     /**
@@ -624,6 +705,17 @@ class HostController extends Controller
         if ($currentQuestion->status === 'completed'
             && $currentQuestion->answerReveals()->count() < $currentQuestion->question->answers()->count()) {
             $currentQuestion->update(['status' => 'active']);
+        }
+
+        // America Says regular round: taking an answer back off while on the
+        // scoreboard (the board auto-advances there once every answer is up) means
+        // the host mis-scored it — drop back to the board state we came from (the
+        // steal, or the primary's turn) so they can re-reveal it correctly (e.g. in
+        // Reveal only). The re-reveal auto-advances again.
+        if (($currentQuestion->segment ?? 'main') === 'main'
+            && $state->getStateValue('phase') === 'recap') {
+            $restore = $state->getStateValue('phase_before_recap', 'question');
+            $state->setStateValue('phase', in_array($restore, ['question', 'steal', 'reveal'], true) ? $restore : 'question');
         }
 
         return response()->json(['success' => true]);
@@ -701,6 +793,8 @@ class HostController extends Controller
 
     public function endGame(GameSession $gameSession)
     {
+        // Round snapshots exist only to power Reset Round mid-game; drop them now.
+        $gameSession->gameState?->clearRoundScores();
         $gameSession->update([
             'status' => 'completed',
             'completed_at' => now(),
@@ -1138,13 +1232,30 @@ class HostController extends Controller
             $state->update([
                 'current_question_id' => $nextQuestion->id,
                 'round_number' => $newRound,
+                // Make the next board's primary (stamped at init by the rotation)
+                // the active team, so its reveals score for the right side and the
+                // "who's up" flip-flop happens without the host assigning control.
+                'active_team_id' => $nextQuestion->controlling_team_id ?? $state->active_team_id,
                 'state_data' => $stateData,
             ]);
             $nextQuestion->update(['status' => 'active']);
+
+            // Snapshot this round's starting scores (the first board of a new round
+            // is the first time we see it; later boards no-op) so Reset Round can
+            // restore them exactly. Regular rounds only — final/tiebreaker excluded.
+            if (($nextQuestion->segment ?? 'main') === 'main') {
+                $state->snapshotRoundScoresIfAbsent(
+                    (int) $newRound,
+                    $gameSession->teams->mapWithKeys(fn ($t) => [$t->id => (int) $t->total_score])->all(),
+                );
+            }
+
             return response()->json(['success' => true, 'game_complete' => false, 'entering_final' => false]);
         }
 
-        // No more questions - game is complete
+        // No more questions - game is complete. Drop the round snapshots we no
+        // longer need so the state row doesn't carry them forever.
+        $state->clearRoundScores();
         $gameSession->update([
             'status' => 'completed',
             'completed_at' => now(),
@@ -1494,6 +1605,13 @@ class HostController extends Controller
         if ($state) {
             $current = (int) $state->getStateValue('wrong_buzz', 0);
             $state->setStateValue('wrong_buzz', $current + 1);
+
+            // A wrong steal ends the steal but not the board: move to the untimed
+            // "reveal the leftovers" state so the display drops its STEAL banner
+            // while the host reveals the rest (in Reveal only, no scoring).
+            if ($state->getStateValue('phase') === 'steal') {
+                $state->setStateValue('phase', 'reveal');
+            }
         }
 
         return response()->json(['success' => true]);
@@ -1510,7 +1628,81 @@ class HostController extends Controller
             abort(403);
         }
 
-        $gameSession->gameState?->setStateValue('phase', 'recap');
+        $state = $gameSession->gameState;
+        // Remember which board state we came from so pulling an answer back off the
+        // scoreboard returns there (the steal, or the primary's turn) rather than
+        // always to "Question Shown".
+        $prev = $state?->getStateValue('phase');
+        if (in_array($prev, ['question', 'steal', 'reveal'], true)) {
+            $state?->setStateValue('phase_before_recap', $prev);
+        }
+        $state?->setStateValue('phase', 'recap');
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * America Says regular round — hand the board to the OTHER team for the steal.
+     * Fired automatically when the primary team's timer runs out (or manually by
+     * the host). The steal is untimed: the stealing team keeps guessing while
+     * correct. A wrong steal flips the host into Reveal-only (client-side) to show
+     * the leftovers; the board ends when every answer is revealed. Revealed answers
+     * score for the stealing team, since it becomes the active/controlling team.
+     */
+    public function stealStart(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $state = $gameSession->gameState;
+        $currentQuestion = $state?->currentQuestion;
+        if (!$currentQuestion || ($currentQuestion->segment ?? 'main') !== 'main') {
+            return response()->json(['error' => 'No active regular-round question'], 400);
+        }
+
+        // The stealing team is the one that isn't primary (2-team game).
+        $primaryId = $currentQuestion->controlling_team_id ?? $state->active_team_id;
+        $stealTeam = $gameSession->teams()->where('id', '!=', $primaryId)->orderBy('display_order')->first();
+
+        if ($stealTeam) {
+            // Remember who was primary so the display can label the board and a
+            // manual correction can hand control back.
+            $state->setStateValue("primary_q{$currentQuestion->id}", $primaryId);
+
+            $currentQuestion->update([
+                'controlling_team_id' => $stealTeam->id,
+                'controlling_team_ids' => null,
+                'control_status' => 'team_control',
+            ]);
+            // Stop the clock (the steal is untimed) and make the stealer active so
+            // their reveals score.
+            $state->update(['active_team_id' => $stealTeam->id, 'timer_started_at' => null]);
+        }
+
+        $state->setStateValue('phase', 'steal');
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * America Says regular round — sync the board phase to the host's Reveal-only
+     * control while a steal is in play. Turning Reveal only ON drops to the untimed
+     * "reveal the leftovers" phase (so the display clears its STEAL banner — nobody
+     * is stealing anymore); turning it OFF returns to the steal.
+     */
+    public function setStealReveal(Request $request, GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $validated = $request->validate(['reveal_only' => 'required|boolean']);
+
+        $state = $gameSession->gameState;
+        if ($state && in_array($state->getStateValue('phase'), ['steal', 'reveal'], true)) {
+            $state->setStateValue('phase', $validated['reveal_only'] ? 'reveal' : 'steal');
+        }
 
         return response()->json(['success' => true]);
     }

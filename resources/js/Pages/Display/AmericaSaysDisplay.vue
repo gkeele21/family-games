@@ -384,6 +384,13 @@ const timerExpired = computed(() => remainingTime.value <= 0);
 // Guided-flow phase (defaults to 'question' when absent so old sessions still render).
 const phase = computed(() => props.gameState?.phase ?? 'question');
 const roundNumber = computed(() => props.gameState?.round_number ?? 1);
+// Steal: the primary's time is up and the other team is grabbing leftovers. The
+// board stays up (untimed) so revealed steals show, with a STEAL banner.
+const isSteal = computed(() => phase.value === 'steal');
+// Keep the board up whenever answers are showing — e.g. after the host pulls an
+// answer back off the scoreboard to fix a mis-score, the round returns to the
+// board (no clock) with the remaining reveals still up.
+const anyRevealed = computed(() => (props.currentQuestion?.answers ?? []).some((a) => a.revealed));
 
 // The team up next on the round intro. The controlling team is the effective
 // holder of the turn; fall back to the active team from state.
@@ -877,14 +884,19 @@ onUnmounted(() => {
                 </div>
             </template>
 
-            <!-- QUESTION: plaque always; answer board + timer only once started -->
+            <!-- QUESTION: plaque always; answer board + timer only once started.
+                 STEAL: board stays up (no clock) with a STEAL banner. -->
             <template v-else>
                 <div
-                    v-if="currentQuestion && timerStarted"
+                    v-if="currentQuestion && timerStarted && !isSteal"
                     class="as-timer"
                     :class="{ 'as-timer-warn': timerWarning, 'as-timer-expired': timerExpired }"
                 >
                     {{ timerDisplay }}
+                </div>
+
+                <div v-if="isSteal && activeTeam" class="as-stealbar font-logo" :style="{ color: activeTeam.color }">
+                    {{ activeTeam.name }} — STEAL!
                 </div>
 
                 <div class="as-overlay">
@@ -896,7 +908,7 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <div v-if="currentQuestion && timerStarted" class="as-answers">
+                    <div v-if="currentQuestion && (timerStarted || isSteal || anyRevealed)" class="as-answers">
                         <div
                             v-for="(row, ri) in answerRows"
                             :key="ri"
@@ -1359,6 +1371,26 @@ onUnmounted(() => {
     background: rgba(6, 12, 40, 0.72);
     border: 2px solid #f4b433;
     box-shadow: 0 0 22px rgba(80, 130, 255, 0.45), inset 0 0 12px rgba(0, 0, 0, 0.4);
+}
+.as-stealbar {
+    position: absolute;
+    right: 2.8%;
+    bottom: 5%;
+    z-index: 20;
+    font-weight: 900;
+    font-size: clamp(22px, 2.6vw, 46px);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.28em 1em;
+    border-radius: 999px;
+    background: rgba(6, 12, 40, 0.72);
+    border: 2px solid currentColor;
+    box-shadow: 0 0 26px rgba(80, 130, 255, 0.5), inset 0 0 12px rgba(0, 0, 0, 0.4);
+    animation: as-steal-pulse 1.1s ease-in-out infinite;
+}
+@keyframes as-steal-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
 }
 .as-timer-warn {
     border-color: #ff3b3b;

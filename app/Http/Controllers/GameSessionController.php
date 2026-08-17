@@ -382,9 +382,34 @@ class GameSessionController extends Controller
             abort(403);
         }
 
+        // A finished game is history — never silently un-complete it back into the
+        // "Active Now" list. Send the host to the setup screen read-only instead.
+        if ($gameSession->status === 'completed') {
+            return redirect()->route('host.lobby', $gameSession);
+        }
+
         $gameSession->update(['status' => 'lobby']);
 
         return redirect()->route('host.lobby', $gameSession);
+    }
+
+    /**
+     * Resume an already-started game that was parked back in the lobby (via Back to
+     * Setup) — flip it live again so the TV display, which gates on 'playing',
+     * follows the host back into the board, then hand off to the game screen. A
+     * completed game is never revived here (its history stays intact).
+     */
+    public function resume(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        if ($gameSession->status === 'lobby' && $gameSession->started_at !== null) {
+            $gameSession->update(['status' => 'playing']);
+        }
+
+        return redirect()->route('host.game', $gameSession);
     }
 
     public function startGame(GameSession $gameSession, GameInitializationService $initService)
@@ -409,6 +434,11 @@ class GameSessionController extends Controller
             'started_at' => now(),
         ]);
 
+        // Fresh start (including a Restart): zero the scoreboard so a replay never
+        // carries the previous game's scores — matches the Restart confirmation's
+        // "wipes scores and progress" promise.
+        $gameSession->teams()->update(['total_score' => 0]);
+
         // Initialize game state based on game type
         $state = $gameSession->gameState;
         $teams = $gameSession->teams()->orderBy('display_order')->get();
@@ -428,6 +458,10 @@ class GameSessionController extends Controller
                 'phase' => 'intro',
             ],
         ]);
+
+        // Snapshot round 1's starting scores (all zero) so Reset Round can restore
+        // them exactly, without recomputing from reveals.
+        $state->snapshotRoundScoresIfAbsent(1, $teams->mapWithKeys(fn ($t) => [$t->id => 0])->all());
 
         return redirect()->route('host.game', $gameSession);
     }

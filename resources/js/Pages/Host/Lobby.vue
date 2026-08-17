@@ -11,7 +11,7 @@ import Toggle from '@/Components/Form/Toggle.vue';
 import Confirm from '@/Components/Feedback/Confirm.vue';
 import BlankText from '@/Components/BlankText.vue';
 import { Head, Link, useForm, router } from '@inertiajs/vue3';
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import axios from 'axios';
 
 interface TeamMember {
@@ -81,6 +81,7 @@ interface Props {
     gameTypes: GameTypeOption[];
     questionData: QuestionData | null;
     attendanceData: AttendanceData | null;
+    wasStarted: boolean;
 }
 
 const props = defineProps<Props>();
@@ -118,6 +119,11 @@ const applyTeamCount = (n: number) => {
     if (count === props.gameSession.teams.length) return;
     router.post(route('games.teams.count', props.gameSession.id), { count }, { preserveScroll: true });
 };
+// America Says is strictly two teams — if a game lands here with a different count
+// (e.g. switched game type), normalise it to 2 once.
+if (props.gameSession.game_type.slug === 'america-says' && props.gameSession.teams.length !== 2) {
+    applyTeamCount(2);
+}
 
 // ---- Team rename (inline, save on blur/Enter) ----
 const renameTeam = (team: Team, event: Event) => {
@@ -502,25 +508,33 @@ onMounted(reconcileSlots);
 
 // ---- active slot + assignment ----
 type ActiveSlot = { group: 'regular'; round: number; team: number } | { group: 'final'; index: number };
-const activeSlot = ref<ActiveSlot>({ group: 'regular', round: 0, team: 0 });
+// Starts unset — nothing is armed on load, so browsing the bank can't silently
+// overwrite a slot. The host picks a slot first, which arms the bank to fill it.
+const activeSlot = ref<ActiveSlot | null>(null);
+const hasActiveSlot = computed(() => activeSlot.value !== null);
 const teamName = (j: number) => props.gameSession.teams[j]?.name ?? `Team ${j + 1}`;
 const teamColor = (j: number) => props.gameSession.teams[j]?.color ?? '#888888';
-const isRegularActive = (i: number, j: number) => activeSlot.value.group === 'regular' && activeSlot.value.round === i && activeSlot.value.team === j;
-const isFinalActive = (i: number) => activeSlot.value.group === 'final' && activeSlot.value.index === i;
-const setRegularActive = (i: number, j: number) => { activeSlot.value = { group: 'regular', round: i, team: j }; };
-const setFinalActive = (i: number) => { activeSlot.value = { group: 'final', index: i }; };
+const isRegularActive = (i: number, j: number) => activeSlot.value?.group === 'regular' && activeSlot.value.round === i && activeSlot.value.team === j;
+const isFinalActive = (i: number) => activeSlot.value?.group === 'final' && activeSlot.value.index === i;
+// Clicking a slot arms the bank to fill it; clicking the armed slot again
+// disarms it (bank empties) so the action reads as a clean toggle.
+const setRegularActive = (i: number, j: number) => { activeSlot.value = isRegularActive(i, j) ? null : { group: 'regular', round: i, team: j }; };
+const setFinalActive = (i: number) => { activeSlot.value = isFinalActive(i) ? null : { group: 'final', index: i }; };
 const regularSlotLabel = (i: number, j: number) =>
     regularCols.value > 1 ? `Round ${i + 1} · ${teamName(j)}` : `Round ${i + 1}`;
 const activeSlotLabel = computed(() => {
     const a = activeSlot.value;
+    if (!a) return null;
     return a.group === 'final' ? finalLabel(a.index) : regularSlotLabel(a.round, a.team);
 });
 const activeList = computed<BankQuestion[]>(() => {
     const a = activeSlot.value;
+    if (!a) return [];
     return a.group === 'final' ? finalPoolFor(a.index) : regularPool.value;
 });
 const activeCurrentId = computed(() => {
     const a = activeSlot.value;
+    if (!a) return null;
     return a.group === 'regular' ? (qsel.value.regular[a.round]?.[a.team]?.id ?? null) : (qsel.value.final[a.index]?.id ?? null);
 });
 // Every question already assigned to a slot → its slot label (shown in the bank).
@@ -533,8 +547,10 @@ const assignedLabels = computed(() => {
 const slotOf = (a: ActiveSlot): Slot | undefined =>
     a.group === 'regular' ? qsel.value.regular[a.round]?.[a.team] : qsel.value.final[a.index];
 const assignToActive = (id: number) => {
+    if (!activeSlot.value) return;
     const s = slotOf(activeSlot.value);
     if (s) { s.id = id; s.pinned = true; }
+    activeSlot.value = null; // replace complete → deselect, so the action reads as done (mirrors swap)
 };
 const swapSlot = (a: ActiveSlot) => {
     const s = slotOf(a);
@@ -548,6 +564,47 @@ const swapRegular = (i: number, j: number) => swapSlot({ group: 'regular', round
 const swapFinal = (i: number) => swapSlot({ group: 'final', index: i });
 const shuffleRegular = () => qsel.value.regular.forEach((r, i) => r.forEach((s, j) => { if (!s.pinned) swapRegular(i, j); }));
 const shuffleFinal = () => qsel.value.final.forEach((s, i) => { if (!s.pinned) swapFinal(i); });
+
+// ---- Swap mode: exchange two already-slotted regular questions (reorder by
+// difficulty across rounds). Distinct from per-slot Shuffle (random from bank)
+// and from clicking a bank question (Replace). Regular grid only — the tiered
+// final slots are answer-count-locked, so trading them isn't valid.
+const swapMode = ref(false);
+const swapSource = ref<{ round: number; team: number } | null>(null);
+const toggleSwapMode = () => { swapMode.value = !swapMode.value; swapSource.value = null; };
+const exitSwapMode = () => { swapMode.value = false; swapSource.value = null; };
+const isSwapSource = (i: number, j: number) =>
+    !!swapSource.value && swapSource.value.round === i && swapSource.value.team === j;
+// Every slot click routes through here: assign-target selection normally, or
+// pick source/target while swapping.
+const handleRegularClick = (i: number, j: number) => {
+    if (!swapMode.value) { setRegularActive(i, j); return; }
+    if (!swapSource.value) { swapSource.value = { round: i, team: j }; return; }
+    if (isSwapSource(i, j)) { swapSource.value = null; return; } // clicked source again → deselect
+    const a = qsel.value.regular[swapSource.value.round]?.[swapSource.value.team];
+    const b = qsel.value.regular[i]?.[j];
+    if (a && b) {
+        // Trade the questions; pinned state travels with each question.
+        [a.id, b.id] = [b.id, a.id];
+        [a.pinned, b.pinned] = [b.pinned, a.pinned];
+    }
+    exitSwapMode(); // one swap completes the action and leaves swap mode
+};
+const regularSlotClass = (i: number, j: number): string => {
+    const base = 'flex cursor-pointer items-start gap-2.5 rounded-md border px-2.5 py-2';
+    if (swapMode.value) {
+        if (isSwapSource(i, j)) return `${base} border-primary bg-primary/10 ring-2 ring-primary`;
+        return swapSource.value
+            ? `${base} border-info bg-info/10 hover:border-info`       // a source is picked → valid target
+            : `${base} border-border-strong bg-surface hover:border-primary`; // awaiting first pick
+    }
+    return isRegularActive(i, j)
+        ? `${base} border-primary bg-primary/10`
+        : `${base} border-border bg-surface hover:border-border-strong`;
+};
+const onKeydown = (e: KeyboardEvent) => { if (e.key === 'Escape' && swapMode.value) exitSwapMode(); };
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 const slotText = (id: number | null) => (id != null ? questionById.value.get(id)?.question_text ?? '(missing)' : null);
 const slotMeta = (id: number | null) => {
     const q = id != null ? questionById.value.get(id) : null;
@@ -566,10 +623,29 @@ const questionSelectionReady = computed(() => {
     return qsel.value.regular.length > 0 && qsel.value.regular.every((r) => r.length > 0 && r.every((s) => s.id != null));
 });
 
-// ---- Start / cancel ----
+// ---- Start / resume / restart / cancel ----
+// A fresh start (re)builds questions from setup and begins at round one.
 const startGame = () => {
     if (settingsForm.isDirty) saveSettings(() => router.post(route('games.start', props.gameSession.id)));
     else router.post(route('games.start', props.gameSession.id));
+};
+// Return to the live game exactly where it was left — no rebuild, no reset.
+const resumeGame = () => {
+    // POST (not visit) so the server flips the game back to 'playing' before the
+    // game screen loads — otherwise the TV display, which gates on 'playing',
+    // stays on the lobby "waiting" screen while you play.
+    router.post(route('games.resume', props.gameSession.id));
+};
+// Explicit, destructive re-start of a game that's already been played.
+const restartGame = () => {
+    askConfirm(
+        {
+            title: 'Restart from setup?',
+            message: 'This wipes the current game — scores and progress — and rebuilds the questions from your setup. This cannot be undone.',
+            confirmText: 'Restart game',
+        },
+        startGame,
+    );
 };
 const cancelGame = () => {
     askConfirm(
@@ -611,28 +687,68 @@ const copyDisplayUrl = () => {
                     <h1 class="text-2xl font-extrabold text-body">Set up your game</h1>
                     <p class="mt-1 text-sm text-muted">Pick a game, name it, set teams &amp; scoring, then start.</p>
                 </div>
-                <div class="flex items-center gap-3">
+                <div class="flex flex-wrap items-center justify-end gap-3">
                     <span v-if="settingsForm.processing" class="text-sm text-muted">Saving…</span>
                     <span v-else-if="justSaved" class="text-sm text-primary">Saved ✓</span>
                     <Button variant="outline" size="md" @click="cancelGame">Cancel</Button>
-                    <Button variant="success" size="md" :disabled="!gameSession.teams.length || !questionSelectionReady" @click="startGame">Start Game →</Button>
+                    <template v-if="wasStarted">
+                        <Button variant="danger" size="md" :disabled="!gameSession.teams.length || !questionSelectionReady" @click="restartGame">Restart</Button>
+                        <Button variant="success" size="md" @click="resumeGame">Resume Game →</Button>
+                    </template>
+                    <Button v-else variant="success" size="md" :disabled="!gameSession.teams.length || !questionSelectionReady" @click="startGame">Start Game →</Button>
                 </div>
             </div>
         </template>
 
         <div class="mx-auto max-w-[1440px] space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-            <!-- Game & name -->
+            <!-- Game & name (+ share / display links) -->
             <Card title="Game">
-                <div class="mb-5">
-                    <GamePicker :game-types="gameTypes" :model-value="gameSlug" @select="changeGame" />
+                <div class="grid gap-5 lg:grid-cols-2">
+                    <!-- Game type -->
+                    <div>
+                        <label class="mb-2 block text-sm font-medium text-muted">Game type</label>
+                        <GamePicker :game-types="gameTypes" :model-value="gameSlug" @select="changeGame" />
+                    </div>
+                    <!-- Share links -->
+                    <div class="space-y-3">
+                        <div>
+                            <label class="mb-1 block text-sm font-medium text-muted">Join link</label>
+                            <div class="flex items-center gap-2">
+                                <span class="min-w-0 flex-1 truncate rounded-lg border border-border bg-surface-inset px-4 py-2 font-mono text-sm text-muted">{{ joinUrl }}</span>
+                                <Button variant="outline" size="md" @click="copyJoinUrl">{{ urlCopied ? 'Copied!' : 'Copy' }}</Button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-sm font-medium text-muted">TV / projector display</label>
+                            <div class="flex items-center gap-2">
+                                <span class="min-w-0 flex-1 truncate rounded-lg border border-info/30 bg-surface-inset px-4 py-2 font-mono text-sm text-info">{{ displayUrl }}</span>
+                                <Button variant="outline" size="md" @click="copyDisplayUrl">{{ displayUrlCopied ? 'Copied!' : 'Copy' }}</Button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <TextField v-model="settingsForm.name" label="Session name" placeholder="e.g., Sunday Family Night" />
+
+                <!-- Session name + game code on one line -->
+                <div class="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end">
+                    <div class="flex-1">
+                        <TextField v-model="settingsForm.name" label="Session name" placeholder="e.g., Sunday Family Night" />
+                    </div>
+                    <div>
+                        <label class="mb-1 block text-sm font-medium text-muted">Game code</label>
+                        <div class="flex items-center gap-2">
+                            <span class="rounded-lg border border-border bg-surface-inset px-4 py-2 font-mono text-xl font-bold tracking-widest text-body">{{ gameSession.invite_code }}</span>
+                            <Button variant="outline" size="md" @click="copyInviteCode">{{ codeCopied ? 'Copied!' : 'Copy' }}</Button>
+                        </div>
+                    </div>
+                </div>
             </Card>
 
             <!-- Teams -->
             <Card title="Teams">
                 <template #headerActions>
-                    <div class="flex items-center gap-3">
+                    <!-- America Says is a fixed head-to-head: exactly two teams, no stepper. -->
+                    <div v-if="gameSlug === 'america-says'" class="text-sm text-muted">Head-to-head · 2 teams</div>
+                    <div v-else class="flex items-center gap-3">
                         <span class="text-sm text-muted">Number of teams</span>
                         <NumberInput :model-value="teamCountInput" :min="1" :max="8" @update:model-value="applyTeamCount" />
                     </div>
@@ -642,8 +758,8 @@ const copyDisplayUrl = () => {
 
                 <div class="space-y-3">
                     <div v-for="team in gameSession.teams" :key="team.id" class="rounded-lg border border-border">
-                        <div class="flex items-center justify-between gap-3 p-3">
-                            <div class="flex flex-1 items-center gap-3">
+                        <div class="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="flex min-w-0 flex-1 items-center gap-3">
                                 <input
                                     :value="team.name"
                                     type="text"
@@ -655,7 +771,7 @@ const copyDisplayUrl = () => {
                                 />
                                 <span class="whitespace-nowrap text-sm text-muted">({{ team.members?.length || 0 }} members)</span>
                             </div>
-                            <div class="flex items-center gap-2">
+                            <div class="flex flex-none items-center gap-2">
                                 <Button variant="secondary" size="xs" icon="plus" @click="openAddMember(team.id)">Members</Button>
                                 <Button variant="danger" size="xs" @click="removeTeam(team)">Remove</Button>
                             </div>
@@ -673,46 +789,6 @@ const copyDisplayUrl = () => {
 
                 <div class="mt-4 border-t border-border pt-4">
                     <Toggle v-model="settingsForm.settings.allow_team_selection" label="Let players pick their own team when they join by code" />
-                </div>
-            </Card>
-
-            <!-- Rounds & scoring (America Says) -->
-            <Card v-if="gameSlug === 'america-says'" title="Rounds & scoring">
-                <template #headerActions>
-                    <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-                        <div class="flex items-center gap-3">
-                            <span class="text-sm text-muted">Rounds</span>
-                            <NumberInput :model-value="roundCountInput" :min="1" :max="8" @update:model-value="applyRoundCount" />
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <span class="text-sm text-muted">Round Timer</span>
-                            <NumberInput v-model="settingsForm.settings.control_timer_seconds" :min="10" :max="60" />
-                            <span class="text-sm text-muted">sec</span>
-                        </div>
-                    </div>
-                </template>
-
-                <p class="mb-4 text-sm text-muted">
-                    A round plays one question per team ({{ teamsCount }} {{ teamsCount === 1 ? 'team' : 'teams' }}). Each correct answer scores its round's points; sweep the whole board for the bonus.
-                    <span class="text-body">{{ rounds.length }} rounds × {{ teamsCount }} = {{ totalQuestions }} questions.</span>
-                </p>
-
-                <label class="mb-2 block text-sm font-medium text-body">Points per round</label>
-                <div class="space-y-2">
-                    <div v-for="(round, i) in rounds" :key="i" class="flex flex-wrap items-end gap-x-5 gap-y-2 rounded-lg border border-border bg-surface-inset p-3">
-                        <span class="w-16 self-center font-semibold text-body">Round {{ i + 1 }}</span>
-                        <NumberInput v-model="round.points_per_answer" label="Pts / answer" :min="0" input-class="w-20" />
-                        <NumberInput v-model="round.bonus_points" label="Sweep bonus" :min="0" input-class="w-24" />
-                        <span class="self-center text-xs text-primary">Sweep all {{ answersPerQuestion }} = {{ sweptTotal(round).toLocaleString() }} pts</span>
-                        <Button v-if="rounds.length > 1" variant="ghost" size="xs" class="ml-auto self-center !text-danger" @click="removeRound(i)">Remove</Button>
-                    </div>
-                </div>
-            </Card>
-
-            <!-- Family Feud rules -->
-            <Card v-if="gameSlug === 'family-feud'" title="Rules">
-                <div class="max-w-xs">
-                    <Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" />
                 </div>
             </Card>
 
@@ -747,6 +823,48 @@ const copyDisplayUrl = () => {
                 </template>
             </Card>
 
+            <!-- Rounds & scoring (America Says) -->
+            <Card v-if="gameSlug === 'america-says'" title="Rounds & scoring">
+                <div class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-border pb-4">
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm text-muted">Rounds</span>
+                        <NumberInput :model-value="roundCountInput" :min="1" :max="8" @update:model-value="applyRoundCount" />
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm text-muted">Round Timer</span>
+                        <NumberInput v-model="settingsForm.settings.control_timer_seconds" :min="10" :max="60" />
+                        <span class="text-sm text-muted">sec</span>
+                    </div>
+                </div>
+
+                <p class="mb-4 text-sm text-muted">
+                    A round plays one question per team ({{ teamsCount }} {{ teamsCount === 1 ? 'team' : 'teams' }}). Each correct answer scores its round's points; sweep the whole board for the bonus.
+                    <span class="text-body">{{ rounds.length }} rounds × {{ teamsCount }} = {{ totalQuestions }} questions.</span>
+                </p>
+
+                <label class="mb-2 block text-sm font-medium text-body">Points per round</label>
+                <div class="space-y-2">
+                    <div v-for="(round, i) in rounds" :key="i" class="rounded-lg border border-border bg-surface-inset p-3">
+                        <div class="flex items-center justify-between gap-3">
+                            <span class="font-semibold text-body">Round {{ i + 1 }}</span>
+                            <Button v-if="rounds.length > 1" variant="ghost" size="xs" class="!text-danger" @click="removeRound(i)">Remove</Button>
+                        </div>
+                        <div class="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3">
+                            <NumberInput v-model="round.points_per_answer" label="Pts / answer" :min="0" input-class="w-20" />
+                            <NumberInput v-model="round.bonus_points" label="Sweep bonus" :min="0" input-class="w-24" />
+                            <span class="self-center text-xs text-primary">Sweep all {{ answersPerQuestion }} = {{ sweptTotal(round).toLocaleString() }} pts</span>
+                        </div>
+                    </div>
+                </div>
+            </Card>
+
+            <!-- Family Feud rules -->
+            <Card v-if="gameSlug === 'family-feud'" title="Rules">
+                <div class="max-w-xs">
+                    <Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" />
+                </div>
+            </Card>
+
             <!-- Questions (per-slot picker: America Says + Family Feud) -->
             <Card v-if="isPickerGame" title="Questions">
                 <template #headerActions>
@@ -757,50 +875,18 @@ const copyDisplayUrl = () => {
                     <span v-else class="text-sm text-muted">{{ rounds.length }} rounds × {{ teamsCount }} {{ teamsCount === 1 ? 'team' : 'teams' }}</span>
                 </template>
 
-                <div class="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
-                    <!-- LEFT: question bank -->
-                    <div class="lg:border-r lg:border-border lg:pr-5">
-                        <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-subtle">
-                            Question bank
-                            <span class="ml-1 font-normal normal-case text-muted">— filling <span class="rounded-full border border-primary/50 bg-primary/10 px-2 py-0.5 text-primary">{{ activeSlotLabel }}</span></span>
-                        </p>
-                        <div class="mb-3 flex flex-wrap items-center gap-2">
-                            <template v-if="activeSlot.group === 'regular'">
-                                <Select v-if="showSource" v-model="pickSource" :options="pickSourceOptions" allow-empty empty-label="Any source" />
-                                <Select v-if="showType" v-model="pickType" :options="pickTypeOptions" allow-empty empty-label="Any type" />
-                                <Select v-if="pickType === 'final' && answerCountOptions.length" v-model="pickAnswers" :options="answerCountOptions" allow-empty empty-label="Any # answers" />
-                                <Select v-if="showCategory" v-model="pickCategory" :options="categoryOptions" allow-empty empty-label="All categories" />
-                                <Select v-if="showDifficulty" v-model="pickDifficulty" :options="difficultyOptions" allow-empty empty-label="Any difficulty" />
-                            </template>
-                            <div class="min-w-[110px] flex-1"><TextField v-model="questionSearch" placeholder="Search…" /></div>
-                        </div>
-                        <div class="max-h-[42rem] overflow-y-auto rounded-lg border border-border">
-                            <button
-                                v-for="q in activeList"
-                                :key="q.id"
-                                type="button"
-                                :class="['flex w-full items-center gap-3 border-t border-border/60 px-3 py-2.5 text-left first:border-t-0', q.id === activeCurrentId ? 'bg-primary/10' : 'hover:bg-surface-inset']"
-                                @click="assignToActive(q.id)"
-                            >
-                                <span class="flex-1 text-sm text-body"><BlankText :text="q.question_text" /></span>
-                                <span v-if="q.round_type === 'final'" class="flex-none rounded border border-info/40 px-1.5 py-0.5 text-[10px] font-bold uppercase text-info">Final</span>
-                                <span v-if="q.id === activeCurrentId" class="flex-none rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Current</span>
-                                <span v-else-if="assignedLabels.has(q.id)" class="flex-none whitespace-nowrap rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-semibold text-primary">{{ assignedLabels.get(q.id) }}</span>
-                                <span class="flex-none whitespace-nowrap text-xs text-subtle">{{ q.answers_count }} ans</span>
-                                <span class="flex-none whitespace-nowrap text-xs text-muted" title="Times used in completed games">{{ q.times_used }}× used</span>
-                                <span v-if="seenBy(q.id)" class="flex-none whitespace-nowrap rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(q.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(q.id) }}</span>
-                            </button>
-                            <p v-if="!activeList.length" class="px-3 py-6 text-center text-sm text-muted">No matching questions.</p>
-                        </div>
-                    </div>
-
-                    <!-- RIGHT: slots -->
-                    <div>
+                <div class="grid gap-5 lg:grid-cols-[1fr_1.35fr]">
+                    <!-- Slots — left column on desktop, and first when stacked on mobile so
+                         clicking a slot keeps your scroll position (the bank grows below it). -->
+                    <div class="min-w-0">
                         <div class="mb-2 flex items-center gap-2">
                             <h4 class="text-sm font-semibold text-body">Rounds</h4>
-                            <span class="text-xs text-subtle"><template v-if="regularCols > 1">{{ regularRowCount }} × {{ teamsCount }}</template><template v-else>{{ regularRowCount }}</template></span>
-                            <Button variant="muted" size="xs" class="ml-auto" @click="shuffleRegular">Shuffle all</Button>
+                            <Button :variant="swapMode ? 'primary' : 'muted'" size="xs" class="ml-auto" @click="toggleSwapMode">{{ swapMode ? '⇄ Swapping…' : '⇄ Swap' }}</Button>
+                            <Button variant="muted" size="xs" :disabled="swapMode" @click="shuffleRegular">Shuffle all</Button>
                         </div>
+                        <p v-if="swapMode" class="mb-2 rounded-md border border-info/30 bg-info/10 px-2.5 py-1.5 text-xs text-info">
+                            Swapping positions — click a question, then click another to trade their spots. Press Esc or ⇄ Swap to finish.
+                        </p>
                         <div class="space-y-3">
                             <div v-for="(round, i) in qsel.regular" :key="i" class="rounded-lg border border-border bg-surface-inset p-2">
                                 <div class="mb-1.5 px-1 text-xs font-semibold text-muted">{{ regularRowLabel(i) }}</div>
@@ -808,19 +894,19 @@ const copyDisplayUrl = () => {
                                     <div
                                         v-for="(slot, j) in round"
                                         :key="j"
-                                        :class="['flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2', isRegularActive(i, j) ? 'border-primary bg-primary/10' : 'border-border bg-surface hover:border-border-strong']"
-                                        @click="setRegularActive(i, j)"
+                                        :class="regularSlotClass(i, j)"
+                                        @click="handleRegularClick(i, j)"
                                     >
-                                        <span v-if="regularCols > 1" class="h-2.5 w-2.5 flex-none rounded-full" :style="{ backgroundColor: teamColor(j) }"></span>
+                                        <span v-if="regularCols > 1" class="mt-1.5 h-2.5 w-2.5 flex-none rounded-full" :style="{ backgroundColor: teamColor(j) }"></span>
                                         <span class="min-w-0 flex-1">
-                                            <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>— pick a question —</template></span>
+                                            <span :class="['block text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>— pick a question —</template></span>
                                             <span class="block text-xs text-subtle">
                                                 <template v-if="regularCols > 1">{{ teamName(j) }}<template v-if="slot.id"> · {{ slotMeta(slot.id) }}</template></template>
                                                 <template v-else>{{ slot.id ? slotMeta(slot.id) : 'Face-off — both teams play' }}</template>
                                             </span>
                                         </span>
                                         <span v-if="seenBy(slot.id)" class="flex-none rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(slot.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(slot.id) }}</span>
-                                        <Button variant="muted" size="xs" class="flex-none" @click.stop="swapRegular(i, j)">⇄ Swap</Button>
+                                        <Button v-if="!swapMode" variant="muted" size="xs" class="flex-none" @click.stop="swapRegular(i, j)">⟳ Shuffle</Button>
                                     </div>
                                 </div>
                             </div>
@@ -841,20 +927,61 @@ const copyDisplayUrl = () => {
                                 <div
                                     v-for="(slot, i) in qsel.final"
                                     :key="i"
-                                    :class="['flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2', isFinalActive(i) ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset hover:border-border-strong']"
+                                    :class="['flex cursor-pointer items-start gap-2.5 rounded-md border px-2.5 py-2', isFinalActive(i) ? 'border-primary bg-primary/10' : 'border-border bg-surface-inset hover:border-border-strong']"
                                     @click="setFinalActive(i)"
                                 >
                                     <span class="flex-none rounded-md bg-surface-elevated px-2 py-1 text-[10px] font-bold text-info">{{ finalSlotBadge(i) }}</span>
                                     <span class="min-w-0 flex-1">
-                                        <span :class="['block truncate text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>{{ finalEmptyText(i) }}</template></span>
+                                        <span :class="['block text-sm font-medium', slot.id ? 'text-body' : 'text-warning']"><BlankText v-if="slot.id" :text="slotText(slot.id)" /><template v-else>{{ finalEmptyText(i) }}</template></span>
                                         <span v-if="finalTiered" class="block text-xs text-subtle">Needs {{ i + 1 }} answer{{ i === 0 ? '' : 's' }}<template v-if="slot.id"> · {{ slotUsed(slot.id) }}</template></span>
                                         <span v-else-if="slot.id" class="block text-xs text-subtle">{{ slotMeta(slot.id) }}</span>
                                     </span>
                                     <span v-if="seenBy(slot.id)" class="flex-none rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(slot.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(slot.id) }}</span>
-                                    <Button v-if="slot.id" variant="muted" size="xs" class="flex-none" @click.stop="swapFinal(i)">⇄ Swap</Button>
+                                    <Button v-if="slot.id" variant="muted" size="xs" class="flex-none" @click.stop="swapFinal(i)">⟳ Shuffle</Button>
                                 </div>
                             </div>
                             <p class="mt-2 text-xs text-subtle">{{ finalNote }}</p>
+                        </div>
+                    </div>
+
+                    <!-- Question bank — right column on desktop; below the slots when stacked
+                         on mobile so arming a slot grows the list below your viewport. -->
+                    <div class="min-w-0 lg:border-l lg:border-border lg:pl-5">
+                        <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-subtle">
+                            Question bank
+                            <span v-if="hasActiveSlot" class="ml-1 font-normal normal-case text-muted">— filling <span class="rounded-full border border-primary/50 bg-primary/10 px-2 py-0.5 text-primary">{{ activeSlotLabel }}</span></span>
+                            <span v-else class="ml-1 font-normal normal-case text-muted">— select a slot to choose its question</span>
+                        </p>
+                        <div class="mb-3 flex flex-wrap items-center gap-2">
+                            <template v-if="activeSlot?.group === 'regular'">
+                                <Select v-if="showSource" v-model="pickSource" :options="pickSourceOptions" allow-empty empty-label="Any source" />
+                                <Select v-if="showType" v-model="pickType" :options="pickTypeOptions" allow-empty empty-label="Any type" />
+                                <Select v-if="pickType === 'final' && answerCountOptions.length" v-model="pickAnswers" :options="answerCountOptions" allow-empty empty-label="Any # answers" />
+                                <Select v-if="showCategory" v-model="pickCategory" :options="categoryOptions" allow-empty empty-label="All categories" />
+                                <Select v-if="showDifficulty" v-model="pickDifficulty" :options="difficultyOptions" allow-empty empty-label="Any difficulty" />
+                            </template>
+                            <div class="min-w-[110px] flex-1"><TextField v-model="questionSearch" placeholder="Search…" /></div>
+                        </div>
+                        <div class="max-h-[42rem] overflow-y-auto rounded-lg border border-border">
+                            <button
+                                v-for="q in activeList"
+                                :key="q.id"
+                                type="button"
+                                :class="['flex w-full flex-col gap-1.5 border-t border-border/60 px-3 py-2.5 text-left first:border-t-0 sm:flex-row sm:items-center sm:gap-3', q.id === activeCurrentId ? 'bg-primary/10' : 'hover:bg-surface-inset']"
+                                @click="assignToActive(q.id)"
+                            >
+                                <span class="min-w-0 flex-1 text-sm text-body"><BlankText :text="q.question_text" /></span>
+                                <span class="flex flex-none flex-wrap items-center gap-x-2 gap-y-1 sm:flex-nowrap">
+                                    <span v-if="q.round_type === 'final'" class="flex-none rounded border border-info/40 px-1.5 py-0.5 text-[10px] font-bold uppercase text-info">Final</span>
+                                    <span v-if="q.id === activeCurrentId" class="flex-none rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Current</span>
+                                    <span v-else-if="assignedLabels.has(q.id)" class="flex-none whitespace-nowrap rounded-full border border-primary/50 px-2 py-0.5 text-[10px] font-semibold text-primary">{{ assignedLabels.get(q.id) }}</span>
+                                    <span class="flex-none whitespace-nowrap text-xs text-subtle">{{ q.answers_count }} ans</span>
+                                    <span class="flex-none whitespace-nowrap text-xs text-muted" title="Times used in completed games">{{ q.times_used }}× used</span>
+                                    <span v-if="seenBy(q.id)" class="flex-none whitespace-nowrap rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning" :title="seenBy(q.id) + ' of tonight\'s players have already been asked this'">Seen · {{ seenBy(q.id) }}</span>
+                                </span>
+                            </button>
+                            <p v-if="!hasActiveSlot" class="px-3 py-8 text-center text-sm text-muted">Select a slot, then pick its question here.</p>
+                            <p v-else-if="!activeList.length" class="px-3 py-6 text-center text-sm text-muted">No matching questions.</p>
                         </div>
                     </div>
                 </div>
@@ -874,25 +1001,6 @@ const copyDisplayUrl = () => {
                 <div class="mt-5 flex items-center gap-2 border-t border-border pt-4 text-sm">
                     <Link :href="route('questions.index')" class="font-semibold text-primary hover:underline">Manage question library →</Link>
                     <span class="text-subtle">Oodles cards are pulled at random. Add or edit questions.</span>
-                </div>
-            </Card>
-
-            <!-- Share -->
-            <Card title="Share & display">
-                <label class="mb-1 block text-sm font-medium text-muted">Game code</label>
-                <div class="mb-4 flex items-center gap-3">
-                    <span class="rounded-lg border border-border bg-surface-inset px-6 py-2 font-mono text-2xl font-bold tracking-widest text-body">{{ gameSession.invite_code }}</span>
-                    <Button variant="primary" size="md" @click="copyInviteCode">{{ codeCopied ? 'Copied!' : 'Copy code' }}</Button>
-                </div>
-                <label class="mb-1 block text-sm font-medium text-muted">Join link</label>
-                <div class="mb-4 flex items-center gap-3">
-                    <span class="flex-1 truncate rounded-lg border border-border bg-surface-inset px-4 py-2 font-mono text-sm text-muted">{{ joinUrl }}</span>
-                    <Button variant="muted" size="md" @click="copyJoinUrl">{{ urlCopied ? 'Copied!' : 'Copy' }}</Button>
-                </div>
-                <label class="mb-1 block text-sm font-medium text-muted">TV / projector display</label>
-                <div class="flex items-center gap-3">
-                    <span class="flex-1 truncate rounded-lg border border-info/30 bg-surface-inset px-4 py-2 font-mono text-sm text-info">{{ displayUrl }}</span>
-                    <Button variant="secondary" size="md" @click="copyDisplayUrl">{{ displayUrlCopied ? 'Copied!' : 'Copy' }}</Button>
                 </div>
             </Card>
 
