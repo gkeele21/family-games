@@ -126,7 +126,7 @@ class GameSessionController extends Controller
             $numTeams = max(1, min(8, (int) $session->getConfig('number_of_teams', 2)));
             foreach (range(0, $numTeams - 1) as $i) {
                 Team::create([
-                    'game_session_id' => $session->id,
+                    'game_id' => $session->id,
                     'name' => 'Team ' . chr(65 + $i),
                     'color' => self::TEAM_COLORS[$i % count(self::TEAM_COLORS)],
                     'display_order' => $i + 1,
@@ -162,7 +162,7 @@ class GameSessionController extends Controller
         $order = $gameSession->teams()->max('display_order') ?? 0;
 
         $team = Team::create([
-            'game_session_id' => $gameSession->id,
+            'game_id' => $gameSession->id,
             'name' => $validated['name'],
             'color' => $validated['color'] ?? '#3B82F6',
             'display_order' => $order + 1,
@@ -196,7 +196,7 @@ class GameSessionController extends Controller
             $order = (int) ($gameSession->teams()->max('display_order') ?? 0);
             for ($i = $current; $i < $target; $i++) {
                 Team::create([
-                    'game_session_id' => $gameSession->id,
+                    'game_id' => $gameSession->id,
                     'name' => 'Team ' . chr(65 + $i),
                     'color' => self::TEAM_COLORS[$i % count(self::TEAM_COLORS)],
                     'display_order' => ++$order,
@@ -215,7 +215,7 @@ class GameSessionController extends Controller
             abort(403);
         }
 
-        if ($team->game_session_id !== $gameSession->id) {
+        if ($team->game_id !== $gameSession->id) {
             abort(403);
         }
 
@@ -234,7 +234,7 @@ class GameSessionController extends Controller
 
     public function removeTeam(GameSession $gameSession, Team $team)
     {
-        if ($team->game_session_id !== $gameSession->id) {
+        if ($team->game_id !== $gameSession->id) {
             abort(403);
         }
 
@@ -251,7 +251,7 @@ class GameSessionController extends Controller
 
         $validated = $request->validate([
             'team_ids' => 'required|array',
-            'team_ids.*' => 'exists:teams,id',
+            'team_ids.*' => 'exists:competitors,id',
         ]);
 
         // Two passes: park in a high range first so a (game, display_order)
@@ -261,12 +261,12 @@ class GameSessionController extends Controller
         DB::transaction(function () use ($validated, $gameSession) {
             foreach ($validated['team_ids'] as $index => $teamId) {
                 Team::where('id', $teamId)
-                    ->where('game_session_id', $gameSession->id)
+                    ->where('game_id', $gameSession->id)
                     ->update(['display_order' => 1000 + $index]);
             }
             foreach ($validated['team_ids'] as $index => $teamId) {
                 Team::where('id', $teamId)
-                    ->where('game_session_id', $gameSession->id)
+                    ->where('game_id', $gameSession->id)
                     ->update(['display_order' => $index + 1]);
             }
         });
@@ -280,7 +280,7 @@ class GameSessionController extends Controller
             abort(403);
         }
 
-        if ($team->game_session_id !== $gameSession->id) {
+        if ($team->game_id !== $gameSession->id) {
             abort(403);
         }
 
@@ -299,7 +299,7 @@ class GameSessionController extends Controller
         } elseif ($validated['type'] === 'friend') {
             // Check if user is already on a team in this session
             $existingMember = TeamMember::whereHas('team', function ($query) use ($gameSession) {
-                $query->where('game_session_id', $gameSession->id);
+                $query->where('game_id', $gameSession->id);
             })->where('user_id', $validated['user_id'])->first();
 
             if ($existingMember) {
@@ -337,7 +337,7 @@ class GameSessionController extends Controller
             abort(403);
         }
 
-        if ($team->game_session_id !== $gameSession->id || $teamMember->team_id !== $team->id) {
+        if ($team->game_id !== $gameSession->id || $teamMember->team_id !== $team->id) {
             abort(403);
         }
 
