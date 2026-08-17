@@ -10,6 +10,7 @@ use App\Models\TeamMember;
 use App\Models\User;
 use App\Services\GameInitializationService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -253,12 +254,22 @@ class GameSessionController extends Controller
             'team_ids.*' => 'exists:teams,id',
         ]);
 
-        // Update display_order for each team
-        foreach ($validated['team_ids'] as $index => $teamId) {
-            Team::where('id', $teamId)
-                ->where('game_session_id', $gameSession->id)
-                ->update(['display_order' => $index + 1]);
-        }
+        // Two passes: park in a high range first so a (game, display_order)
+        // uniqueness rule is never momentarily violated mid-swap. Matches
+        // Scorekeeper's CompetitorController::reorder, and is what lets the
+        // unified `competitors` table keep that constraint for both kinds.
+        DB::transaction(function () use ($validated, $gameSession) {
+            foreach ($validated['team_ids'] as $index => $teamId) {
+                Team::where('id', $teamId)
+                    ->where('game_session_id', $gameSession->id)
+                    ->update(['display_order' => 1000 + $index]);
+            }
+            foreach ($validated['team_ids'] as $index => $teamId) {
+                Team::where('id', $teamId)
+                    ->where('game_session_id', $gameSession->id)
+                    ->update(['display_order' => $index + 1]);
+            }
+        });
 
         return back()->with('success', 'Team order updated');
     }
