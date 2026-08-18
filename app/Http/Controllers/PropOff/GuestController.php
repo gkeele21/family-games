@@ -81,9 +81,13 @@ class GuestController extends Controller
         $group = $invitation->group;
         $name = trim($validated['name']);
 
-        // 1. They confirmed a matched entry on the "is this you?" step.
+        // 1. They confirmed a matched entry on the "is this you?" step. The
+        //    match may have come from a previous year's group, so look the
+        //    person up across the lineage rather than only this group —
+        //    otherwise a returning player's claim silently falls through and
+        //    they get a duplicate anyway.
         if (! empty($validated['claim_user_id'])) {
-            $claimed = $group->users()->where('users.id', $validated['claim_user_id'])->first();
+            $claimed = $this->claimableUser((int) $validated['claim_user_id'], $group);
 
             if ($claimed) {
                 return $this->completeJoin($claimed, $invitation, $resolver);
@@ -102,14 +106,20 @@ class GuestController extends Controller
 
         // 3. A name match is only a candidate — two real people share a name
         //    often enough that merging them silently would be wrong. Ask, unless
-        //    they've already told us it isn't them.
+        //    they've already told us it isn't them. Searches back through the
+        //    groups this one continues from, since a new year's group is empty
+        //    on the night and only the lineage can recognise a returning player.
         $candidate = empty($validated['allow_duplicate_name'])
-            ? $resolver->findCandidateInGroup($name, $group)
+            ? $resolver->findCandidateInLineage($name, $group)
             : null;
         if ($candidate) {
             return back()->with([
                 'step'        => 'verify',
-                'verifyEntry' => $resolver->candidateSummary($candidate, $group),
+                'verifyEntry' => $resolver->candidateSummary(
+                    $candidate['user'],
+                    $candidate['group'],
+                    $group,
+                ),
             ]);
         }
 
@@ -117,6 +127,23 @@ class GuestController extends Controller
         $guestToken = $user->guest_token;
 
         return $this->completeJoin($user, $invitation, $resolver, $guestToken);
+    }
+
+    /**
+     * A claim is only honoured for someone actually present in this group or one
+     * it continues from — never an arbitrary user id posted from the client.
+     */
+    private function claimableUser(int $userId, \App\Models\PropOff\Group $group): ?User
+    {
+        foreach ($group->lineage() as $ancestor) {
+            $user = $ancestor->users()->where('users.id', $userId)->first();
+
+            if ($user) {
+                return $user;
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -32,13 +32,21 @@
                  would be worse than asking. -->
             <div v-if="verifyEntry" class="bg-surface-elevated border border-border rounded-lg p-5 mb-6">
                 <h2 class="text-lg font-bold text-body mb-1">Is this you?</h2>
-                <p class="text-sm text-muted mb-4">
+                <p v-if="verifyEntry.from_previous_group" class="text-sm text-muted mb-4">
+                    Someone called "{{ verifyEntry.name }}" played with
+                    {{ verifyEntry.previous_group_name }} last time. Pick up where you
+                    left off and keep your history.
+                </p>
+                <p v-else class="text-sm text-muted mb-4">
                     Someone called "{{ verifyEntry.name }}" has already joined this group.
                 </p>
 
                 <div class="bg-surface border border-border rounded-lg p-4 mb-5">
                     <div class="font-semibold text-body">{{ verifyEntry.name }}</div>
                     <div class="text-sm text-muted">
+                        <span v-if="verifyEntry.previous_event_name">
+                            {{ verifyEntry.previous_event_name }} &middot;
+                        </span>
                         {{ verifyEntry.answered }} of {{ verifyEntry.total }} questions answered
                     </div>
                 </div>

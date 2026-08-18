@@ -40,6 +40,31 @@ class ParticipantResolver
     }
 
     /**
+     * The same search, but walking back through the groups this one continues
+     * from. PropOff is annual and groups are per-event, so on the night of a new
+     * event the current group is empty and only the lineage can recognise
+     * anyone. Nearest year wins, so the freshest entry is the one offered.
+     *
+     * Returns the matched person together with the group they were found in —
+     * the caller needs that to word the prompt honestly ("you played last
+     * year") and to summarise the right entry.
+     *
+     * @return array{user: User, group: Group}|null
+     */
+    public function findCandidateInLineage(string $name, Group $group): ?array
+    {
+        foreach ($group->lineage() as $ancestor) {
+            $match = $this->findCandidateInGroup($name, $ancestor);
+
+            if ($match) {
+                return ['user' => $match, 'group' => $ancestor];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * An email match is a definite identity — emails are unique on users, and
      * someone typing their own address is asserting who they are. Safe to reuse
      * without confirmation.
@@ -89,15 +114,21 @@ class ParticipantResolver
      * The summary shown on the "is this you?" step: enough for someone to
      * recognise their own entry without exposing anyone else's answers.
      */
-    public function candidateSummary(User $user, Group $group): array
+    public function candidateSummary(User $user, Group $group, ?Group $current = null): array
     {
         $entry = $group->entries()->where('user_id', $user->id)->first();
+        $isPriorYear = $current !== null && $current->id !== $group->id;
 
         return [
             'name'     => $user->name,
             'answered' => $entry ? $entry->userAnswers()->count() : 0,
             'total'    => $group->groupQuestions()->where('is_active', true)->count(),
             'user_id'  => $user->id,
+            // Lets the prompt say "you played X last time" rather than implying
+            // they have already joined tonight, which would be a lie.
+            'from_previous_group' => $isPriorYear,
+            'previous_group_name' => $isPriorYear ? $group->name : null,
+            'previous_event_name' => $isPriorYear ? $group->event?->name : null,
         ];
     }
 }
