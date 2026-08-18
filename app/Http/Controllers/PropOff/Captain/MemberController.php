@@ -6,11 +6,16 @@ use App\Http\Controllers\Controller;
 use App\Models\PropOff\Group;
 use App\Models\PropOff\Leaderboard;
 use App\Models\User;
+use App\Services\PropOff\ParticipantResolver;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 class MemberController extends Controller
 {
+    public function __construct(private ParticipantResolver $resolver)
+    {
+    }
+
     /**
      * Display a listing of group members.
      */
@@ -140,22 +145,25 @@ class MemberController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            // The captain has seen the warning and means to add a second
+            // person who genuinely shares the name.
+            'allow_duplicate_name' => 'nullable|boolean',
         ]);
 
-        // Create guest user
-        $guest = User::create([
-            ...User::splitName($validated['name']),
-            'email' => null,
-            'password' => null,
-            'role' => 'guest',
-            'guest_token' => \Illuminate\Support\Str::random(32),
-        ]);
+        $name = trim($validated['name']);
 
-        // Add to group
-        $group->users()->attach($guest->id, [
-            'joined_at' => now(),
-            'is_captain' => false,
-        ]);
+        // Adding someone already in the group is nearly always a slip. Say so
+        // rather than silently creating a second row for the same person —
+        // that is how "Megan" ended up in the data three times.
+        if (empty($validated['allow_duplicate_name'])
+            && $this->resolver->findCandidateInGroup($name, $group)) {
+            return back()->withErrors([
+                'name' => "{$name} is already in this group. Add them again only if this is a different person with the same name.",
+            ]);
+        }
+
+        $guest = $this->resolver->createGuest($name);
+        $this->resolver->attachTo($guest, $group);
 
         return back()->with('success', "Guest {$guest->name} added successfully!");
     }
