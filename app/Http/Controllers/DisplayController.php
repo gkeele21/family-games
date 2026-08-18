@@ -195,6 +195,9 @@ class DisplayController extends Controller
                 // answer flashes a strike X — both bumped as monotonic counters.
                 'faceoff_buzz' => $isFamilyFeud ? (int) $state?->getStateValue('faceoff_buzz', 0) : null,
                 'faceoff_strike' => $isFamilyFeud ? (int) $state?->getStateValue('faceoff_strike', 0) : null,
+                // The host "armed" the face-off from the intro — the display fires the
+                // face-off music + lights the bulbs while still on the matchup slide.
+                'faceoff_armed' => $isFamilyFeud ? (bool) $state?->getStateValue('faceoff_armed', false) : null,
                 'round_multiplier' => $isFamilyFeud && $currentQuestion
                     ? $this->feudRoundMultiplier($gameSession, $currentQuestion)
                     : null,

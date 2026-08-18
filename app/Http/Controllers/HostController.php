@@ -593,6 +593,8 @@ class HostController extends Controller
                 $state->setStateValue('phase', 'intro');
                 $state->setStateValue('strikes', 0);
                 $state->setStateValue('faceoff', null);
+                // Each round arms its face-off fresh (host clicks "Start Face-Off").
+                $state->setStateValue('faceoff_armed', false);
             }
         }
 
@@ -1384,6 +1386,16 @@ class HostController extends Controller
             // Timer". This keeps the intro on the 2nd+ question of a round too, and
             // avoids the brief answer-board flash on a same-round transition.
             $stateData['phase'] = 'intro';
+            // Family Feud opens each new round on the face-off buildup: clear the
+            // prior round's arming (+ strikes / buzz state) so it starts UNARMED on
+            // the Round Intro step — the host hits Start Face-Off again (music +
+            // numbered board), matching round 1. Otherwise the stale flag skips the
+            // buildup and jumps the checklist straight to the Face-Off step.
+            if ($gameSession->gameType->slug === 'family-feud') {
+                $stateData['faceoff_armed'] = false;
+                $stateData['faceoff'] = null;
+                $stateData['strikes'] = 0;
+            }
 
             $state->update([
                 'current_question_id' => $nextQuestion->id,
@@ -1719,6 +1731,9 @@ class HostController extends Controller
         }
 
         $gameSession->gameState?->setStateValue('phase', 'intro');
+        // Stepping back to the intro re-arms the face-off (Feud): the host starts it
+        // again, so the display's buildup + "Show Question" gate reset.
+        $gameSession->gameState?->setStateValue('faceoff_armed', false);
 
         return response()->json(['success' => true]);
     }
@@ -1956,6 +1971,24 @@ class HostController extends Controller
         if ($currentQuestion->controlling_team_id) {
             $state->update(['active_team_id' => $currentQuestion->controlling_team_id]);
         }
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Feud face-off — "arm" the face-off from the round intro. Stays on the intro
+     * (matchup) slide but tells the display to fire the face-off music and light the
+     * bulbs up; the host's "Show Question" button only appears once this is set. The
+     * flag is cleared whenever the round returns to its intro (see roundIntro / round
+     * advance), so each round arms fresh.
+     */
+    public function feudFaceoffStart(GameSession $gameSession)
+    {
+        if ($gameSession->host_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $gameSession->gameState?->setStateValue('faceoff_armed', true);
 
         return response()->json(['success' => true]);
     }

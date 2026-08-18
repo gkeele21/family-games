@@ -148,6 +148,9 @@ export function useSoundEffects<G extends Game>(game: G, options: { volume?: num
         } catch (e) {
             console.warn(`Could not play sound "${name}":`, e);
         }
+        // Returned so a caller can react to the clip finishing (e.g. reveal the board
+        // once the face-off sting ends). Attach an { once: true } 'ended' listener.
+        return el;
     };
 
     onMounted(preload);

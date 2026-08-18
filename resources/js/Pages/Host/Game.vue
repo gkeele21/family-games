@@ -646,6 +646,23 @@ const onWrongAnswer = () => {
     buzzWrong();
 };
 
+// The scoreboard's "Reveal only" tile. America Says shows it as a toggle whenever a
+// (non-final) question is up. Family Feud shows it as a read-only indicator on the
+// main board's reveal phases — the backend zero-scores reveals during 'reveal', so
+// the tile just LIGHTS UP while the host puts up the leftover answers.
+const showRevealOnly = computed(() => {
+    if (isAmericaSays) return !!currentQuestion.value && !isFinal.value && !isTiebreaker.value;
+    if (isFamilyFeud) {
+        return !!currentQuestion.value
+            && (currentQuestion.value.segment ?? 'main') !== 'fast_money'
+            && ['question', 'steal', 'reveal'].includes(phase.value);
+    }
+    return false;
+});
+const revealOnlyActive = computed(() =>
+    revealWithoutPoints.value || (isFamilyFeud && phase.value === 'reveal')
+);
+
 // The scoreboard's "Reveal only" control. Toggling it also syncs the board phase
 // during a steal so the TV's STEAL banner tracks it: on → reveal (banner off),
 // off → steal (banner back).
@@ -889,7 +906,9 @@ const feudMaxStrikes = computed(() => Number(props.config?.max_strikes ?? 3));
 
 const feudStepIndex = computed(() => {
     switch (phase.value) {
-        case 'intro': return 0;
+        // Arming the face-off (still 'intro' on the backend) advances the checklist to
+        // the Face-Off step, where "Show Question" lives.
+        case 'intro': return faceoffArmed.value ? 1 : 0;
         case 'faceoff': return 1;
         case 'question': return 2;
         case 'steal':
@@ -899,8 +918,8 @@ const feudStepIndex = computed(() => {
     }
 });
 const feudSteps = computed(() => [
-    { title: 'Round Intro', hint: `Round ${gameState.value?.round_number ?? 1} is on the board. Show the question to start the face-off.` },
-    { title: 'Face-Off', hint: 'Mark who buzzed in first, then reveal their answer (or Strike). Get the #1 answer and they choose; otherwise the other team answers and the higher points decides Play or Pass.' },
+    { title: 'Round Intro', hint: `Round ${gameState.value?.round_number ?? 1} is on the board. Start the face-off when the room's ready.` },
+    { title: 'Face-Off', hint: 'Show the question, then mark who buzzed in first and reveal their answer (or Strike). Get the #1 answer and they choose; otherwise the other team answers and the higher points decides Play or Pass.' },
     { title: 'Playing', hint: `${primaryTeam.value?.name ?? 'The controlling team'} guesses the board — reveal answers as they’re said. A wrong guess is a Strike; ${feudMaxStrikes.value} strikes hands to the steal. Clearing the board wins the pool.` },
     phase.value === 'reveal'
         ? { title: 'Reveal', hint: 'Steal resolved — reveal the remaining answers on the board (no points). The scores show once the whole board is up.' }
@@ -930,6 +949,13 @@ const faceoff = computed<{ buzzed: number | null; turn: number | null; answers: 
 );
 const faceoffTurnTeam = computed<Team | null>(() => teams.value.find(t => t.id === faceoff.value?.turn) ?? null);
 const faceoffDecider = computed<Team | null>(() => teams.value.find(t => t.id === faceoff.value?.decider) ?? null);
+// "Armed" = the host has started the face-off from the intro (TV plays the face-off
+// music + lights the bulbs). "Show Question" only appears once armed.
+const faceoffArmed = computed<boolean>(() => !!gameState.value?.state_data?.faceoff_armed);
+const feudStartFaceoff = async () => {
+    await axios.post(route('host.feud.faceoff.start', props.gameSession.id));
+    fetchState();
+};
 const feudFaceoffBuzz = async (teamId: number) => {
     await axios.post(route('host.feud.faceoff.buzz', props.gameSession.id), { team_id: teamId });
     fetchState();
@@ -1272,12 +1298,13 @@ onUnmounted(() => {
                     <Scoreboard
                         v-if="!(isAmericaSays && isFinal) && !(isFamilyFeud && isFastMoney)"
                         :teams="teams"
-                        :active-team-id="revealWithoutPoints ? null : gameState?.active_team_id"
-                        :controlling-team-ids="revealWithoutPoints ? [] : boardControllingTeamIds"
+                        :active-team-id="revealOnlyActive ? null : gameState?.active_team_id"
+                        :controlling-team-ids="revealOnlyActive ? [] : boardControllingTeamIds"
                         :selectable="!isOodles"
                         :editable="true"
-                        :show-reveal-only="isAmericaSays && !!currentQuestion && !isFinal && !isTiebreaker"
-                        :reveal-only-active="revealWithoutPoints"
+                        :show-reveal-only="showRevealOnly"
+                        :reveal-only-active="revealOnlyActive"
+                        :reveal-only-selectable="!isFamilyFeud"
                         @select-team="selectControllingTeam"
                         @edit-scores="openScoreModal"
                         @reveal-only="toggleRevealOnly"
@@ -1375,18 +1402,26 @@ onUnmounted(() => {
                                 <p class="mt-1 pl-8 text-xs" :class="i === feudStepIndex ? 'text-body' : 'text-subtle'">{{ step.hint }}</p>
 
                                 <div v-if="i === feudStepIndex" class="mt-3 flex flex-wrap gap-2 pl-8">
-                                    <!-- Round intro → show the question (starts the face-off). -->
-                                    <Button v-if="phase === 'intro'" variant="primary" size="sm" @click="showQuestion">Show Question</Button>
+                                    <!-- Round Intro step: the only action is to start the face-off
+                                         (fires the face-off music + lights on the TV). -->
+                                    <template v-if="phase === 'intro' && !faceoffArmed">
+                                        <Button variant="primary" size="sm" @click="feudStartFaceoff">Start Face-Off</Button>
+                                    </template>
+                                    <!-- Face-Off step, before the board: show the question to bring it
+                                         up for the buzz-in. (Armed but still 'intro' on the backend.) -->
+                                    <template v-else-if="phase === 'intro' && faceoffArmed">
+                                        <Button variant="primary" size="sm" @click="showQuestion">Show Question</Button>
+                                    </template>
 
-                                    <!-- Face-off. Before a buzz: who buzzed in first?
+                                    <!-- Face-off proper. Before a buzz: who buzzed in first?
                                          After: reveal their answer (or Strike) in the
                                          answers section — the winner is worked out
                                          automatically. Play/Pass appears once decided. -->
                                     <template v-else-if="phase === 'faceoff'">
                                         <template v-if="faceoffDecider">
                                             <span class="w-full text-xs text-muted"><span class="font-semibold text-body">{{ faceoffDecider.name }}</span> won the face-off — play or pass?</span>
-                                            <Button variant="primary" size="sm" @click="feudPlay">Play &rarr;</Button>
-                                            <Button variant="secondary" size="sm" @click="feudPass">Pass to {{ idleTurnTeam?.name ?? 'other team' }} &rarr;</Button>
+                                            <Button variant="primary" size="sm" @click="feudPlay">Play</Button>
+                                            <Button variant="secondary" size="sm" @click="feudPass">Pass to {{ idleTurnTeam?.name ?? 'other team' }}</Button>
                                         </template>
                                         <template v-else-if="faceoff?.buzzed">
                                             <span class="w-full text-xs text-muted"><span class="font-semibold text-body">{{ faceoffTurnTeam?.name ?? 'The team' }}</span> is up — reveal their answer, or hit Strike in the answers section.</span>
@@ -1438,6 +1473,9 @@ onUnmounted(() => {
                                          it's off); otherwise it's the next round. The backend routes
                                          it — this just labels the button. -->
                                     <template v-else-if="phase === 'recap'">
+                                        <!-- Advance to the next round's intro (the host arms the face-off
+                                             there with Start Face-Off). Labelled "Next Round" since the
+                                             face-off has its own button now. -->
                                         <Button variant="primary" size="sm" @click="advanceQuestion">
                                             {{ feudTargetReached ? (feudFastMoneyReady ? 'Start Fast Money' : 'Finish Game') : 'Next Round' }} &rarr;
                                         </Button>

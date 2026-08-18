@@ -76,6 +76,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/steal/start', [HostController::class, 'stealStart'])->name('host.steal.start');
     Route::post('/host/{gameSession}/steal/reveal', [HostController::class, 'setStealReveal'])->name('host.steal.reveal');
     // Family Feud regular-round flow (face-off → play → strikes → steal → resolve).
+    Route::post('/host/{gameSession}/feud/faceoff/start', [HostController::class, 'feudFaceoffStart'])->name('host.feud.faceoff.start');
     Route::post('/host/{gameSession}/feud/faceoff/buzz', [HostController::class, 'feudFaceoffBuzz'])->name('host.feud.faceoff.buzz');
     Route::post('/host/{gameSession}/feud/play', [HostController::class, 'feudStartPlay'])->name('host.feud.play');
     Route::post('/host/{gameSession}/feud/strike', [HostController::class, 'feudStrike'])->name('host.feud.strike');

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useSoundEffects } from '@/composables/useSoundEffects';
-import Button from '@/Components/Base/Button.vue';
 
 /* =====================================================================
    Family Feud projector board — a data-driven port of the approved mockup
@@ -122,6 +121,9 @@ interface GameState {
     // answer flashes a strike X.
     faceoff_buzz?: number;
     faceoff_strike?: number;
+    // The host armed the face-off from the round intro — fire the face-off music and
+    // light the bulbs (bright-yellow flash) while still on the matchup slide.
+    faceoff_armed?: boolean;
     // Fast Money board data (optional; see FastMoney above).
     fast_money?: FastMoney | null;
     // Family Feud: a team reached the target (300) — the recap becomes the
@@ -198,16 +200,29 @@ const blessAudio = (m: HTMLAudioElement, isPrimed?: () => boolean) => {
     }
 };
 
-// Theme slide: FF logo + team matchup shown while the theme plays, then it
-// dismisses itself when the sting ends. Fires ONCE, the moment BOTH the sound
-// check is done (audio unlocked) AND the game has started.
-const soundCheckDone = ref(false);
+// Theme slide: FF logo + team matchup, shown with the opening music the moment the
+// host starts the game. The board needs NO gesture of its own — audio is already
+// unlocked by the Entry page's "Open board" tap (same document; Inertia doesn't
+// reload), and we prime everything on mount (see onMounted). Fires ONCE, when the
+// game goes live.
 const themeSlideOpen = ref(false);
+// The opening theme has finished playing but the curtain stays up (calm) until the
+// host starts the face-off. themeFlashing drives the party bulbs ONLY while the
+// music is actually playing.
+const themeMusicDone = ref(false);
+const themeFlashing = computed(() => themeSlideOpen.value && !themeMusicDone.value && props.status === 'playing');
+// Standby: the set sits dark until the host starts the game (Start Game → 'playing').
+const isStandby = computed(() => props.status === 'lobby');
+// True when the browser blocked the theme's autoplay — no user gesture on THIS page
+// yet (a direct load / dev refresh, vs arriving via Entry's "Open board" tap). Shows
+// a small "tap for sound" hint; any tap on the board unlocks and starts it.
+const audioBlocked = ref(false);
 let themeStarted = false;
 
 const startTheme = () => {
     if (themeStarted) return;
     themeStarted = true;
+    themeMusicDone.value = false;
     const t = getTheme();
     themeSlideOpen.value = true;
     let done = false;
@@ -217,22 +232,50 @@ const startTheme = () => {
         done = true;
         if (safety) clearTimeout(safety);
         t.pause();
-        themeSlideOpen.value = false;
+        // Stop the flashing bulbs. Hold the curtain on the matchup slide only if
+        // we're still at the round intro (the normal game-open) — it then waits for
+        // the host to start the face-off (see the 'faceoff' phase watcher). If the
+        // game already moved on (a mid-round reconnect), drop it so nothing's hidden.
+        themeMusicDone.value = true;
+        if (phase.value !== 'intro') themeSlideOpen.value = false;
     };
-    // The theme plays to its natural end, which dismisses the curtain.
+    // The theme plays to its natural end, then the curtain holds for the face-off.
     t.addEventListener('ended', finish, { once: true });
     t.addEventListener('error', finish, { once: true });
     t.currentTime = 0;
     themePrimed = true;
     const p = t.play();
-    if (p) p.catch(() => finish());
+    if (p) {
+        p.then(() => { audioBlocked.value = false; }).catch(() => {
+            // Autoplay blocked — no user gesture on this page yet. Hold silent, drop
+            // the curtain back to the plain intro, prompt for a tap, and allow retry.
+            if (safety) clearTimeout(safety);
+            themeStarted = false;
+            themeMusicDone.value = true;
+            themeSlideOpen.value = false;
+            audioBlocked.value = true;
+        });
+    }
     // Safety net if the audio stalls without firing 'ended'/'error' (Intro.m4a is
     // ~15.4s; keep this comfortably past that so it never clips a healthy play).
     safety = window.setTimeout(finish, 20000);
 };
 
 const maybeStartTheme = () => {
-    if (soundCheckDone.value && props.status === 'playing') startTheme();
+    if (props.status === 'playing') startTheme();
+};
+
+// Unlock audio + start the theme if it's pending. Called on mount (rides Entry's
+// tap) and on the first interaction with the board (covers a direct load / refresh).
+const tryUnlockAndPlay = () => {
+    sounds.unlock();
+    audioBlocked.value = false;
+    if (props.status === 'playing') maybeStartTheme();
+};
+const onFirstInteraction = () => {
+    window.removeEventListener('pointerdown', onFirstInteraction);
+    window.removeEventListener('keydown', onFirstInteraction);
+    tryUnlockAndPlay();
 };
 
 // Skip Intro: cut the theme and drop the curtain immediately.
@@ -244,25 +287,9 @@ const skipTheme = () => {
     themeSlideOpen.value = false;
 };
 
-// The sound-check panel shows on load. It doubles as the browser autoplay unlock
-// (TVs block sound until a user gesture) and previews the key cues. "Done"
-// unlocks all audio, then rolls into the theme if the game has already started.
-const soundPanelOpen = ref(true);
-const startShow = () => {
-    sounds.unlock();
-    soundCheckDone.value = true;
-    soundPanelOpen.value = false;
-    if (props.status === 'playing') {
-        // Game already started — play the theme now, inside this Done gesture.
-        maybeStartTheme();
-    } else {
-        // Not started — bless the theme so the status watcher can start it later.
-        blessAudio(getTheme(), () => themePrimed);
-    }
-};
-
-// Start the theme when the admin starts the game (fires outside a gesture, hence
-// the bless above), and stop it when leaving active play.
+// Start the theme the moment the host starts the game, and stop it when leaving
+// active play. Audio was already unlocked on mount (Entry's tap), so this needs no
+// fresh gesture.
 watch(() => props.status, (s) => {
     if (s === 'playing') maybeStartTheme();
     else if (theme) { theme.pause(); theme.currentTime = 0; }
@@ -279,6 +306,18 @@ const rightTeam = computed<Team | null>(() => orderedTeams.value[1] ?? null);
 const phase = computed(() => props.gameState?.phase ?? 'question');
 const roundNumber = computed(() => props.gameState?.round_number ?? 1);
 
+// Face-off "armed" from the intro (host hit Start Face-Off): reveals the face-off
+// framing on the intro slide and fires the face-off music. No bulb strobe — the
+// bright-yellow flash belongs to the opening theme. "Show Question" then brings up
+// the board.
+const faceoffArmed = computed(() => !!props.gameState?.faceoff_armed);
+// Once the face-off sting finishes, the numbered (still question-less) board comes
+// up; it stays up through "Show Question". Set in the faceoffArmed watcher.
+const faceoffBoardShown = ref(false);
+// The face-off slide (intro + plain recap) carries the live scores under each team
+// UNTIL the host arms the face-off — then they drop and only the matchup remains.
+const faceoffSlideScores = computed(() => !(phase.value === 'intro' && faceoffArmed.value));
+
 // Fast Money spans a few phases (intro → p1 → p2 → result); the segment is the
 // reliable signal since the current question stays a fast_money one throughout.
 const isFastMoney = computed(() =>
@@ -287,14 +326,26 @@ const isFastMoney = computed(() =>
 const fmActivePlayer = computed(() => props.gameState?.fast_money?.active_player ?? 1);
 const isSteal = computed(() => phase.value === 'steal');
 
-// The board (proscenium + slots + survey) is shown during the board phases, once
-// there's a question to show and we're not in Fast Money.
+// The board (proscenium + slots) is shown during the board phases, once there's a
+// question to show and we're not in Fast Money. It ALSO comes up during the armed
+// face-off (still 'intro') once the sting has finished — numbered slots, no question
+// yet — and stays up when "Show Question" moves us into 'faceoff'.
 const boardVisible = computed(() =>
     props.status === 'playing'
     && !!props.currentQuestion
     && !isFastMoney.value
-    && ['faceoff', 'question', 'steal', 'reveal'].includes(phase.value)
+    && (
+        ['faceoff', 'question', 'steal', 'reveal'].includes(phase.value)
+        || (phase.value === 'intro' && faceoffArmed.value && faceoffBoardShown.value)
+    )
 );
+// In the face-off (the armed pre-board beat or the buzz-in phase) — used for the tag.
+const inFaceoff = computed(() =>
+    phase.value === 'faceoff' || (phase.value === 'intro' && faceoffArmed.value)
+);
+// The survey question text lands on the board only once the host hits "Show Question"
+// (phase leaves 'intro'); before that the board shows just its numbered slots.
+const questionShown = computed(() => boardVisible.value && phase.value !== 'intro');
 
 // Round multiplier: host-published if present, else the seeder-default schedule.
 const multiplier = computed(() => {
@@ -386,12 +437,38 @@ const flashStrikes = (count: number) => {
 watch(() => props.currentQuestion?.id, () => { derivedStrikes.value = 0; strikeFlash.value = 0; });
 watch(phase, (now) => { if (now === 'faceoff' || now === 'intro') { derivedStrikes.value = 0; } });
 
-// Face-off lead-in: advancing lands on the round intro ("Get Ready", before the
-// host shows the question) — sound the face-off cue there. Only on a real
-// transition into the intro, and not while the opening theme is up.
+// The host ARMS the face-off from the round intro: this is the "Start Face-Off"
+// beat. Drop the opening curtain if it's still up (so the matchup slide + the
+// bright-yellow bulb flash show on the board), and play the face-off music. The
+// board itself doesn't appear until the host then hits "Show Question" (→ faceoff).
+watch(faceoffArmed, (armed, was) => {
+    if (armed && !was && props.status === 'playing') {
+        if (themeSlideOpen.value) {
+            if (theme) { theme.pause(); theme.currentTime = 0; }
+            themeSlideOpen.value = false;
+        }
+        // Play the face-off sting; when it finishes, bring up the numbered (still
+        // question-less) board. Fall back to a timer if 'ended' never fires (e.g.
+        // audio blocked), so the board still appears.
+        faceoffBoardShown.value = false;
+        const reveal = () => { faceoffBoardShown.value = true; };
+        const el = sounds.play('faceOff');
+        if (el) {
+            el.addEventListener('ended', reveal, { once: true });
+            window.setTimeout(reveal, 7000);
+        } else {
+            window.setTimeout(reveal, 1200);
+        }
+    } else if (!armed) {
+        faceoffBoardShown.value = false;
+    }
+});
+// Show Question (intro/arm → 'faceoff'): the board comes up for the buzz-in. The
+// music already fired on the arm; just make sure any lingering curtain is gone.
 watch(phase, (now, prev) => {
-    if (now === 'intro' && !!prev && prev !== 'intro' && props.status === 'playing' && !themeSlideOpen.value) {
-        sounds.play('faceOff');
+    if (now === 'faceoff' && prev !== 'faceoff' && props.status === 'playing' && themeSlideOpen.value) {
+        if (theme) { theme.pause(); theme.currentTime = 0; }
+        themeSlideOpen.value = false;
     }
 });
 
@@ -621,6 +698,18 @@ watch(fmWon, (won, prev) => {
 });
 
 onMounted(() => {
+    // No gesture needed on the board: the Entry page's "Open board" tap already gave
+    // this document sticky user-activation (Inertia doesn't reload), so unlock the
+    // effect clips and prime the theme now. The music then rolls on its own when the
+    // host starts the game. (Direct-to-board without Entry simply stays silent.)
+    sounds.unlock();
+    blessAudio(getTheme(), () => themePrimed);
+    // If the board opens after the game is already live, start the theme immediately.
+    if (props.status === 'playing') maybeStartTheme();
+    // Fallback for a direct load / refresh (no Entry tap): the first interaction with
+    // the board unlocks audio and rolls any pending theme.
+    window.addEventListener('pointerdown', onFirstInteraction);
+    window.addEventListener('keydown', onFirstInteraction);
     computeFmRemaining();
     fmTimerInterval = window.setInterval(computeFmRemaining, 200);
 });
@@ -628,6 +717,8 @@ onMounted(() => {
 onUnmounted(() => {
     if (strikeFlashTimer) clearTimeout(strikeFlashTimer);
     if (fmTimerInterval) clearInterval(fmTimerInterval);
+    window.removeEventListener('pointerdown', onFirstInteraction);
+    window.removeEventListener('keydown', onFirstInteraction);
     if (theme) { theme.pause(); theme = null; }
 });
 </script>
@@ -636,7 +727,7 @@ onUnmounted(() => {
     <!-- Family Feud projector board — a replica of the real show's gameboard.
          Colors are intentionally off the Keeler palette (see the scoped styles):
          TV-blue lit set, glossy blue answer slots, gold proscenium, red strikes. -->
-    <div class="ff-board">
+    <div class="ff-board" :class="{ 'ff-standby': isStandby, 'ff-theme-live': themeFlashing }">
         <!-- drifting light wash over the bulb wall -->
         <div class="ff-wallglow"></div>
 
@@ -695,8 +786,9 @@ onUnmounted(() => {
                     <div class="ff-roundtag">
                         <span>Round {{ roundNumber }}</span>
                         <span v-if="multLabel" class="ff-mult">{{ multLabel }}</span>
+                        <span v-if="inFaceoff" class="ff-facetag">Face-Off</span>
                     </div>
-                    <div class="ff-survey"><span>{{ currentQuestion?.question_text }}</span></div>
+                    <div v-if="questionShown" class="ff-survey"><span>{{ currentQuestion?.question_text }}</span></div>
                 </div>
 
                 <!-- the answer board -->
@@ -823,38 +915,37 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <!-- ===================== INTRO (round about to start) ===================== -->
-            <div v-else-if="phase === 'intro'" class="ff-center show">
-                <div class="ff-eyebrow">Round {{ roundNumber }}</div>
-                <template v-if="stealTeam">
-                    <div class="ff-headline" :style="{ color: stealTeam.color }">{{ stealTeam.name }}</div>
-                    <div class="ff-subhead">Get Ready</div>
-                </template>
-                <div v-else class="ff-subhead">Get Ready</div>
-            </div>
-
-            <!-- ===================== RECAP (end-of-round scores) ===================== -->
-            <div v-else-if="phase === 'recap'" class="ff-center show">
-                <!-- A team hit the target → crown the game winner (Fast Money is next,
-                     as a bonus). Otherwise just the end-of-round scores. No confetti
-                     here — that's reserved for a Fast Money win. -->
-                <template v-if="gameWon">
-                    <div class="ff-eyebrow">Game Winner</div>
-                    <div v-if="winningTeam" class="ff-headline" :style="{ color: winningTeam.color }">{{ winningTeam.name }}</div>
-                    <div class="ff-subhead">Wins the Game!</div>
-                </template>
-                <div v-else class="ff-eyebrow">End of Round {{ roundNumber }} &middot; Scores</div>
+            <!-- ===================== GAME WINNER (target reached at recap) ===================== -->
+            <div v-else-if="gameWon" class="ff-center show">
+                <div class="ff-eyebrow">Game Winner</div>
+                <div v-if="winningTeam" class="ff-headline" :style="{ color: winningTeam.color }">{{ winningTeam.name }}</div>
+                <div class="ff-subhead">Wins the Game!</div>
                 <div class="ff-chips">
-                    <div
-                        v-for="team in orderedTeams"
-                        :key="team.id"
-                        class="ff-chip"
-                        :style="{ '--tc': team.color }"
-                    >
+                    <div v-for="team in orderedTeams" :key="team.id" class="ff-chip" :style="{ '--tc': team.color }">
                         <span class="ff-cn" :style="{ color: team.color }">{{ team.name }}</span>
                         <span class="ff-cp">{{ team.total_score }}</span>
                     </div>
                 </div>
+            </div>
+
+            <!-- ===================== FACE-OFF SLIDE (round intro + plain recap) ==========
+                 One shared look — "Round N · Face-Off", the matchup, and "One Player
+                 From Each Team" — with the live scores UNDER each team until the host
+                 arms the face-off (Start Face-Off), when the scores drop and the sting
+                 plays. So recap → Next Round → Start Face-Off is one continuous slide;
+                 arming just removes the scores, then the board comes up. -->
+            <div v-else-if="phase === 'intro' || phase === 'recap'" class="ff-center show">
+                <div class="ff-eyebrow">Round {{ roundNumber }} &middot; Face-Off</div>
+                <div v-if="orderedTeams.length" class="ff-matchup">
+                    <template v-for="(team, ti) in orderedTeams" :key="team.id">
+                        <span v-if="ti > 0" class="ff-vs">vs</span>
+                        <span class="ff-mwrap">
+                            <span class="ff-m" :style="{ color: team.color }">{{ team.name }}</span>
+                            <span v-if="faceoffSlideScores" class="ff-mscore">{{ team.total_score }}</span>
+                        </span>
+                    </template>
+                </div>
+                <div class="ff-subhead">One Player From Each Team</div>
             </div>
 
             <!-- Fallback: a phase with no question yet -->
@@ -911,21 +1002,11 @@ onUnmounted(() => {
         </div>
         <button v-if="themeSlideOpen" type="button" class="ff-skip" @click="skipTheme">Skip Intro &rarr;</button>
 
-        <!-- Sound check + one-time audio unlock. TVs/browsers block sound until a
-             user gesture, so this shows on load: preview the cues, then Done
-             enables audio and dismisses it. The card uses the Keeler palette
-             (keeler-app scope); the rest of the board is intentionally off-palette. -->
-        <div v-if="soundPanelOpen" class="ff-soundcheck keeler-app">
-            <div class="ff-soundcheck-card">
-                <p class="ff-soundcheck-title">Sound Check</p>
-                <p class="ff-soundcheck-hint">Tap a sound to preview it, then press Done.</p>
-                <div class="ff-soundcheck-row">
-                    <Button variant="success" size="md" @click="sounds.play('answerReveal')">&#9654;&nbsp; Answer Reveal</Button>
-                    <Button variant="danger" size="md" @click="sounds.play('strike')">&#9654;&nbsp; Strike</Button>
-                </div>
-                <Button variant="accent" size="md" @click="startShow">Done</Button>
-            </div>
-        </div>
+        <!-- Only when the browser actually blocked autoplay (a direct load / refresh
+             with no gesture): a subtle prompt. Any tap on the board also unlocks. -->
+        <button v-if="audioBlocked && status === 'playing'" type="button" class="ff-soundhint" @click="tryUnlockAndPlay">
+            &#128266;&nbsp; Tap for sound
+        </button>
     </div>
 </template>
 
@@ -989,6 +1070,32 @@ onUnmounted(() => {
     animation: ff-drift 14s ease-in-out infinite alternate;
 }
 @keyframes ff-drift { 0% { transform: translate3d(-1%, 0, 0); } 100% { transform: translate3d(1%, 1%, 0); } }
+
+/* Standby: before the host starts the game the set sits dark — bulbs dimmed way
+   down, wall glow and floor wash off — so nothing lights until Start Game. */
+.ff-standby::before { animation: none; opacity: .1; filter: brightness(.5) saturate(.6); }
+.ff-standby::after { opacity: .12; }
+.ff-standby .ff-wallglow { opacity: 0; }
+
+/* Start Game → opening theme: the whole bulb wall blazes BRIGHT YELLOW and strobes
+   hard while the music plays, then settles back to the calm twinkle the instant the
+   music stops (themeFlashing → false). */
+.ff-theme-live::before {
+    animation: ff-introblitz .26s steps(2, jump-none) infinite;
+}
+@keyframes ff-introblitz {
+    0%   { opacity: .45; filter: brightness(1.2) saturate(2.4) hue-rotate(200deg); }
+    50%  { opacity: 1;   filter: brightness(2.8) saturate(3)   hue-rotate(200deg); }
+    100% { opacity: .45; filter: brightness(1.2) saturate(2.4) hue-rotate(200deg); }
+}
+.ff-theme-live .ff-wallglow {
+    background: radial-gradient(62% 52% at 50% 44%, rgba(255, 215, 60, .55), transparent 74%);
+    animation: ff-introglow .26s steps(2, jump-none) infinite;
+}
+@keyframes ff-introglow {
+    0%, 100% { opacity: .35; }
+    50%      { opacity: 1; }
+}
 
 /* gold proscenium */
 .ff-svg {
@@ -1063,6 +1170,18 @@ onUnmounted(() => {
     letter-spacing: .04em;
     box-shadow: 0 0 16px rgba(255, 210, 63, .6);
 }
+/* Face-off marker on the round tag while both teams square off. */
+.ff-facetag {
+    color: #fff;
+    background: linear-gradient(180deg, #ff6a3d, #ef2b1d);
+    padding: .12em .7em;
+    border-radius: 999px;
+    font-weight: 900;
+    letter-spacing: .06em;
+    box-shadow: 0 0 16px rgba(239, 43, 29, .55);
+    animation: ff-facetag-pulse 1.1s ease-in-out infinite;
+}
+@keyframes ff-facetag-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 .ff-survey {
     width: 100%;
     text-align: center;
@@ -1354,6 +1473,22 @@ onUnmounted(() => {
     font-size: clamp(26px, 3.8vw, 66px);
     text-shadow: 0 0 16px rgba(120, 190, 255, .4), 0 2px 6px rgba(0, 0, 0, .6);
 }
+/* A team column in the face-off matchup: name over its live score (the score drops
+   when the host arms the face-off). */
+.ff-mwrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .1em;
+}
+.ff-mscore {
+    color: #fff;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    font-size: clamp(24px, 3.4vw, 58px);
+    text-shadow: 0 0 16px rgba(150, 200, 255, .5), 0 2px 6px rgba(0, 0, 0, .6);
+}
 .ff-vs {
     color: var(--ink);
     opacity: .7;
@@ -1589,53 +1724,33 @@ onUnmounted(() => {
 }
 .ff-skip:hover { background: rgba(20, 34, 94, .9); transform: scale(1.04); }
 
-/* Sound-check card, tucked top-left (no full-screen scrim) so the board stays
-   visible. The card uses Keeler palette tokens (keeler-app scope on the wrapper). */
-.ff-soundcheck {
+/* "Tap for sound" — subtle bottom-center prompt shown only when autoplay was
+   blocked (no gesture on this page). Any tap on the board unlocks anyway. */
+.ff-soundhint {
     position: absolute;
-    top: 3%;
-    left: 2.4%;
+    left: 50%;
+    bottom: 5%;
+    transform: translateX(-50%);
     z-index: 40;
-    min-height: 0;
-    background: transparent;
-}
-.ff-soundcheck-card {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-    width: min(320px, 36vw);
-    padding: 16px 18px;
-    border-radius: 16px;
-    background: rgb(var(--color-surface-elevated));
-    border: 1px solid rgb(var(--color-border-strong));
-    box-shadow: 0 16px 40px rgba(0, 0, 0, .55);
-}
-.ff-soundcheck-title {
-    color: rgb(var(--color-text));
     font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    font-size: clamp(16px, 1.6vw, 22px);
+    letter-spacing: .04em;
+    font-size: clamp(13px, 1.3vw, 20px);
+    color: #eaf1ff;
+    padding: .5em 1.2em;
+    border-radius: 999px;
+    background: rgba(6, 12, 40, .72);
+    border: 2px solid var(--led);
+    box-shadow: 0 0 22px rgba(80, 130, 255, .45), inset 0 0 12px rgba(0, 0, 0, .4);
+    cursor: pointer;
+    animation: ff-facetag-pulse 1.4s ease-in-out infinite;
 }
-.ff-soundcheck-hint {
-    margin: 0 0 2px;
-    color: rgb(var(--color-text-muted));
-    font-weight: 600;
-    letter-spacing: .01em;
-    font-size: clamp(11px, 1vw, 14px);
-}
-.ff-soundcheck-row {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 100%;
-}
-.ff-soundcheck-card :deep(button) { width: 100%; justify-content: center; }
 
 @media (prefers-reduced-motion: reduce) {
     .ff-inner { transition: none; }
-    .ff-stealbar, .ff-scorewrap.ctrl .ff-scorebox { animation: none; }
+    .ff-stealbar, .ff-scorewrap.ctrl .ff-scorebox, .ff-facetag { animation: none; }
     .ff-confetti-piece { animation: none; display: none; }
+    /* No strobing bulbs; hold a steady bright-yellow wall during the opening theme. */
+    .ff-theme-live::before { animation: none; opacity: 1; filter: brightness(1.8) saturate(2.4) hue-rotate(200deg); }
+    .ff-theme-live .ff-wallglow { animation: none; opacity: .8; }
 }
 </style>
