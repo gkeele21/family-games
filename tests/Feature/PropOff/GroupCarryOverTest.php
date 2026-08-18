@@ -25,9 +25,16 @@ class GroupCarryOverTest extends TestCase
     /** Last year's group with one returning player, and this year's successor. */
     private function twoYears(): array
     {
+        // Names are pinned on every factory-made user here: UserFactory uses
+        // fake()->firstName() and will occasionally produce "Hazel" by itself,
+        // which would break the assertions that count by name.
+        $owner = User::factory()->create(['first_name' => 'Fixture', 'last_name' => 'Owner']);
+
         $lastYear = Group::factory()->create([
-            'name'     => "Bert's Super Bowl Bash",
-            'event_id' => Event::factory()->create([
+            'name'       => "Bert's Super Bowl Bash",
+            'created_by' => $owner->id,
+            'event_id'   => Event::factory()->create([
+                'created_by' => $owner->id,
                 'name'       => 'Super Bowl LX',
                 'event_date' => now()->subYear(),
             ])->id,
@@ -42,8 +49,10 @@ class GroupCarryOverTest extends TestCase
 
         $thisYear = Group::factory()->create([
             'name'              => "Bert's Super Bowl Bash",
+            'created_by'        => $owner->id,
             'previous_group_id' => $lastYear->id,
             'event_id'          => Event::factory()->create([
+                'created_by' => $owner->id,
                 'name'       => 'Super Bowl LXI',
                 'event_date' => now(),
             ])->id,
@@ -114,7 +123,7 @@ class GroupCarryOverTest extends TestCase
     public function test_a_claim_for_someone_outside_the_lineage_is_refused(): void
     {
         [, $thisYear, $invitation] = $this->twoYears();
-        $stranger = User::factory()->create(['first_name' => 'Stranger', 'role' => 'guest']);
+        $stranger = User::factory()->create(['first_name' => 'Stranger', 'last_name' => 'Danger', 'role' => 'guest']);
 
         // A forged id must not hand over another account; it falls through to
         // the normal path and creates a distinct person instead.
@@ -136,5 +145,39 @@ class GroupCarryOverTest extends TestCase
 
         $chain = $thisYear->fresh()->lineage();
         $this->assertCount(2, $chain);
+    }
+
+    public function test_the_code_join_flow_also_recognises_across_the_year(): void
+    {
+        [, $thisYear, , $returning] = $this->twoYears();
+
+        // The code-join entry point carried its own narrower copy of this logic
+        // and only ever searched the current group. Both entry points now share
+        // ParticipantResolver, so both reach back through the lineage.
+        $this->post(route('propoff.play.join.process', ['code' => $thisYear->code]), [
+            'name' => 'Hazel Reed',
+        ])->assertSessionHas('step', 'verify');
+
+        $entry = session('verifyEntry');
+        $this->assertTrue($entry['from_previous_group']);
+        $this->assertSame($returning->id, $entry['user_id']);
+        $this->assertSame(1, User::where('first_name', 'Hazel')->count());
+    }
+
+    public function test_the_code_join_flow_attaches_the_claimed_person_to_the_new_group(): void
+    {
+        [, $thisYear, , $returning] = $this->twoYears();
+
+        $this->post(route('propoff.play.join.process', ['code' => $thisYear->code]), [
+            'name'     => 'Hazel Reed',
+            'verified' => true,
+        ])->assertRedirect();
+
+        // The verified branch only logged them in — correct while a match could
+        // only come from the current group, since they were already a member.
+        // Widening the search to the lineage makes the attach necessary.
+        $this->assertTrue($thisYear->fresh()->users()->where('users.id', $returning->id)->exists());
+        $this->assertSame($returning->id, auth()->id());
+        $this->assertSame(1, User::where('first_name', 'Hazel')->count());
     }
 }

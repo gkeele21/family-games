@@ -24,10 +24,19 @@ class GuestDeduplicationTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * Names are pinned on every factory-made user throughout this file.
+     * UserFactory uses fake()->firstName(), which will occasionally produce
+     * "Ben" or "Megan" on its own and break assertions that count by name.
+     */
     private function invitation(): EventInvitation
     {
-        $event = Event::factory()->create();
-        $group = Group::factory()->create(['event_id' => $event->id]);
+        $owner = User::factory()->create(['first_name' => 'Fixture', 'last_name' => 'Owner']);
+        $event = Event::factory()->create(['created_by' => $owner->id]);
+        $group = Group::factory()->create([
+            'event_id'   => $event->id,
+            'created_by' => $owner->id,
+        ]);
 
         return EventInvitation::factory()->create([
             'event_id'  => $event->id,
@@ -149,7 +158,7 @@ class GuestDeduplicationTest extends TestCase
     {
         $invitation = $this->invitation();
         $group = $invitation->group;
-        $captain = User::factory()->create(['role' => 'user']);
+        $captain = User::factory()->create(['first_name' => 'Fixture', 'last_name' => 'Captain', 'role' => 'user']);
         $group->addCaptain($captain);
 
         $this->actingAs($captain)

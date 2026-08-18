@@ -3,7 +3,9 @@
 namespace App\Services\PropOff;
 
 use App\Models\PropOff\Group;
+use App\Models\PropOff\Leaderboard;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
@@ -130,5 +132,46 @@ class ParticipantResolver
             'previous_group_name' => $isPriorYear ? $group->name : null,
             'previous_event_name' => $isPriorYear ? $group->event?->name : null,
         ];
+    }
+
+    /**
+     * Undo a wrong claim: give this member a fresh identity for THIS group only.
+     *
+     * The claim step deliberately trades a little risk for a lot of convenience
+     * — it offers a name match back and lets the person confirm it. With three
+     * different Megans in the data, somebody will eventually press "yes, that's
+     * me" on someone else's entry, and until now there was no way back.
+     *
+     * Splitting is scoped to one group, which is what makes it safe. Entries and
+     * leaderboard rows are per (user, group), and answers hang off the entry, so
+     * moving this group's rows to a new person leaves every other year's history
+     * exactly where it was — including the original person's.
+     *
+     * Returns the newly separated user.
+     */
+    public function separateFromGroup(User $user, Group $group): User
+    {
+        return DB::transaction(function () use ($user, $group) {
+            $pivot = $group->users()->where('users.id', $user->id)->first()?->pivot;
+
+            $fresh = $this->createGuest($user->name);
+
+            // Move membership, keeping when they joined.
+            $group->users()->detach($user->id);
+            $group->users()->attach($fresh->id, [
+                'joined_at'  => $pivot?->joined_at ?? now(),
+                'is_captain' => false,
+            ]);
+
+            // This group's entry — and, through it, every answer they gave.
+            $group->entries()->where('user_id', $user->id)->update(['user_id' => $fresh->id]);
+
+            // This group's standing.
+            Leaderboard::where('group_id', $group->id)
+                ->where('user_id', $user->id)
+                ->update(['user_id' => $fresh->id]);
+
+            return $fresh;
+        });
     }
 }

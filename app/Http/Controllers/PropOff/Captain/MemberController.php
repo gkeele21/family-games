@@ -167,4 +167,36 @@ class MemberController extends Controller
 
         return back()->with('success', "Guest {$guest->name} added successfully!");
     }
+
+    /**
+     * Separate a member who claimed the wrong entry.
+     *
+     * The "is this you?" step lets someone confirm a name match, which is what
+     * makes returning painless — but with several people sharing a name, an
+     * occasional wrong press is inevitable. This gives the captain the way back:
+     * the member gets a fresh identity for this group, taking this group's entry
+     * and answers with them, and the original person keeps everything else,
+     * including their previous years.
+     */
+    public function separate(Request $request, Group $group, User $user)
+    {
+        // A captain splitting themselves would strip the group's own captaincy.
+        // Transferring the role first is the honest order of operations.
+        if ($group->users()->where('users.id', $user->id)->wherePivot('is_captain', true)->exists()) {
+            return back()->withErrors([
+                'member' => 'Promote another captain before separating this one.',
+            ]);
+        }
+
+        if (! $group->users()->where('users.id', $user->id)->exists()) {
+            return back()->withErrors(['member' => 'That person is not in this group.']);
+        }
+
+        $this->resolver->separateFromGroup($user, $group);
+
+        return back()->with(
+            'success',
+            "{$user->name} was separated — their answers here now belong to a new person, and the original entry keeps its history.",
+        );
+    }
 }
