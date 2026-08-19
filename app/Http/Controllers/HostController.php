@@ -1395,6 +1395,10 @@ class HostController extends Controller
                 $stateData['faceoff_armed'] = false;
                 $stateData['faceoff'] = null;
                 $stateData['strikes'] = 0;
+                // Drop the prior round's win / decision banners so they can't linger
+                // into the new round.
+                $stateData['feud_round_winner'] = null;
+                $stateData['feud_decision'] = null;
             }
 
             $state->update([
@@ -1950,16 +1954,33 @@ class HostController extends Controller
      * guessing the board. Strikes reset for the fresh turn; the pool carries the
      * face-off reveal(s) already on the board.
      */
-    public function feudStartPlay(GameSession $gameSession)
+    public function feudStartPlay(Request $request, GameSession $gameSession)
     {
         if ($gameSession->host_user_id !== auth()->id()) {
             abort(403);
         }
 
+        $validated = $request->validate([
+            'decision' => ['nullable', 'in:play,pass'],
+            'decision_team_id' => ['nullable', 'integer'],
+        ]);
+
         $state = $gameSession->gameState;
         $currentQuestion = $state?->currentQuestion;
         if (!$currentQuestion) {
             return response()->json(['error' => 'No active question'], 400);
+        }
+
+        // The face-off winner's Play/Pass call — published so the board can flash a
+        // "TEAM — PLAY / PASS" banner. Monotonic seq so the display shows it once
+        // (a reconnect doesn't replay it). Cleared on the next face-off / round.
+        if (!empty($validated['decision']) && !empty($validated['decision_team_id'])) {
+            $seq = (int) (($state->getStateValue('feud_decision')['seq'] ?? 0)) + 1;
+            $state->setStateValue('feud_decision', [
+                'team_id' => (int) $validated['decision_team_id'],
+                'choice' => $validated['decision'],
+                'seq' => $seq,
+            ]);
         }
 
         // Keep the chosen controlling team as the active side so its reveals attach
@@ -2236,6 +2257,15 @@ class HostController extends Controller
         if ($winner && $amount > 0) {
             $winner->addScore($amount);
             $state->setStateValue($poolKey, ['team_id' => $winner->id, 'amount' => $amount]);
+            // Publish the round winner so the board flashes a "TEAM WINS THE ROUND!"
+            // banner. Monotonic seq → shown once; cleared when the next turn's play
+            // begins (feudStartPlay) or the round advances.
+            $seq = (int) (($state->getStateValue('feud_round_winner')['seq'] ?? 0)) + 1;
+            $state->setStateValue('feud_round_winner', [
+                'team_id' => $winner->id,
+                'amount' => $amount,
+                'seq' => $seq,
+            ]);
         }
 
         // Where to next? A clear means the board is already full → straight to the

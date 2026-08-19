@@ -198,6 +198,16 @@ class DisplayController extends Controller
                 // The host "armed" the face-off from the intro — the display fires the
                 // face-off music + lights the bulbs while still on the matchup slide.
                 'faceoff_armed' => $isFamilyFeud ? (bool) $state?->getStateValue('faceoff_armed', false) : null,
+                // The face-off winner who's now deciding Play/Pass — the board shows a
+                // "{Team} — Play or Pass?" prompt while they choose (phase 'faceoff').
+                'feud_decider' => $isFamilyFeud && is_array($state?->getStateValue('faceoff'))
+                    ? ($state->getStateValue('faceoff')['decider'] ?? null)
+                    : null,
+                // Face-off winner's Play/Pass call — the board flashes a bottom banner.
+                'feud_decision' => $isFamilyFeud ? $state?->getStateValue('feud_decision') : null,
+                // The team that won the round's pool — the board flashes a bottom
+                // "WINS THE ROUND!" banner until the leftover answers are revealed.
+                'feud_round_winner' => $isFamilyFeud ? $state?->getStateValue('feud_round_winner') : null,
                 'round_multiplier' => $isFamilyFeud && $currentQuestion
                     ? $this->feudRoundMultiplier($gameSession, $currentQuestion)
                     : null,

@@ -129,6 +129,13 @@ interface GameState {
     // Family Feud: a team reached the target (300) — the recap becomes the
     // "Team X Wins the game" celebration before Fast Money.
     feud_target_reached?: boolean;
+    // The face-off winner currently deciding Play/Pass (phase 'faceoff') — drives the
+    // "{Team} — Play or Pass?" prompt shown while they choose.
+    feud_decider?: number | null;
+    // Face-off winner's Play/Pass call — a transient bottom banner. Monotonic seq.
+    feud_decision?: { team_id: number; choice: 'play' | 'pass'; seq: number } | null;
+    // The team that won the round's pool — a bottom "Wins the Round!" banner.
+    feud_round_winner?: { team_id: number; amount: number; seq: number } | null;
 }
 
 interface CurrentQuestion {
@@ -306,6 +313,14 @@ const rightTeam = computed<Team | null>(() => orderedTeams.value[1] ?? null);
 const phase = computed(() => props.gameState?.phase ?? 'question');
 const roundNumber = computed(() => props.gameState?.round_number ?? 1);
 
+// A team reached the target (300): the round turns into the "Team X Wins the game"
+// celebration. This fires the instant the pool award crosses the target — at the
+// recap (a clear) OR during the leftover-reveal beat (a steal), so the win slide
+// shows as soon as the points are assigned, not after the host reveals leftovers.
+const gameWon = computed(() =>
+    !!props.gameState?.feud_target_reached && (phase.value === 'recap' || phase.value === 'reveal')
+);
+
 // Face-off "armed" from the intro (host hit Start Face-Off): reveals the face-off
 // framing on the intro slide and fires the face-off music. No bulb strobe — the
 // bright-yellow flash belongs to the opening theme. "Show Question" then brings up
@@ -334,6 +349,7 @@ const boardVisible = computed(() =>
     props.status === 'playing'
     && !!props.currentQuestion
     && !isFastMoney.value
+    && !gameWon.value
     && (
         ['faceoff', 'question', 'steal', 'reveal'].includes(phase.value)
         || (phase.value === 'intro' && faceoffArmed.value && faceoffBoardShown.value)
@@ -537,6 +553,90 @@ watch(() => props.currentQuestion?.id, (qid) => {
     prevRevealed = new Set(revealedIds.value);
 });
 
+// --- Bottom banners: Play/Pass decision + round winner -----------------------
+const teamById = (id?: number | null): Team | null =>
+    id ? props.teams.find((t) => t.id === id) ?? null : null;
+
+// Play or Pass? — the deciding (face-off winner) team is prompted at the bottom of
+// the board WHILE they choose (phase 'faceoff', a decider set). Once the host
+// records the call, the transient decisionBanner below replaces it.
+const feudDeciderTeam = computed(() => teamById(props.gameState?.feud_decider));
+const showDecisionPrompt = computed(() => phase.value === 'faceoff' && !!feudDeciderTeam.value);
+
+// Play/Pass: the face-off winner's call. Shown just under that team's name on the
+// board — "Play or Pass" while deciding, then the chosen "Play"/"Pass" for a few
+// seconds after. Monotonic seq → shown once; the first value on load/reconnect is
+// adopted silently.
+const decisionBanner = ref<{ team: Team | null; choice: 'play' | 'pass' } | null>(null);
+// One consistent status line in white under a team's name on the board. Covers the
+// whole round: the Play/Pass call (prompt → chosen), the steal chance, and the round
+// winner — all in the same spot instead of separate top/bottom banners.
+const sideStatusLabel = (team: Team | null): string => {
+    if (!team) return '';
+    if (decisionBanner.value?.team?.id === team.id) return decisionBanner.value.choice === 'play' ? 'Play' : 'Pass';
+    if (showDecisionPrompt.value && feudDeciderTeam.value?.id === team.id) return 'Play or Pass';
+    if (isSteal.value && stealTeam.value?.id === team.id) return 'Chance to Steal';
+    if (showRoundWinBanner.value && roundWinTeam.value?.id === team.id) return 'Winner!';
+    return '';
+};
+let decisionTimer: number | null = null;
+// seq is absent (null) until the first decision, so treat missing as 0 — the first
+// real bump (0 → 1) still fires. A fresh page mid-game captures the current seq as
+// its baseline (watch isn't immediate), so a reconnect doesn't replay a stale one.
+watch(() => props.gameState?.feud_decision?.seq ?? 0, (now, prev) => {
+    if (now <= prev) return;
+    const d = props.gameState?.feud_decision;
+    if (!d) return;
+    decisionBanner.value = { team: teamById(d.team_id), choice: d.choice };
+    if (decisionTimer) clearTimeout(decisionTimer);
+    decisionTimer = window.setTimeout(() => { decisionBanner.value = null; }, 4500);
+});
+
+// Round winner: once the pool is awarded, flash "TEAM WINS THE ROUND!" at the
+// bottom through the post-resolve beats. It clears as soon as the host reveals a
+// LEFTOVER answer (reveal phase) — tracked against the reveal count at award time
+// so the steal answer that triggered the award doesn't clear it immediately.
+const roundWinBanner = ref(false);
+const roundWinRevealBaseline = ref(0);
+let winMusicTimer: number | null = null;
+// The winner sting plays ONCE per round (latched). Timing keyed on how the pool
+// resolved:
+//   • Steal (→ 'reveal', board stays up): wait ~1s so the sting lands a beat AFTER
+//     the steal's reveal/strike cue instead of stacking on it.
+//   • Sweep (→ 'recap' slide): play it IN SYNC with the transition — the final
+//     reveal was already ~2s ago, so there's nothing to stack on and no reason to lag.
+let winMusicPlayed = false;
+const playRoundWinMusic = (delay: number) => {
+    if (winMusicPlayed) return;
+    winMusicPlayed = true;
+    if (winMusicTimer) clearTimeout(winMusicTimer);
+    winMusicTimer = window.setTimeout(() => { sounds.play('win'); }, delay);
+};
+watch(() => props.gameState?.feud_round_winner?.seq ?? 0, (now, prev) => {
+    if (now <= prev) return;
+    roundWinBanner.value = true;
+    roundWinRevealBaseline.value = revealedIds.value.length;
+    playRoundWinMusic(phase.value === 'reveal' ? 1000 : 0);
+});
+watch(() => revealedIds.value.length, (n) => {
+    if (roundWinBanner.value && phase.value === 'reveal' && n > roundWinRevealBaseline.value) {
+        roundWinBanner.value = false;
+    }
+});
+const roundWinTeam = computed(() => teamById(props.gameState?.feud_round_winner?.team_id));
+const showRoundWinBanner = computed(() =>
+    roundWinBanner.value && !!roundWinTeam.value && !gameWon.value
+    && (phase.value === 'reveal' || phase.value === 'recap')
+);
+// A question change ends both banners, re-arms the winner sting for the new round,
+// and cancels any pending one.
+watch(() => props.currentQuestion?.id, () => {
+    roundWinBanner.value = false;
+    decisionBanner.value = null;
+    winMusicPlayed = false;
+    if (winMusicTimer) { clearTimeout(winMusicTimer); winMusicTimer = null; }
+});
+
 // --- Question-shown sound ----------------------------------------------------
 // The intro sting fires with the start curtain (above). The board appearing on
 // face-off gets the strike-library... nothing extra: reveals carry the audio.
@@ -674,11 +774,6 @@ const winningTeam = computed<Team | null>(() => {
     )[0];
 });
 
-// A team reached the target (300): the round recap turns into the "Team X Wins
-// the game" celebration (score chips, no confetti — that's saved for a Fast
-// Money win), mirroring the America Says crown-the-leader beat before its final.
-const gameWon = computed(() => phase.value === 'recap' && !!props.gameState?.feud_target_reached);
-
 // Confetti rains only on a Fast Money win (Feud's "pass the final" moment). Built
 // once so the pieces don't reshuffle on every poll; festive gold/red/blue.
 const CONFETTI_COLORS = ['#ffd23f', '#ef2b1d', '#2a6df4', '#eaf1ff', '#59d0ff'];
@@ -693,8 +788,11 @@ const confettiPieces = Array.from({ length: 60 }, (_, i) => ({
 }));
 const fmWon = computed(() => phase.value === 'fast_money_result' && fmResult.value === 'win');
 // The winner sting on a Fast Money win (its own clip, cut from the intro's tail).
-watch(fmWon, (won, prev) => {
-    if (won && !prev) sounds.play('win');
+// Latched so it plays ONCE — when the host pops back to reveal leftover answers and
+// then returns to the result slide, we don't re-fire the music/celebration cue.
+let fmWinPlayed = false;
+watch(fmWon, (won) => {
+    if (won && !fmWinPlayed) { fmWinPlayed = true; sounds.play('win'); }
 });
 
 onMounted(() => {
@@ -716,6 +814,8 @@ onMounted(() => {
 
 onUnmounted(() => {
     if (strikeFlashTimer) clearTimeout(strikeFlashTimer);
+    if (decisionTimer) clearTimeout(decisionTimer);
+    if (winMusicTimer) clearTimeout(winMusicTimer);
     if (fmTimerInterval) clearInterval(fmTimerInterval);
     window.removeEventListener('pointerdown', onFirstInteraction);
     window.removeEventListener('keydown', onFirstInteraction);
@@ -746,10 +846,12 @@ onUnmounted(() => {
                     <stop offset=".5" stop-color="#eab234" />
                     <stop offset="1" stop-color="#dda328" />
                 </linearGradient>
-                <pattern id="ffdots" width="12" height="12" patternUnits="userSpaceOnUse">
-                    <rect width="12" height="12" fill="#1a5fd0" />
-                    <circle cx="3" cy="3" r="1.3" fill="#a8d6ff" opacity=".85" />
-                </pattern>
+                <!-- clean glossy blue for the score boxes (no bulb dots) -->
+                <linearGradient id="ffscoreblue" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#5fb8ff" />
+                    <stop offset=".5" stop-color="#2b86f0" />
+                    <stop offset="1" stop-color="#1560d6" />
+                </linearGradient>
                 <path
                     id="ffring"
                     fill="none"
@@ -765,16 +867,18 @@ onUnmounted(() => {
             <!-- left score pod -->
             <g class="ff-scorewrap" :class="{ ctrl: leftTeam && holderId === leftTeam.id }"
                :style="leftTeam ? { '--tc': leftTeam.color } : undefined">
-                <rect class="ff-scorebox" x="42" y="376" width="92" height="128" rx="9" fill="url(#ffdots)" stroke="#0f3f9e" stroke-width="3" />
+                <rect class="ff-scorebox" x="42" y="376" width="92" height="128" rx="9" fill="url(#ffscoreblue)" stroke="#0f3f9e" stroke-width="3" />
                 <text class="ff-score" x="88" y="440" text-anchor="middle" dominant-baseline="central">{{ leftTeam?.total_score ?? 0 }}</text>
                 <text class="ff-name" x="6" y="668" text-anchor="start" :style="leftTeam ? { fill: leftTeam.color } : undefined">{{ leftTeam?.name ?? '' }}</text>
+                <text v-if="sideStatusLabel(leftTeam)" class="ff-pp" x="6" y="708" text-anchor="start">{{ sideStatusLabel(leftTeam) }}</text>
             </g>
             <!-- right score pod -->
             <g class="ff-scorewrap" :class="{ ctrl: rightTeam && holderId === rightTeam.id }"
                :style="rightTeam ? { '--tc': rightTeam.color } : undefined">
-                <rect class="ff-scorebox" x="1486" y="376" width="92" height="128" rx="9" fill="url(#ffdots)" stroke="#0f3f9e" stroke-width="3" />
+                <rect class="ff-scorebox" x="1486" y="376" width="92" height="128" rx="9" fill="url(#ffscoreblue)" stroke="#0f3f9e" stroke-width="3" />
                 <text class="ff-score" x="1532" y="440" text-anchor="middle" dominant-baseline="central">{{ rightTeam?.total_score ?? 0 }}</text>
                 <text class="ff-name" x="1614" y="668" text-anchor="end" :style="rightTeam ? { fill: rightTeam.color } : undefined">{{ rightTeam?.name ?? '' }}</text>
+                <text v-if="sideStatusLabel(rightTeam)" class="ff-pp" x="1614" y="708" text-anchor="end">{{ sideStatusLabel(rightTeam) }}</text>
             </g>
         </svg>
 
@@ -822,17 +926,8 @@ onUnmounted(() => {
                         <div v-for="n in strikeFlash" :key="n" class="ff-xmark">&#10005;</div>
                     </div>
                 </div>
-
-                <!-- Steal banner — only during the actual one-guess steal. Once it
-                     resolves we drop to the 'reveal' beat (host puts up the leftovers),
-                     so the banner clears rather than implying a steal is still live. -->
-                <div
-                    v-if="isSteal && stealTeam"
-                    class="ff-stealbar"
-                    :style="{ '--tc': stealTeam.color, color: stealTeam.color }"
-                >
-                    {{ stealTeam.name }} — Steal!
-                </div>
+                <!-- "Chance to Steal" shows under the stealing team's name (see the
+                     score pods), consolidated with the other status labels. -->
             </template>
 
             <!-- ===================== FAST MONEY ===================== -->
@@ -928,24 +1023,38 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <!-- ===================== FACE-OFF SLIDE (round intro + plain recap) ==========
-                 One shared look — "Round N · Face-Off", the matchup, and "One Player
-                 From Each Team" — with the live scores UNDER each team until the host
-                 arms the face-off (Start Face-Off), when the scores drop and the sting
-                 plays. So recap → Next Round → Start Face-Off is one continuous slide;
-                 arming just removes the scores, then the board comes up. -->
-            <div v-else-if="phase === 'intro' || phase === 'recap'" class="ff-center show">
+            <!-- ===================== FACE-OFF SLIDE (round intro) =========================
+                 "Round N · Face-Off", the matchup, and "One Player From Each Team" — with
+                 the live scores UNDER each team until the host arms the face-off (Start
+                 Face-Off), when the scores FADE (their space is kept, so the matchup
+                 doesn't shift) and the sting plays, then the board comes up. -->
+            <div v-else-if="phase === 'intro'" class="ff-center show">
                 <div class="ff-eyebrow">Round {{ roundNumber }} &middot; Face-Off</div>
                 <div v-if="orderedTeams.length" class="ff-matchup">
                     <template v-for="(team, ti) in orderedTeams" :key="team.id">
                         <span v-if="ti > 0" class="ff-vs">vs</span>
                         <span class="ff-mwrap">
                             <span class="ff-m" :style="{ color: team.color }">{{ team.name }}</span>
-                            <span v-if="faceoffSlideScores" class="ff-mscore">{{ team.total_score }}</span>
+                            <!-- keep the score's slot when armed so nothing jumps -->
+                            <span class="ff-mscore" :style="{ visibility: faceoffSlideScores ? 'visible' : 'hidden' }">{{ team.total_score }}</span>
                         </span>
                     </template>
                 </div>
                 <div class="ff-subhead">One Player From Each Team</div>
+            </div>
+
+            <!-- ===================== BETWEEN-ROUNDS RECAP (Step 5, before Next Round) ======
+                 The end-of-round hold: the Family Feud logo over each team's name + its
+                 running score. Only once the host clicks Next Round (→ 'intro') does the
+                 face-off matchup slide above come up. -->
+            <div v-else-if="phase === 'recap'" class="ff-center show">
+                <div class="ff-logo"><span class="ff-logotext"><span class="ff-l1">Family</span><span class="ff-l2">Feud</span></span></div>
+                <div v-if="orderedTeams.length" class="ff-chips">
+                    <div v-for="team in orderedTeams" :key="team.id" class="ff-chip" :style="{ '--tc': team.color }">
+                        <span class="ff-cn" :style="{ color: team.color }">{{ team.name }}</span>
+                        <span class="ff-cp">{{ team.total_score }}</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Fallback: a phase with no question yet -->
@@ -1000,7 +1109,9 @@ onUnmounted(() => {
                 </template>
             </div>
         </div>
-        <button v-if="themeSlideOpen" type="button" class="ff-skip" @click="skipTheme">Skip Intro &rarr;</button>
+        <!-- Skip Intro only while the theme is actually playing; once the music ends
+             the curtain holds silently for the face-off, so there's nothing to skip. -->
+        <button v-if="themeSlideOpen && !themeMusicDone" type="button" class="ff-skip" @click="skipTheme">Skip Intro &rarr;</button>
 
         <!-- Only when the browser actually blocked autoplay (a direct load / refresh
              with no gesture): a subtle prompt. Any tap on the board also unlocks. -->
@@ -1130,10 +1241,32 @@ onUnmounted(() => {
     stroke-width: 5px;
     stroke-linejoin: round;
 }
+/* Play/Pass label, in white just under the deciding team's name. */
+.ff-pp {
+    fill: #fff;
+    font-weight: 800;
+    font-size: 24px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    paint-order: stroke;
+    stroke: #0a0a12;
+    stroke-width: 4px;
+    stroke-linejoin: round;
+}
+/* Active/controlling team — highlighted from the moment the host picks who buzzed
+   in. Its score pod gets a bright, gently pulsing halo and its name lights up so
+   it's unmistakable which family is guessing. */
 .ff-scorewrap.ctrl .ff-scorebox {
     stroke: var(--tc, #4bd6ff);
-    stroke-width: 6px;
-    filter: drop-shadow(0 0 12px var(--tc, #4bd6ff));
+    stroke-width: 8px;
+    animation: ff-ctrl-pulse 1.2s ease-in-out infinite;
+}
+.ff-scorewrap.ctrl .ff-name {
+    filter: drop-shadow(0 0 10px var(--tc, #4bd6ff));
+}
+@keyframes ff-ctrl-pulse {
+    0%, 100% { filter: drop-shadow(0 0 8px var(--tc, #4bd6ff)) drop-shadow(0 0 16px var(--tc, #4bd6ff)); }
+    50%      { filter: drop-shadow(0 0 15px var(--tc, #4bd6ff)) drop-shadow(0 0 32px var(--tc, #4bd6ff)); }
 }
 
 /* ---- Top bar: survey banner + round / multiplier ---------------------- */
@@ -1245,9 +1378,7 @@ onUnmounted(() => {
     font-variant-numeric: tabular-nums;
     letter-spacing: .02em;
     font-size: clamp(30px, 3.7vw, 66px);
-    background:
-        radial-gradient(circle, rgba(150, 205, 255, .85) 0 1.4px, transparent 2.4px) 0 0/13px 13px,
-        linear-gradient(180deg, #2f8bf2, #1560d6);
+    background: linear-gradient(180deg, #2f8bf2, #1560d6);
     border: 1px solid #0f3f9e;
     text-shadow: 0 2px 6px rgba(0, 0, 0, .6);
 }
@@ -1371,29 +1502,8 @@ onUnmounted(() => {
 }
 @keyframes ff-pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-/* ---- Steal banner ----------------------------------------------------- */
-.ff-stealbar {
-    position: absolute;
-    top: 16%;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 22;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    font-size: clamp(20px, 2.6vw, 46px);
-    padding: .24em 1.1em;
-    border-radius: 999px;
-    color: var(--tc, #fff);
-    background: rgba(6, 16, 64, .82);
-    border: 3px solid currentColor;
-    box-shadow: 0 0 30px rgba(75, 214, 255, .5), inset 0 0 14px rgba(0, 0, 0, .4);
-    animation: ff-steal 1.1s ease-in-out infinite;
-}
-@keyframes ff-steal {
-    0%, 100% { transform: translateX(-50%) scale(1); }
-    50% { transform: translateX(-50%) scale(1.05); }
-}
+/* Steal, round-win, and Play/Pass status all render as a single white line under
+   the deciding/active team's name on the board (see .ff-pp / sideStatusLabel). */
 
 /* ---- Centered overlays (lobby / recap / winner / fast money) ---------- */
 .ff-center {
@@ -1609,14 +1719,23 @@ onUnmounted(() => {
 .ff-fm2cell {
     display: grid;
     grid-template-columns: 1fr clamp(52px, 4.2vw, 92px);
+    /* A DEFINITE row track — every cell is exactly this tall in BOTH columns. */
+    grid-auto-rows: clamp(44px, 5.4vh, 64px);
     gap: clamp(5px, .5vw, 10px);
     align-items: stretch;
+    /* Don't let the flex column resize the cell, and (crucially) kill the flex-item
+       min-content floor: without this the points number (a larger font) grows the
+       FILLED left cells past the row height while the empty right cells stay put —
+       that was the left/right misalignment. */
+    flex: none;
+    min-height: 0;
 }
 .ff-fm2text {
     display: flex;
     align-items: center;
     min-width: 0;
-    min-height: clamp(38px, 5.4vh, 64px);
+    /* content must not push the row taller than its track */
+    min-height: 0;
     padding: 0 .7em;
     border-radius: 6px;
     background: #000;
@@ -1635,13 +1754,17 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
+    min-width: 0;
+    /* same: the number must not expand the row past its track */
+    min-height: 0;
+    overflow: hidden;
     border-radius: 6px;
     background: #000;
     border: 2px solid #b8c6d8;
     color: #fff;
     font-weight: 900;
     font-variant-numeric: tabular-nums;
-    font-size: clamp(18px, 2.2vw, 40px);
+    font-size: clamp(18px, 2.2vw, 38px);
     text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
 }
 /* A revealed cell brightens its hairline rim. */
@@ -1747,7 +1870,9 @@ onUnmounted(() => {
 
 @media (prefers-reduced-motion: reduce) {
     .ff-inner { transition: none; }
-    .ff-stealbar, .ff-scorewrap.ctrl .ff-scorebox, .ff-facetag { animation: none; }
+    .ff-scorewrap.ctrl .ff-scorebox, .ff-facetag { animation: none; }
+    /* Keep a steady halo on the active team when the pulse is disabled. */
+    .ff-scorewrap.ctrl .ff-scorebox { filter: drop-shadow(0 0 14px var(--tc, #4bd6ff)); }
     .ff-confetti-piece { animation: none; display: none; }
     /* No strobing bulbs; hold a steady bright-yellow wall during the opening theme. */
     .ff-theme-live::before { animation: none; opacity: 1; filter: brightness(1.8) saturate(2.4) hue-rotate(200deg); }

@@ -209,11 +209,14 @@ class GameInitializationService
             }
         }
 
-        // Set the first question as current.
+        // Set the first question as current and sync the round number — otherwise a
+        // Restart keeps the previous game's round_number (the host's Round Steps then
+        // shows e.g. "Round 3" while the board/question is back on Round 1).
         $firstQuestion = $gameSession->sessionQuestions()->orderBy('display_order')->first();
         if ($firstQuestion) {
             $gameSession->gameState->update([
                 'current_question_id' => $firstQuestion->id,
+                'round_number' => $firstQuestion->round_number ?? 1,
             ]);
         }
     }

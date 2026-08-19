@@ -969,19 +969,25 @@ const feudClearStrikes = async () => {
     await axios.post(route('host.feud.clear-strikes', props.gameSession.id));
     fetchState();
 };
-const feudStartPlay = async () => {
-    await axios.post(route('host.feud.play', props.gameSession.id));
+const feudStartPlay = async (decision?: { decision: 'play' | 'pass'; decision_team_id: number }) => {
+    await axios.post(route('host.feud.play', props.gameSession.id), decision ?? {});
     fetchState();
 };
 // Play keeps the face-off winner; Pass hands control to the other team. Both then
-// begin the controlling team's turn.
-const feudPlay = async () => { await feudStartPlay(); };
+// begin the controlling team's turn. Either way we send the deciding (face-off
+// winner) team + their choice so the board can flash a "TEAM — PLAY/PASS" banner —
+// captured BEFORE a pass flips control to the other side.
+const feudPlay = async () => {
+    const decider = faceoffDecider.value ?? faceoffTurnTeam.value ?? primaryTeam.value;
+    await feudStartPlay(decider ? { decision: 'play', decision_team_id: decider.id } : undefined);
+};
 const feudPass = async () => {
+    const decider = faceoffDecider.value ?? faceoffTurnTeam.value ?? primaryTeam.value;
     const other = idleTurnTeam.value;
     if (other) {
         await axios.post(route('host.control.team', props.gameSession.id), { team_id: other.id });
     }
-    await feudStartPlay();
+    await feudStartPlay(decider ? { decision: 'pass', decision_team_id: decider.id } : undefined);
 };
 const feudResolve = async (outcome: 'clear' | 'steal_success' | 'steal_fail') => {
     await axios.post(route('host.feud.resolve', props.gameSession.id), { outcome });
@@ -993,12 +999,13 @@ const feudFinishReveal = async () => {
     fetchState();
 };
 
-// Two auto-advances, both gated on the board being FULLY revealed and each holding
-// 2s so the last answer lands on the TV before the scores show:
+// Two auto-advances, both gated on the board being FULLY revealed:
 //   • 'question' — the controlling team cleared the board → award the pool ('clear').
+//                  Hold 1s after the final reveal (matching the steal's beat), then
+//                  transition to the recap with the winner sting in sync (see below).
 //   • 'reveal'   — a steal resolved and the host has now revealed the leftovers
-//                  (no points) → drop to the scoreboard. We never jump to the
-//                  scores/winner slide until every answer is on the board.
+//                  (no points) → hold 2s so the last answer lands, then drop to the
+//                  scoreboard. We never jump to the scores until every answer is up.
 const feudResolving = ref(false);
 watch([allAnswersRevealed, phase], () => {
     if (!allAnswersRevealed.value || feudResolving.value || !isFamilyFeud) return;
@@ -1007,7 +1014,7 @@ watch([allAnswersRevealed, phase], () => {
         window.setTimeout(async () => {
             await feudResolve('clear');
             feudResolving.value = false;
-        }, 2000);
+        }, 1000);
     } else if (phase.value === 'reveal') {
         feudResolving.value = true;
         window.setTimeout(async () => {
@@ -1223,7 +1230,13 @@ watch(fmClinched, (clinched) => {
     if (clinched && fmIsReveal.value && !fmAutoAdvanced.value) fmDropToResult(1000);
 });
 watch([fmAllRevealed, phase], () => {
-    if (phase.value === 'fast_money_p2_reveal' && fmAllRevealed.value) fmDropToResult(0);
+    // LOSS: hold ~2s on the fully-revealed board, then drop to the "So Close" result.
+    // WIN: the winner slide already showed at the clinch; after the host pops back to
+    // reveal the leftover answers we STAY on the board (they finish with End Game) —
+    // don't bounce back to the winner slide.
+    if (phase.value === 'fast_money_p2_reveal' && fmAllRevealed.value && !fmAutoAdvanced.value) {
+        fmDropToResult(2000);
+    }
 });
 
 // Dismiss the "All Answers Revealed" bonus prompt for this question (no sweep).
@@ -1557,12 +1570,14 @@ onUnmounted(() => {
                                              back to reveal leftovers, revealing the last one drops to the
                                              result (End Game) step on its own. -->
                                         <template v-else-if="fmIsReveal">
-                                            <Button v-if="fmRevealRow" :variant="fmClinched ? 'secondary' : 'primary'" size="sm" @click="fmRevealNext">
+                                            <Button v-if="fmRevealRow" variant="primary" size="sm" @click="fmRevealNext">
                                                 {{ fmRevealPart === 'points' ? 'Reveal Points' : 'Reveal Answer' }} &rarr;
                                             </Button>
                                             <span v-else-if="fmClinched && !fmAutoAdvanced" class="text-xs text-gold">🎉 Target reached — winner slide coming up…</span>
                                             <template v-else-if="!fmRevealRow">
                                                 <Button v-if="phase === 'fast_money_p1_reveal'" variant="primary" size="sm" @click="fmNextPlayer">Next Player &rarr;</Button>
+                                                <!-- Won already + every answer revealed → stay on the board; End Game to finish. -->
+                                                <Button v-else-if="fmAllRevealed && fmAutoAdvanced" variant="primary" size="sm" @click="endGame">End Game &rarr;</Button>
                                                 <span v-else class="text-xs text-muted">Revealing the result…</span>
                                             </template>
                                         </template>
