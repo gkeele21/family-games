@@ -795,6 +795,55 @@ watch(fmWon, (won) => {
     if (won && !fmWinPlayed) { fmWinPlayed = true; sounds.play('win'); }
 });
 
+// ---- Back wall of light bulbs ----------------------------------------------
+// A real grid of addressable bulbs (not a tiled gradient) so the wall can do a
+// choreographed center-out RIPPLE during the opening theme and on a Fast Money
+// win, instead of every bulb flashing at once. Colour follows the phase: warm
+// YELLOW for the face-off/main rounds, BLUE for Fast Money — like the real show.
+const BULB_SPACING = 52;      // px per bulb tile (matches the old wall's density)
+const RIPPLE_SECONDS = 1.6;   // one center-out sweep; also the CSS animation length
+const wallCols = ref(0);
+const wallRows = ref(0);
+const bulbs = ref<Array<{ '--tw': string; '--d': string }>>([]);
+
+const buildBulbs = () => {
+    const cols = Math.max(8, Math.round((window.innerWidth * 1.04) / BULB_SPACING));
+    const rows = Math.max(6, Math.round((window.innerHeight * 1.04) / BULB_SPACING));
+    const cx = (cols - 1) / 2;
+    const cy = (rows - 1) / 2;
+    const maxD = Math.hypot(cx, cy) || 1;
+    const next: Array<{ '--tw': string; '--d': string }> = [];
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            // phase 0 at the center → 1 at the far corner drives the center-out sweep
+            const phaseFrac = Math.hypot(c - cx, r - cy) / maxD;
+            next.push({
+                '--tw': (Math.random() * 4).toFixed(2) + 's',
+                '--d': (-(phaseFrac * RIPPLE_SECONDS)).toFixed(3) + 's',
+            });
+        }
+    }
+    wallCols.value = cols;
+    wallRows.value = rows;
+    bulbs.value = next;
+};
+
+let wallResizeTimer: number | undefined;
+const onWallResize = () => {
+    if (wallResizeTimer) clearTimeout(wallResizeTimer);
+    wallResizeTimer = window.setTimeout(buildBulbs, 200);
+};
+
+// The bulbs RIPPLE while the opening theme plays and on a Fast Money win; otherwise
+// they sit in a calm twinkle. Standby (pre-game lobby) dims the whole wall.
+const wallMode = computed(() => {
+    if (isStandby.value) return 'standby';
+    if (themeFlashing.value || fmWon.value) return 'ripple';
+    return 'idle';
+});
+// Colour by phase: BLUE for Fast Money, warm YELLOW everywhere else.
+const wallColor = computed(() => (isFastMoney.value ? 'blue' : 'yellow'));
+
 onMounted(() => {
     // No gesture needed on the board: the Entry page's "Open board" tap already gave
     // this document sticky user-activation (Inertia doesn't reload), so unlock the
@@ -808,6 +857,8 @@ onMounted(() => {
     // the board unlocks audio and rolls any pending theme.
     window.addEventListener('pointerdown', onFirstInteraction);
     window.addEventListener('keydown', onFirstInteraction);
+    buildBulbs();
+    window.addEventListener('resize', onWallResize);
     computeFmRemaining();
     fmTimerInterval = window.setInterval(computeFmRemaining, 200);
 });
@@ -817,8 +868,10 @@ onUnmounted(() => {
     if (decisionTimer) clearTimeout(decisionTimer);
     if (winMusicTimer) clearTimeout(winMusicTimer);
     if (fmTimerInterval) clearInterval(fmTimerInterval);
+    if (wallResizeTimer) clearTimeout(wallResizeTimer);
     window.removeEventListener('pointerdown', onFirstInteraction);
     window.removeEventListener('keydown', onFirstInteraction);
+    window.removeEventListener('resize', onWallResize);
     if (theme) { theme.pause(); theme = null; }
 });
 </script>
@@ -828,6 +881,17 @@ onUnmounted(() => {
          Colors are intentionally off the Keeler palette (see the scoped styles):
          TV-blue lit set, glossy blue answer slots, gold proscenium, red strikes. -->
     <div class="ff-board" :class="{ 'ff-standby': isStandby, 'ff-theme-live': themeFlashing }">
+        <!-- Back wall of light bulbs: a real grid of addressable dots so the wall can
+             do a choreographed center-out ripple on the opening theme + Fast Money win
+             (otherwise a calm twinkle). Colour follows the phase (yellow / blue). -->
+        <div
+            class="ff-wall"
+            :class="[`ff-wall--${wallMode}`, `ff-wall--${wallColor}`]"
+            :style="{ '--cols': wallCols, '--rows': wallRows }"
+            aria-hidden="true"
+        >
+            <i v-for="(b, i) in bulbs" :key="i" class="ff-dot" :style="b"></i>
+        </div>
         <!-- drifting light wash over the bulb wall -->
         <div class="ff-wallglow"></div>
 
@@ -1143,24 +1207,45 @@ onUnmounted(() => {
         linear-gradient(90deg, rgba(180, 130, 50, .55) 0%, rgba(34, 25, 14, 0) 18%, rgba(34, 25, 14, 0) 82%, rgba(180, 130, 50, .55) 100%),
         radial-gradient(120% 100% at 50% 40%, #362a18 0%, #201810 56%, #120c07 100%);
 }
-/* Full back WALL of blue light bulbs, faded toward the edges, gently twinkling. */
-.ff-board::before {
-    content: "";
+/* Full back WALL of light bulbs — a real grid of addressable dots (so it can chase),
+   faded toward the edges. Colour is set per phase via the .ff-wall--yellow/blue
+   classes; the twinkle/ripple motion via .ff-wall--idle/ripple/standby. */
+.ff-wall {
     position: absolute;
     inset: -2%;
-    pointer-events: none;
     z-index: 0;
-    background-image: radial-gradient(circle,
-        rgba(175, 222, 255, 1) 0 2.6px,
-        rgba(70, 160, 255, .82) 3.2px 4.7px,
-        rgba(20, 72, 178, .28) 5.4px 7px,
-        transparent 7.6px);
-    background-size: 52px 52px;
+    pointer-events: none;
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 30), 1fr);
+    grid-template-rows: repeat(var(--rows, 18), 1fr);
+    place-items: center;
     -webkit-mask-image: radial-gradient(135% 122% at 50% 42%, #000 60%, rgba(0, 0, 0, .5) 84%, transparent 100%);
     mask-image: radial-gradient(135% 122% at 50% 42%, #000 60%, rgba(0, 0, 0, .5) 84%, transparent 100%);
-    animation: ff-twinkle 4s ease-in-out infinite;
 }
+.ff-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 45% 40%, var(--c-core), var(--c-mid) 60%, var(--c-rim) 88%);
+    will-change: opacity, transform, background, box-shadow;
+}
+/* phase colours: warm YELLOW for the rounds, BLUE for Fast Money */
+.ff-wall--yellow { --c-core: #fff3cf; --c-mid: #ffbf45; --c-rim: rgba(150, 90, 20, .42); --c-on: #fff0c8; --c-glow1: #ffcf4a; --c-glow2: #ff9d1c; }
+.ff-wall--blue   { --c-core: #dff0ff; --c-mid: #46a0ff; --c-rim: rgba(20, 72, 178, .40); --c-on: #cfe4ff; --c-glow1: #79bbff; --c-glow2: #1f6adb; }
+/* calm resting twinkle */
+.ff-wall--idle .ff-dot { animation: ff-twinkle 4s ease-in-out infinite; animation-delay: var(--tw); }
+/* center-out ripple: each dot fires on a delay set from its distance to center */
+.ff-wall--ripple .ff-dot { animation: ff-ripple 1.6s linear infinite; animation-delay: var(--d); }
+/* standby: whole wall dimmed until the host starts the game */
+.ff-wall--standby .ff-dot { opacity: .12; filter: brightness(.6) saturate(.6); }
+
 @keyframes ff-twinkle { 0%, 100% { opacity: .7; } 50% { opacity: .95; } }
+@keyframes ff-ripple {
+    0%   { background: radial-gradient(circle at 45% 40%, var(--c-core), var(--c-mid) 60%, var(--c-rim) 88%); box-shadow: none; transform: scale(1); }
+    9%   { background: radial-gradient(circle at 44% 38%, #fff, var(--c-on) 50%, var(--c-glow1) 86%);
+           box-shadow: 0 0 9px var(--c-glow1), 0 0 17px var(--c-glow2); transform: scale(1.6); }
+    34%, 100% { background: radial-gradient(circle at 45% 40%, var(--c-core), var(--c-mid) 60%, var(--c-rim) 88%); box-shadow: none; transform: scale(1); }
+}
 /* blue stage-floor glow */
 .ff-board::after {
     content: "";
@@ -1182,23 +1267,14 @@ onUnmounted(() => {
 }
 @keyframes ff-drift { 0% { transform: translate3d(-1%, 0, 0); } 100% { transform: translate3d(1%, 1%, 0); } }
 
-/* Standby: before the host starts the game the set sits dark — bulbs dimmed way
-   down, wall glow and floor wash off — so nothing lights until Start Game. */
-.ff-standby::before { animation: none; opacity: .1; filter: brightness(.5) saturate(.6); }
+/* Standby: before the host starts the game the set sits dark — floor wash and wall
+   glow off (the bulbs themselves are dimmed via .ff-wall--standby) until Start Game. */
 .ff-standby::after { opacity: .12; }
 .ff-standby .ff-wallglow { opacity: 0; }
 
-/* Start Game → opening theme: the whole bulb wall blazes BRIGHT YELLOW and strobes
-   hard while the music plays, then settles back to the calm twinkle the instant the
-   music stops (themeFlashing → false). */
-.ff-theme-live::before {
-    animation: ff-introblitz .26s steps(2, jump-none) infinite;
-}
-@keyframes ff-introblitz {
-    0%   { opacity: .45; filter: brightness(1.2) saturate(2.4) hue-rotate(200deg); }
-    50%  { opacity: 1;   filter: brightness(2.8) saturate(3)   hue-rotate(200deg); }
-    100% { opacity: .45; filter: brightness(1.2) saturate(2.4) hue-rotate(200deg); }
-}
+/* Start Game → opening theme: the drifting wall wash warms to gold while the theme
+   plays (the bulbs do the center-out ripple; see .ff-wall--ripple), then settles back
+   the instant the music stops (themeFlashing → false). */
 .ff-theme-live .ff-wallglow {
     background: radial-gradient(62% 52% at 50% 44%, rgba(255, 215, 60, .55), transparent 74%);
     animation: ff-introglow .26s steps(2, jump-none) infinite;
@@ -1874,8 +1950,13 @@ onUnmounted(() => {
     /* Keep a steady halo on the active team when the pulse is disabled. */
     .ff-scorewrap.ctrl .ff-scorebox { filter: drop-shadow(0 0 14px var(--tc, #4bd6ff)); }
     .ff-confetti-piece { animation: none; display: none; }
-    /* No strobing bulbs; hold a steady bright-yellow wall during the opening theme. */
-    .ff-theme-live::before { animation: none; opacity: 1; filter: brightness(1.8) saturate(2.4) hue-rotate(200deg); }
+    /* No motion: hold the bulbs steady — lit for the ripple moments, calm otherwise. */
+    .ff-wall--idle .ff-dot { animation: none; }
+    .ff-wall--ripple .ff-dot {
+        animation: none;
+        background: radial-gradient(circle at 44% 38%, #fff, var(--c-on) 50%, var(--c-glow1) 86%);
+        box-shadow: 0 0 9px var(--c-glow1);
+    }
     .ff-theme-live .ff-wallglow { animation: none; opacity: .8; }
 }
 </style>

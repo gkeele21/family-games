@@ -1025,6 +1025,34 @@ watch([allAnswersRevealed, phase], () => {
 });
 watch(() => currentQuestion.value?.id, () => { feudResolving.value = false; });
 
+// Between rounds the scoreboard recap is just a 3-second beat — the next round's
+// face-off slide shows the scores again and needs its own "Start Face-Off" click
+// anyway, so there's no reason to make the host click "Next Round" too. Auto-advance
+// after 3s. ONLY the plain next-round case auto-advances; when a team has hit the
+// target the host still chooses (Start Fast Money / Finish Game), so we leave that
+// button in place.
+const feudRecapAdvancing = ref(false);
+let feudRecapTimer: number | undefined;
+const feudRecapAutoAdvance = computed(() =>
+    isFamilyFeud && phase.value === 'recap' && !feudTargetReached.value
+);
+watch(feudRecapAutoAdvance, (auto) => {
+    if (auto && feudRecapTimer === undefined && !feudRecapAdvancing.value) {
+        feudRecapTimer = window.setTimeout(async () => {
+            feudRecapAdvancing.value = true;
+            try {
+                await advanceQuestion();
+            } finally {
+                feudRecapTimer = undefined;
+                feudRecapAdvancing.value = false;
+            }
+        }, 3000);
+    } else if (!auto && feudRecapTimer !== undefined) {
+        clearTimeout(feudRecapTimer);
+        feudRecapTimer = undefined;
+    }
+}, { immediate: true });
+
 // ---- Family Feud Fast Money ---------------------------------------------------
 // Real-show, capture-then-reveal, per player. Phases: fast_money_intro →
 // p1_capture → p1_reveal → p2_capture → p2_reveal → result. During capture the
@@ -1276,6 +1304,7 @@ onMounted(() => {
 });
 onUnmounted(() => {
     if (pollInterval) clearInterval(pollInterval);
+    if (feudRecapTimer !== undefined) clearTimeout(feudRecapTimer);
 });
 </script>
 
@@ -1486,12 +1515,14 @@ onUnmounted(() => {
                                          it's off); otherwise it's the next round. The backend routes
                                          it — this just labels the button. -->
                                     <template v-else-if="phase === 'recap'">
-                                        <!-- Advance to the next round's intro (the host arms the face-off
-                                             there with Start Face-Off). Labelled "Next Round" since the
-                                             face-off has its own button now. -->
-                                        <Button variant="primary" size="sm" @click="advanceQuestion">
-                                            {{ feudTargetReached ? (feudFastMoneyReady ? 'Start Fast Money' : 'Finish Game') : 'Next Round' }} &rarr;
+                                        <!-- Target reached: the host still chooses what's next. -->
+                                        <Button v-if="feudTargetReached" variant="primary" size="sm" @click="advanceQuestion">
+                                            {{ feudFastMoneyReady ? 'Start Fast Money' : 'Finish Game' }} &rarr;
                                         </Button>
+                                        <!-- Otherwise the scores hold for a beat, then the next round's
+                                             face-off slide comes up on its own (no button — the face-off
+                                             has its own Start Face-Off, and that slide shows the scores). -->
+                                        <span v-else class="text-xs text-muted">Scores are up — next round starting…</span>
                                     </template>
                                 </div>
                             </li>
