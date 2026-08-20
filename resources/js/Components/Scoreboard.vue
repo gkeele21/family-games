@@ -27,6 +27,9 @@ interface Props {
     showRevealOnly?: boolean;
     /** Whether reveal-only mode is currently active (highlights that row). */
     revealOnlyActive?: boolean;
+    /** Whether the reveal-only tile is clickable (America Says toggles it) or a
+     *  read-only indicator (Family Feud — the 'reveal' phase drives it). */
+    revealOnlySelectable?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -35,6 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
     editable: false,
     showRevealOnly: false,
     revealOnlyActive: false,
+    revealOnlySelectable: true,
 });
 
 const emit = defineEmits<{
@@ -118,21 +122,26 @@ const onRowClick = (teamId: number) => {
                 </div>
             </div>
 
-            <!-- Reveal-only control: a sibling to the team rows (same size), but
-                 neutral — no team color, no score. Selecting it reveals answers
-                 without awarding any team, for fixing a board manually. -->
-            <button
+            <!-- Reveal-only tile: a sibling to the team rows (same size), but neutral —
+                 no team color, no score. America Says toggles it to reveal without
+                 scoring; Family Feud shows it as a read-only indicator that lights up
+                 while the leftover answers are being revealed (the 'reveal' phase). -->
+            <component
+                :is="revealOnlySelectable ? 'button' : 'div'"
                 v-if="showRevealOnly"
-                type="button"
-                class="hover-glow w-full cursor-pointer rounded-lg border border-dashed border-border-strong bg-surface-inset p-3 text-left transition-all duration-300"
-                :class="{ 'ring-2 ring-white shadow-[0_0_22px_2px_rgba(255,255,255,0.6)]': revealOnlyActive }"
-                @click="emit('reveal-only')"
+                :type="revealOnlySelectable ? 'button' : undefined"
+                class="w-full rounded-lg border border-dashed border-border-strong bg-surface-inset p-3 text-left transition-all duration-300"
+                :class="[
+                    { 'ring-2 ring-white shadow-[0_0_22px_2px_rgba(255,255,255,0.6)]': revealOnlyActive },
+                    revealOnlySelectable ? 'hover-glow cursor-pointer' : '',
+                ]"
+                @click="revealOnlySelectable && emit('reveal-only')"
             >
                 <div class="flex items-center justify-between">
                     <span class="font-semibold" :class="revealOnlyActive ? 'text-body' : 'text-muted'">Reveal only</span>
                     <span class="text-sm" :class="revealOnlyActive ? 'text-body' : 'text-subtle'">no points</span>
                 </div>
-            </button>
+            </component>
         </div>
     </div>
 </template>

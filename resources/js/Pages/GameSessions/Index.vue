@@ -66,7 +66,7 @@ const formatDate = (dateString: string) => {
     <AuthenticatedLayout>
         <template #header>
             <div class="flex justify-between items-center">
-                <h2 class="text-xl font-semibold leading-tight text-gray-800">
+                <h2 class="text-xl font-semibold leading-tight text-body">
                     My Games
                 </h2>
                 <Link

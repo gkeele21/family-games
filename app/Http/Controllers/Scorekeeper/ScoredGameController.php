@@ -28,14 +28,14 @@ class ScoredGameController extends Controller
         return Inertia::render('Scorekeeper/ScoredGames/Index', [
             'household' => $household->only(['id', 'name']),
             'games'     => $household->scoredGames()
-                ->with(['competitors.players:players.id,players.name', 'rounds.scores'])
+                ->with(['competitors.players:players.id,players.name,players.user_id', 'rounds.scores'])
                 // started_at is a date-only play date, so same-day games
                 // tie-break on creation time, newest first.
                 ->orderByDesc('started_at')
                 ->orderByDesc('created_at')
                 ->orderByDesc('id')
                 ->get()
-                ->map(function (ScoredGame $g) {
+                ->map(function (ScoredGame $g) use ($request) {
                     $players = $g->competitors->flatMap->players->unique('id')->values();
                     // Same short names as the scorecard: first name only,
                     // extended just enough to tell same-named people apart.
@@ -69,8 +69,20 @@ class ScoredGameController extends Controller
                             ->map(fn ($p) => $display[$p->id] ?? $p->name)
                             ->values(),
                         'winners'     => $winners,
+                        // Games the viewer is playing in themselves float to
+                        // the top of the in-progress group.
+                        'is_mine'     => $players->contains('user_id', $request->user()->id),
                     ];
-                }),
+                })
+                // Unfinished games first — the viewer's own ahead of the rest
+                // of the household's — then the completed archive. sortBy is
+                // stable, so the date ordering above survives within groups.
+                ->sortBy(fn (array $g) => match (true) {
+                    $g['is_complete'] => 2,
+                    $g['is_mine']     => 0,
+                    default           => 1,
+                })
+                ->values(),
         ]);
     }
 
