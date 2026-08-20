@@ -178,6 +178,17 @@ const inputs = reactive<
 const dirty = reactive(new Set<string>());
 const cellKey = (roundId: number, competitorId: number, fieldKey: string) =>
     `${roundId}:${competitorId}:${fieldKey}`;
+// Field keys may themselves contain ':', so split on the first two only.
+const parseCellKey = (key: string) => {
+    const a = key.indexOf(':');
+    const b = key.indexOf(':', a + 1);
+
+    return {
+        roundId: Number(key.slice(0, a)),
+        competitorId: Number(key.slice(a + 1, b)),
+        fieldKey: key.slice(b + 1),
+    };
+};
 const markDirty = (roundId: number, competitorId: number, fieldKey: string) =>
     dirty.add(cellKey(roundId, competitorId, fieldKey));
 function sync() {
@@ -475,48 +486,89 @@ const addRound = () => {
     );
 };
 
-// Tab moves through all of a player's fields before advancing to the next
-// player (the DOM's natural order is the opposite — across players per
-// field). After a round's last cell, Tab continues into the next round; after
-// the final round it lands on the Save button.
-const onScoreTab = (
-    e: KeyboardEvent,
+// Tab (and Enter, where the keyboard has a return key) moves through all of a
+// player's fields before advancing to the next player — the DOM's natural
+// order is the opposite, across players per field. After a round's last cell
+// it continues into the next round; after the final round it lands on Save.
+const cellAt = (key: string) =>
+    document.querySelector<HTMLElement>(`[data-cell="${key}"]`);
+
+const stepFromCell = (
     roundId: number,
     competitorId: number,
     fieldKey: string,
-) => {
+    backwards: boolean,
+): HTMLElement | null => {
     const cells = orderedCompetitors.value
         .filter((c) => canEditCompetitor(c.id))
         .flatMap((c) => fields.value.map((f) => ({ c: c.id, f: f.key })));
     const idx = cells.findIndex(
         (cell) => cell.c === competitorId && cell.f === fieldKey,
     );
-    if (idx === -1) return;
+    if (idx === -1) return null;
 
-    const next = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
-    let target: HTMLElement | null = null;
-    if (next) {
-        target = document.querySelector<HTMLElement>(
-            `[data-cell="${roundId}:${next.c}:${next.f}"]`,
-        );
-    } else if (!e.shiftKey) {
-        // Continue into the next round that's open for editing (locked past
-        // rounds have no inputs to land on).
-        const ri = props.rounds.findIndex((r) => r.id === roundId);
-        const nextRound = props.rounds
-            .slice(ri + 1)
-            .find((r) => isRoundEditable(r.id));
-        target =
-            nextRound && cells[0]
-                ? document.querySelector<HTMLElement>(
-                      `[data-cell="${nextRound.id}:${cells[0].c}:${cells[0].f}"]`,
-                  )
-                : document.querySelector<HTMLElement>('[data-save-all]');
-    }
+    const next = backwards ? cells[idx - 1] : cells[idx + 1];
+    if (next) return cellAt(`${roundId}:${next.c}:${next.f}`);
+    if (backwards) return null;
+
+    // Continue into the next round that's open for editing (locked past
+    // rounds have no inputs to land on).
+    const ri = props.rounds.findIndex((r) => r.id === roundId);
+    const nextRound = props.rounds
+        .slice(ri + 1)
+        .find((r) => isRoundEditable(r.id));
+
+    return nextRound && cells[0]
+        ? cellAt(`${nextRound.id}:${cells[0].c}:${cells[0].f}`)
+        : document.querySelector<HTMLElement>('[data-save-all]');
+};
+
+const onScoreTab = (
+    e: KeyboardEvent,
+    roundId: number,
+    competitorId: number,
+    fieldKey: string,
+) => {
+    const target = stepFromCell(roundId, competitorId, fieldKey, e.shiftKey);
     if (target) {
         e.preventDefault();
         target.focus();
     }
+};
+
+const onScoreEnter = (
+    roundId: number,
+    competitorId: number,
+    fieldKey: string,
+) => stepFromCell(roundId, competitorId, fieldKey, false)?.focus();
+
+// --- sign toggle -------------------------------------------------------
+// The score inputs ask for the compact numeric keypad, which on iOS has no
+// minus key. The focused row's label cell grows a ± button instead; it stays
+// on screen because the browser keeps the focused input in view.
+const focusedCell = ref<string | null>(null);
+const onCellFocus = (key: string) => (focusedCell.value = key);
+const onCellBlur = (key: string) => {
+    // Focus lands on the next cell before blur fires here, so only clear if
+    // nothing else claimed it — otherwise the ± would vanish mid-move.
+    setTimeout(() => {
+        if (focusedCell.value === key) focusedCell.value = null;
+    }, 0);
+};
+// True while a cell in this round/field row holds focus (any competitor).
+const rowHasFocus = (roundId: number, fieldKey: string): boolean =>
+    focusedCell.value?.startsWith(`${roundId}:`) === true &&
+    focusedCell.value?.endsWith(`:${fieldKey}`) === true;
+const toggleFocusedSign = () => {
+    const key = focusedCell.value;
+    if (!key) return;
+    const { roundId: rid, competitorId: cid, fieldKey } = parseCellKey(key);
+    const current = Number(inputs[rid]?.[cid]?.[fieldKey]);
+    // Nothing to flip on an empty cell — type the digits first, then tap ±.
+    if (!current) return;
+    inputs[rid][cid][fieldKey] = String(-current);
+    markDirty(rid, cid, fieldKey);
+    cellAt(key)?.focus();
 };
 
 const saveAll = () => {
@@ -524,21 +576,30 @@ const saveAll = () => {
         number,
         Record<number, Record<string, number | null>>
     > = {};
-    // Submit only rounds open for editing — locked rounds show saved values
-    // and shouldn't overwrite anyone else's concurrent fixes.
-    props.rounds.forEach((r) => {
-        if (!isRoundEditable(r.id)) return;
-        rounds[r.id] = {};
-        props.competitors.forEach((c) => {
-            if (!canEditCompetitor(c.id)) return; // guests submit only their own
-            rounds[r.id][c.id] = {};
-            fields.value.forEach((f) => {
-                const v = inputs[r.id]?.[c.id]?.[f.key];
-                rounds[r.id][c.id][f.key] =
-                    v === '' || v === null || v === undefined ? null : Number(v);
-            });
-        });
+    // Send only the cells this device actually edited. Submitting untouched
+    // cells too would push our own (possibly seconds-stale) view of them over
+    // whatever another player just saved from their phone — that's how a save
+    // used to wipe everyone else's scores. The server merges what arrives.
+    // What each key was worth at submit time, so edits typed while the save
+    // is in flight keep their unsaved flag instead of being dropped.
+    const submitted = new Map<string, number | null>();
+    dirty.forEach((key) => {
+        const { roundId, competitorId, fieldKey } = parseCellKey(key);
+        // Locked past rounds and other people's columns can't be submitted
+        // even if a stale dirty flag survives.
+        if (!isRoundEditable(roundId)) return;
+        if (!canEditCompetitor(competitorId)) return;
+
+        const v = inputs[roundId]?.[competitorId]?.[fieldKey];
+        const value =
+            v === '' || v === null || v === undefined ? null : Number(v);
+        if (!rounds[roundId]) rounds[roundId] = {};
+        if (!rounds[roundId][competitorId]) rounds[roundId][competitorId] = {};
+        rounds[roundId][competitorId][fieldKey] = value;
+        submitted.set(key, value);
     });
+    if (!submitted.size) return;
+
     saving.value = true;
     router.patch(
         route('scorekeeper.games.scores.update', props.game.id),
@@ -546,11 +607,25 @@ const saveAll = () => {
         {
             preserveScroll: true,
             onFinish: () => (saving.value = false),
-            // Saved — server is the source of truth again, and any past
-            // rounds opened for fixes lock back up.
             onSuccess: () => {
-                dirty.clear();
-                unlockedRounds.clear();
+                // The server now holds these values, so let the live refresh
+                // own them again — but only the ones that still match what we
+                // sent. A cell retyped mid-flight stays unsaved.
+                submitted.forEach((value, key) => {
+                    const { roundId, competitorId, fieldKey } =
+                        parseCellKey(key);
+                    const v = inputs[roundId]?.[competitorId]?.[fieldKey];
+                    const now =
+                        v === '' || v === null || v === undefined
+                            ? null
+                            : Number(v);
+                    if (now === value) dirty.delete(key);
+                });
+                // Past rounds opened for fixes lock back up once their edits
+                // are safely saved.
+                [...unlockedRounds]
+                    .filter((id) => !roundHasUnsaved(id))
+                    .forEach((id) => unlockedRounds.delete(id));
             },
         },
     );
@@ -768,19 +843,25 @@ const deleteGame = () => {
                         <table class="min-w-full divide-y divide-border text-sm">
                             <thead>
                                 <tr>
+                                    <!-- Rd and the field labels stay frozen at
+                                         the left edge so a wide multi-field
+                                         game keeps its row headings on screen
+                                         while the player columns scroll. The
+                                         52px offset below is this cell's
+                                         width: w-9 content + px-2 padding. -->
                                     <th
-                                        class="sticky top-0 z-10 bg-surface px-3 py-3 text-left font-medium text-muted"
+                                        class="sticky left-0 top-0 z-30 w-[52px] bg-surface px-2 py-3 text-left font-medium text-muted"
                                     >
                                         Rd
                                     </th>
                                     <th
                                         v-if="!singleField"
-                                        class="sticky top-0 z-10 bg-surface px-2 py-3"
+                                        class="sticky left-[52px] top-0 z-30 bg-surface px-2 py-3"
                                     ></th>
                                     <th
                                         v-for="c in orderedCompetitors"
                                         :key="c.id"
-                                        class="sticky top-0 z-10 bg-surface px-2 py-3 text-left font-semibold"
+                                        class="sticky top-0 z-20 bg-surface px-2 py-3 text-left font-semibold"
                                         :style="{ color: colorFor(c.id) }"
                                     >
                                         <div class="flex items-center gap-1.5">
@@ -804,9 +885,9 @@ const deleteGame = () => {
                                 <!-- Single field: one row per round -->
                                 <tr v-if="singleField">
                                     <td
-                                        class="px-3 py-2 align-top font-medium text-body"
+                                        class="sticky left-0 z-10 w-[52px] bg-surface px-2 py-2 align-top font-medium text-body"
                                     >
-                                        <span class="flex items-center gap-1.5">
+                                        <span class="flex w-9 items-center gap-1">
                                             {{ r.round_number }}
                                             <button
                                                 v-if="
@@ -835,28 +916,77 @@ const deleteGame = () => {
                                         :key="c.id"
                                         class="px-2 py-2 align-top"
                                     >
-                                        <input
+                                        <template
                                             v-if="
                                                 canEditCompetitor(c.id) &&
                                                 isRoundEditable(r.id)
                                             "
-                                            v-model="
-                                                inputs[r.id][c.id][
-                                                    fields[0].key
-                                                ]
-                                            "
-                                            type="number"
-                                            @input="
-                                                markDirty(
-                                                    r.id,
-                                                    c.id,
-                                                    fields[0].key,
-                                                )
-                                            "
-                                            :style="{ color: colorFor(c.id) }"
-                                            class="no-spinner rounded-md border-border-strong bg-surface-inset px-2 text-sm font-semibold focus:border-primary focus:ring-primary"
-                                            :class="fieldWidths[fields[0].key]"
-                                        />
+                                        >
+                                            <input
+                                                v-model="
+                                                    inputs[r.id][c.id][
+                                                        fields[0].key
+                                                    ]
+                                                "
+                                                type="number"
+                                                inputmode="numeric"
+                                                enterkeyhint="next"
+                                                :data-cell="`${r.id}:${c.id}:${fields[0].key}`"
+                                                @input="
+                                                    markDirty(
+                                                        r.id,
+                                                        c.id,
+                                                        fields[0].key,
+                                                    )
+                                                "
+                                                @focus="
+                                                    onCellFocus(
+                                                        `${r.id}:${c.id}:${fields[0].key}`,
+                                                    )
+                                                "
+                                                @blur="
+                                                    onCellBlur(
+                                                        `${r.id}:${c.id}:${fields[0].key}`,
+                                                    )
+                                                "
+                                                @keydown.tab="
+                                                    onScoreTab(
+                                                        $event,
+                                                        r.id,
+                                                        c.id,
+                                                        fields[0].key,
+                                                    )
+                                                "
+                                                @keydown.enter.prevent="
+                                                    onScoreEnter(
+                                                        r.id,
+                                                        c.id,
+                                                        fields[0].key,
+                                                    )
+                                                "
+                                                :style="{ color: colorFor(c.id) }"
+                                                class="no-spinner rounded-md border-border-strong bg-surface-inset px-2 text-sm font-semibold focus:border-primary focus:ring-primary"
+                                                :class="fieldWidths[fields[0].key]"
+                                            />
+                                            <button
+                                                v-if="
+                                                    focusedCell ===
+                                                    `${r.id}:${c.id}:${fields[0].key}`
+                                                "
+                                                type="button"
+                                                class="ml-1 inline-flex h-5 w-5 items-center justify-center rounded border border-border-strong align-middle text-xs font-semibold text-muted hover:border-primary hover:text-primary"
+                                                title="Make this score negative"
+                                                @pointerdown.prevent
+                                                @click="toggleFocusedSign"
+                                            >
+                                                ±
+                                            </button>
+                                            <span
+                                                v-else
+                                                class="ml-1 inline-block h-5 w-5 align-middle"
+                                                aria-hidden="true"
+                                            ></span>
+                                        </template>
                                         <span
                                             v-else
                                             class="font-semibold"
@@ -877,10 +1007,10 @@ const deleteGame = () => {
                                         <td
                                             v-if="fi === 0"
                                             :rowspan="fields.length"
-                                            class="px-3 py-2 align-top font-medium text-body"
+                                            class="sticky left-0 z-10 w-[52px] bg-surface px-2 py-2 align-top font-medium text-body"
                                         >
                                             <span
-                                                class="flex items-center gap-1.5"
+                                                class="flex w-9 items-center gap-1"
                                             >
                                                 {{ r.round_number }}
                                                 <button
@@ -908,10 +1038,10 @@ const deleteGame = () => {
                                             </span>
                                         </td>
                                         <td
-                                            class="whitespace-nowrap px-2 py-1"
+                                            class="sticky left-[52px] z-10 whitespace-nowrap bg-surface px-2 py-1"
                                         >
                                             <span
-                                                class="flex items-center gap-1.5 text-sm text-muted"
+                                                class="flex max-w-[9rem] items-center gap-1.5 text-sm text-muted sm:max-w-none"
                                             >
                                                 <span
                                                     v-if="f.color"
@@ -921,7 +1051,33 @@ const deleteGame = () => {
                                                             f.color,
                                                     }"
                                                 ></span>
-                                                {{ f.label }}
+                                                <span
+                                                    class="min-w-0 truncate"
+                                                    :title="f.label"
+                                                    >{{ f.label }}</span
+                                                >
+                                                <!-- Sign flip for the cell
+                                                     being edited in this row;
+                                                     the numeric keypad has no
+                                                     minus key. The slot is
+                                                     always reserved so the
+                                                     frozen column never
+                                                     reflows mid-typing. -->
+                                                <button
+                                                    v-if="rowHasFocus(r.id, f.key)"
+                                                    type="button"
+                                                    class="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border-strong text-xs font-semibold text-muted hover:border-primary hover:text-primary"
+                                                    title="Make this score negative"
+                                                    @pointerdown.prevent
+                                                    @click="toggleFocusedSign"
+                                                >
+                                                    ±
+                                                </button>
+                                                <span
+                                                    v-else
+                                                    class="ml-auto h-5 w-5 shrink-0"
+                                                    aria-hidden="true"
+                                                ></span>
                                             </span>
                                         </td>
                                         <td
@@ -938,13 +1094,32 @@ const deleteGame = () => {
                                                     inputs[r.id][c.id][f.key]
                                                 "
                                                 type="number"
+                                                inputmode="numeric"
+                                                enterkeyhint="next"
                                                 :data-cell="`${r.id}:${c.id}:${f.key}`"
                                                 @input="
                                                     markDirty(r.id, c.id, f.key)
                                                 "
+                                                @focus="
+                                                    onCellFocus(
+                                                        `${r.id}:${c.id}:${f.key}`,
+                                                    )
+                                                "
+                                                @blur="
+                                                    onCellBlur(
+                                                        `${r.id}:${c.id}:${f.key}`,
+                                                    )
+                                                "
                                                 @keydown.tab="
                                                     onScoreTab(
                                                         $event,
+                                                        r.id,
+                                                        c.id,
+                                                        f.key,
+                                                    )
+                                                "
+                                                @keydown.enter.prevent="
+                                                    onScoreEnter(
                                                         r.id,
                                                         c.id,
                                                         f.key,
@@ -967,7 +1142,7 @@ const deleteGame = () => {
                                     <tr class="text-sm">
                                         <td
                                             colspan="2"
-                                            class="px-3 py-1 font-medium text-muted"
+                                            class="sticky left-0 z-10 bg-surface px-2 py-1 font-medium text-muted"
                                         >
                                             Round total
                                         </td>
@@ -1002,7 +1177,7 @@ const deleteGame = () => {
                                 <tr>
                                     <td
                                         :colspan="singleField ? 1 : 2"
-                                        class="border-t-2 border-border-strong px-3 py-3 align-top font-semibold text-body"
+                                        class="sticky left-0 z-10 border-t-2 border-border-strong bg-surface px-2 py-3 align-top font-semibold text-body"
                                     >
                                         Total
                                     </td>
@@ -1014,24 +1189,6 @@ const deleteGame = () => {
                                     >
                                         <div class="font-bold">
                                             {{ totals[c.id] ?? 0 }}
-                                        </div>
-                                        <div
-                                            v-if="!singleField"
-                                            class="text-xs opacity-70"
-                                        >
-                                            <span
-                                                v-for="(f, i) in fields"
-                                                :key="f.key"
-                                                >{{ f.label }}
-                                                {{
-                                                    fieldSubtotals[c.id]?.[
-                                                        f.key
-                                                    ] ?? 0
-                                                }}<span
-                                                    v-if="i < fields.length - 1"
-                                                    >, </span
-                                                ></span
-                                            >
                                         </div>
                                     </td>
                                 </tr>
