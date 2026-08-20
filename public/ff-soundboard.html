@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Feud — Sound Test</title>
+<style>
+  :root{
+    --bg:#0e1116; --surface:#161b22; --surface-2:#1c2330; --border:#2a3342;
+    --body:#e6edf3; --muted:#9aa7b4; --primary:#3fb950; --gold:#d9a441;
+    --danger:#f0554e; --info:#4a9eea;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg);color:var(--body);padding:28px}
+  h1{font-size:22px;margin:0 0 4px}
+  p.sub{color:var(--muted);margin:0 0 24px}
+  .now{font-size:13px;color:var(--muted);min-height:18px;margin:0 0 20px}
+  .now b{color:var(--gold)}
+  section{margin-bottom:28px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+    border-bottom:1px solid var(--border);padding-bottom:6px;margin:0 0 14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+  button.snd{display:flex;flex-direction:column;gap:4px;text-align:left;cursor:pointer;
+    background:var(--surface);border:1px solid var(--border);border-radius:12px;
+    padding:14px 16px;color:var(--body);transition:.12s}
+  button.snd:hover{background:var(--surface-2);border-color:#3a4556}
+  button.snd:active{transform:translateY(1px)}
+  button.snd.playing{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
+  button.snd.missing{opacity:.5;cursor:not-allowed}
+  .snd .label{font-weight:600;font-size:15px}
+  .snd .moment{font-size:12px;color:var(--muted)}
+  .snd .file{font-size:11px;color:#5f6b78;font-family:ui-monospace,Menlo,monospace}
+  .row{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+  .vol{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+  .stopbtn{background:var(--surface-2);border:1px solid var(--border);color:var(--body);
+    border-radius:8px;padding:8px 14px;cursor:pointer}
+  .stopbtn:hover{border-color:var(--danger);color:var(--danger)}
+  .tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:6px;
+    background:rgba(63,185,80,.14);color:var(--primary);margin-left:8px}
+</style>
+</head>
+<body>
+  <h1>Family Feud — Sound Test <span class="tag">9 clips</span></h1>
+  <p class="sub">Click any tile to play. Mapped to the America-Says-style flow so each clip sits where its moment happens.</p>
+
+  <div class="row">
+    <button class="stopbtn" id="stop">■ Stop</button>
+    <div class="vol"><label for="vol">Volume</label>
+      <input id="vol" type="range" min="0" max="1" step="0.05" value="0.8"></div>
+  </div>
+  <p class="now" id="now">Ready.</p>
+
+  <section>
+    <h2>Main Game</h2>
+    <div class="grid" id="main"></div>
+  </section>
+
+  <section>
+    <h2>Fast Money</h2>
+    <div class="grid" id="fm"></div>
+  </section>
+
+<script>
+  const SOUNDS = {
+    main: [
+      { file:'Intro.m4a',        label:'Intro',          moment:'Show open — like the America Says intro' },
+      { file:'AnswerReveal.m4a', label:'Answer Reveal',  moment:'A correct answer flips open on the board' },
+      { file:'Strike.m4a',       label:'Strike',         moment:'Wrong / no-match answer — the big red X' },
+      { file:'Buzzer.m4a',       label:'Buzzer',         moment:'Time up / round-ending buzzer' },
+    ],
+    fm: [
+      { file:'FastMoneyTimer1.m4a',      label:'Timer — Player 1', moment:'Fast Money first pass (20s bed)' },
+      { file:'FastMoneyTimer2.m4a',      label:'Timer — Player 2', moment:'Fast Money second pass (25s bed)' },
+      { file:'FastMoneyAnswerReveal.m4a',label:'Answer Reveal',    moment:'Reveal the survey answer given' },
+      { file:'FastMoneyPointsReveal.m4a',label:'Points Reveal',    moment:'Ding — points for that answer' },
+      { file:'FastMoneyZeroPoints.m4a',  label:'Zero Points',      moment:'Buzz — answer scored nothing' },
+    ],
+  };
+
+  const now = document.getElementById('now');
+  const vol = document.getElementById('vol');
+  let current = null, currentBtn = null;
+
+  function play(item, btn){
+    if (current){ current.pause(); current.currentTime = 0; }
+    if (currentBtn) currentBtn.classList.remove('playing');
+    const a = new Audio('/sounds/family-feud/' + item.file);
+    a.volume = parseFloat(vol.value);
+    current = a; currentBtn = btn;
+    btn.classList.add('playing');
+    now.innerHTML = '▶ <b>' + item.label + '</b> — ' + item.moment;
+    a.addEventListener('ended', () => { btn.classList.remove('playing'); if (current===a) now.textContent='Ready.'; });
+    a.addEventListener('error', () => { btn.classList.add('missing'); now.textContent = 'Missing file: ' + item.file; });
+    a.play().catch(err => { now.textContent = 'Blocked: ' + err.message; });
+  }
+
+  function render(list, mount){
+    list.forEach(item => {
+      const b = document.createElement('button');
+      b.className = 'snd';
+      b.innerHTML = '<span class="label">'+item.label+'</span>'
+        + '<span class="moment">'+item.moment+'</span>'
+        + '<span class="file">'+item.file+'</span>';
+      b.onclick = () => play(item, b);
+      mount.appendChild(b);
+    });
+  }
+  render(SOUNDS.main, document.getElementById('main'));
+  render(SOUNDS.fm, document.getElementById('fm'));
+
+  document.getElementById('stop').onclick = () => {
+    if (current){ current.pause(); current.currentTime = 0; }
+    if (currentBtn) currentBtn.classList.remove('playing');
+    now.textContent = 'Stopped.';
+  };
+  vol.oninput = () => { if (current) current.volume = parseFloat(vol.value); };
+</script>
+</body>
+</html>

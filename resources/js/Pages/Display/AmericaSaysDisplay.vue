@@ -81,7 +81,7 @@ const orderedTeams = computed(() =>
 const usMapPath = US_MAP_PATH;
 
 // Sound effects: uploaded clips in public/sounds/ (correct / incorrect / timeout).
-const sounds = useSoundEffects();
+const sounds = useSoundEffects('america-says');
 
 // Background round music — its own channel at a lower volume so the one-shot
 // effects cut through it. Plays while the timer runs and pauses with it (see the
@@ -99,7 +99,7 @@ let bgm: HTMLAudioElement | null = null;
 let bgmObjectUrl: string | null = null;
 const preloadBgmBlob = () => {
     if (bgmObjectUrl) return;
-    fetch('/sounds/GameplayMusic.m4a')
+    fetch('/sounds/america-says/GameplayMusic.m4a')
         .then((r) => r.blob())
         .then((b) => {
             bgmObjectUrl = URL.createObjectURL(b);
@@ -109,7 +109,7 @@ const preloadBgmBlob = () => {
 };
 const getBgm = (): HTMLAudioElement => {
     if (!bgm) {
-        bgm = new Audio(bgmObjectUrl ?? '/sounds/GameplayMusic.m4a');
+        bgm = new Audio(bgmObjectUrl ?? '/sounds/america-says/GameplayMusic.m4a');
         bgm.preload = 'auto';
         bgm.volume = 0.4;
     }
@@ -121,7 +121,7 @@ const getBgm = (): HTMLAudioElement => {
 let theme: HTMLAudioElement | null = null;
 const getTheme = (): HTMLAudioElement => {
     if (!theme) {
-        theme = new Audio('/sounds/ThemeMusic.m4a');
+        theme = new Audio('/sounds/america-says/ThemeMusic.m4a');
         theme.preload = 'auto';
         theme.volume = 0.6;
     }
