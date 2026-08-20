@@ -68,7 +68,10 @@ class ScoreGameService
     }
 
     /**
-     * Record (or overwrite) each competitor's field values for a round.
+     * Merge each competitor's submitted field values into a round. Only the
+     * fields present in $byCompetitor are touched; a null value clears that
+     * one field. Absent fields keep whatever is already stored, so two people
+     * scoring the same round from different phones can't erase each other.
      *
      * @param  array<int, array<string, int|string|null>>  $byCompetitor  [competitorId => [fieldKey => value]]
      */
@@ -76,18 +79,37 @@ class ScoreGameService
     {
         DB::transaction(function () use ($round, $byCompetitor) {
             foreach ($byCompetitor as $competitorId => $values) {
-                $clean = [];
+                // Merge into what's stored instead of replacing it. A save
+                // carries only the cells that device edited, so any field it
+                // left out has to keep the value another player may have
+                // saved from their own phone seconds earlier. A field sent as
+                // null is an explicit clear. The row lock stops two
+                // simultaneous merges from losing one of the updates.
+                $existing = RoundScore::where('round_id', $round->id)
+                    ->where('competitor_id', (int) $competitorId)
+                    ->lockForUpdate()
+                    ->first();
+
+                $merged = $existing?->values ?? [];
                 foreach ($values as $key => $value) {
                     if ($value === null || $value === '') {
-                        continue;
+                        unset($merged[$key]);
+                    } else {
+                        $merged[$key] = (int) $value;
                     }
-                    $clean[$key] = (int) $value;
                 }
 
-                RoundScore::updateOrCreate(
-                    ['round_id' => $round->id, 'competitor_id' => (int) $competitorId],
-                    ['values' => $clean],
-                );
+                if ($existing) {
+                    $existing->update(['values' => $merged]);
+
+                    continue;
+                }
+
+                RoundScore::create([
+                    'round_id'      => $round->id,
+                    'competitor_id' => (int) $competitorId,
+                    'values'        => $merged,
+                ]);
             }
         });
     }

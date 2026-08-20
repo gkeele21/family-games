@@ -6,6 +6,7 @@ use App\Models\GameSession;
 use App\Models\PropOff\Entry;
 use App\Models\PropOff\Event;
 use App\Models\PropOff\Leaderboard;
+use App\Models\Scorekeeper\HouseholdInvite;
 use App\Models\Scorekeeper\ScoredGame;
 use App\Services\Scorekeeper\ScoreGameService;
 use Illuminate\Support\Facades\Auth;
@@ -30,6 +31,7 @@ class DashboardController extends Controller
             ->get()
             ->map(fn (GameSession $g) => [
                 'kind'             => 'trivia',
+                'is_mine'          => true,
                 'id'               => $g->id,
                 'name'             => $g->name,
                 'status'           => $g->status,
@@ -43,11 +45,17 @@ class DashboardController extends Controller
 
         // In-progress scorekeeper games from any household the user belongs to
         $activeScoredGames = ScoredGame::withCount('competitors')
+            ->with('competitors.players:players.id,players.user_id')
             ->whereIn('household_id', $householdIds)
             ->where('is_complete', false)
             ->get()
             ->map(fn (ScoredGame $g) => [
                 'kind'             => 'scorekeeper',
+                // Games the user was actually added to as a player, vs. other
+                // games running in their households.
+                'is_mine'          => $g->competitors
+                    ->flatMap->players
+                    ->contains('user_id', $user->id),
                 'id'               => $g->id,
                 'name'             => $g->template_name_snapshot,
                 'status'           => 'scoring',
@@ -67,6 +75,7 @@ class DashboardController extends Controller
             ->get()
             ->map(fn ($group) => [
                 'kind'             => 'propoff',
+                'is_mine'          => true,
                 'id'               => $group->id,
                 'name'             => $group->event->name,
                 'status'           => $group->event->status,
@@ -82,6 +91,10 @@ class DashboardController extends Controller
             ->concat($activeScoredGames)
             ->concat($activePropOffGames)
             ->sortByDesc('updated_at')
+            // Games the user is playing in come first; the rest of their
+            // households' games follow. sortBy is stable, so the recency
+            // order above holds within each group.
+            ->sortBy(fn (array $g) => $g['is_mine'] ? 0 : 1)
             ->values();
 
         // Recent completed trivia games. "Who played" comes from the attendance
@@ -258,8 +271,26 @@ class DashboardController extends Controller
                 'players' => $h->players->map(fn ($p) => ['id' => $p->id, 'name' => $p->name])->values(),
             ])->values();
 
+        // Household invites still waiting on this user — accepting one is what
+        // gets them into that household's games.
+        $pendingInvites = HouseholdInvite::with(['household', 'invitedBy'])
+            ->whereRaw('LOWER(email) = ?', [strtolower($user->email)])
+            ->whereNull('accepted_at')
+            ->where('expires_at', '>', now())
+            ->whereNotIn('household_id', $householdIds)
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn (HouseholdInvite $invite) => [
+                'token'          => $invite->token,
+                'household_name' => $invite->household->name,
+                'inviter_name'   => $invite->invitedBy?->name,
+                'role'           => $invite->role,
+            ])
+            ->values();
+
         return Inertia::render('Dashboard', [
             'activeGames' => $activeGames,
+            'pendingInvites' => $pendingInvites,
             'recentGames' => $recentGames,
             'attendanceRosters' => $attendanceRosters,
             'stats' => [

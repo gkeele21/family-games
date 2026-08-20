@@ -11,6 +11,9 @@ import axios from 'axios';
 
 interface ActiveGame {
     kind: 'trivia' | 'scorekeeper' | 'propoff';
+    // True when the signed-in user is playing in it, rather than it merely
+    // running in one of their households.
+    is_mine: boolean;
     id: number;
     name: string | null;
     status: 'lobby' | 'playing' | 'paused' | 'scoring' | 'open' | 'locked' | 'in_progress';
@@ -41,11 +44,19 @@ interface RecentGame {
     winners: Winner[];
 }
 
+interface PendingInvite {
+    token: string;
+    household_name: string;
+    inviter_name: string | null;
+    role: string;
+}
+
 interface RosterPlayer { id: number; name: string }
 interface AttendanceHousehold { id: number; name: string; players: RosterPlayer[] }
 
 const props = defineProps<{
     activeGames: ActiveGame[];
+    pendingInvites: PendingInvite[];
     recentGames: RecentGame[];
     attendanceRosters: AttendanceHousehold[];
 }>();
@@ -272,6 +283,32 @@ const getActiveGameLink = (game: ActiveGame) => {
                 </form>
             </div>
 
+            <!-- ===== Pending invites ===== -->
+            <div v-if="pendingInvites.length" class="overflow-hidden rounded-[18px] border border-info/30 bg-info/5">
+                <div class="border-b border-info/30 px-6 py-4">
+                    <h3 class="text-base font-semibold text-body">You've been invited</h3>
+                </div>
+                <div class="divide-y divide-info/20">
+                    <div
+                        v-for="invite in pendingInvites"
+                        :key="invite.token"
+                        class="flex items-center gap-4 px-6 py-4"
+                    >
+                        <div class="min-w-0 flex-1">
+                            <h4 class="font-semibold text-body">{{ invite.household_name }}</h4>
+                            <div class="text-sm text-muted">
+                                <template v-if="invite.inviter_name">{{ invite.inviter_name }} invited you</template>
+                                <template v-else>Invitation pending</template>
+                                <span> &middot; joins as {{ invite.role }}</span>
+                            </div>
+                        </div>
+                        <Link :href="route('scorekeeper.invites.show', invite.token)" class="btn-resume">
+                            View invite
+                        </Link>
+                    </div>
+                </div>
+            </div>
+
             <!-- ===== Active now ===== -->
             <div v-if="activeGames.length" class="overflow-hidden rounded-[18px] border border-border bg-surface">
                 <div class="border-b border-border px-6 py-4">
@@ -294,6 +331,12 @@ const getActiveGameLink = (game: ActiveGame) => {
                                 <span>{{ game.competitor_count }} {{ game.team_based ? 'teams' : 'players' }}</span>
                             </div>
                         </div>
+                        <span
+                            v-if="game.kind === 'scorekeeper' && game.is_mine"
+                            class="rounded-full bg-primary/15 px-3 py-1 text-xs font-semibold text-primary"
+                        >
+                            You're in
+                        </span>
                         <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="getStatusBadge(game.status).class">
                             {{ getStatusBadge(game.status).text }}
                         </span>

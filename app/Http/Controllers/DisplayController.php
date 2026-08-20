@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\BuildsFastMoneyBoard;
 use App\Models\GameSession;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class DisplayController extends Controller
 {
+    use BuildsFastMoneyBoard;
+
     /**
      * Code-entry landing page for the TV display. This is the stable URL you add
      * to an iPhone home screen once: launching it opens chromeless (via the
@@ -84,12 +87,13 @@ class DisplayController extends Controller
 
         $state = $gameSession->gameState;
         $currentQuestion = $state?->currentQuestion;
+        $isFamilyFeud = $gameSession->gameType->slug === 'family-feud';
 
         // For display, we hide unrevealed answers (same as player view)
         $answers = [];
         if ($currentQuestion) {
             $revealedIds = $currentQuestion->revealedAnswerIds();
-            $answers = $currentQuestion->question->answers->map(function ($answer) use ($revealedIds) {
+            $answers = $currentQuestion->question->answers->map(function ($answer) use ($revealedIds, $currentQuestion) {
                 $revealed = in_array($answer->id, $revealedIds);
                 return [
                     'id' => $answer->id,
@@ -97,6 +101,10 @@ class DisplayController extends Controller
                     'points' => $revealed ? $answer->points : null,
                     'display_order' => $answer->display_order,
                     'revealed' => $revealed,
+                    // Feud pool contribution: the survey points for face-off/primary
+                    // reveals, 0 for a steal reveal (drives the board's "pot" so the
+                    // steal answer lights up but doesn't inflate the total).
+                    'pool_points' => (int) ($currentQuestion->answerReveals->firstWhere('answer_id', $answer->id)?->points_awarded ?? 0),
                 ];
             });
         }
@@ -120,6 +128,15 @@ class DisplayController extends Controller
             $pending = $gameSession->sessionQuestions()->where('status', 'pending');
             $finalQueued = (clone $pending)->where('segment', 'final')->exists()
                 && !(clone $pending)->where('segment', '!=', 'final')->exists();
+        }
+
+        // Family Feud: a team has reached the target (300), so the regular game is
+        // won — the recap turns into a "Team X Wins the game" celebration before
+        // Fast Money (the AS crown-the-leader beat, Feud's equivalent).
+        $feudTargetReached = false;
+        if ($isFamilyFeud && ($currentQuestion?->segment ?? 'main') === 'main') {
+            $target = (int) $gameSession->getConfig('target_score', 300);
+            $feudTargetReached = (int) ($gameSession->teams()->max('total_score') ?? 0) >= $target;
         }
 
         // Get controlling team IDs from state_data if multiple teams
@@ -169,8 +186,38 @@ class DisplayController extends Controller
                 // Monotonic counter bumped by the host's "Wrong" buzzer; the
                 // display plays its incorrect sound each time it advances.
                 'wrong_buzz' => $state?->getStateValue('wrong_buzz'),
+                // Family Feud: the authoritative strike count (the board flashes N
+                // X's and sounds the strike/buzzer cue when it rises), the strike
+                // limit, and the round's point multiplier (rounds 1-2 = 1×, etc.).
+                'strikes' => $isFamilyFeud ? (int) $state?->getStateValue('strikes', 0) : null,
+                'max_strikes' => $isFamilyFeud ? (int) $gameSession->getConfig('max_strikes', 3) : null,
+                // Face-off cues: a buzz-in sounds the buzzer; a wrong face-off
+                // answer flashes a strike X — both bumped as monotonic counters.
+                'faceoff_buzz' => $isFamilyFeud ? (int) $state?->getStateValue('faceoff_buzz', 0) : null,
+                'faceoff_strike' => $isFamilyFeud ? (int) $state?->getStateValue('faceoff_strike', 0) : null,
+                // The host "armed" the face-off from the intro — the display fires the
+                // face-off music + lights the bulbs while still on the matchup slide.
+                'faceoff_armed' => $isFamilyFeud ? (bool) $state?->getStateValue('faceoff_armed', false) : null,
+                // The face-off winner who's now deciding Play/Pass — the board shows a
+                // "{Team} — Play or Pass?" prompt while they choose (phase 'faceoff').
+                'feud_decider' => $isFamilyFeud && is_array($state?->getStateValue('faceoff'))
+                    ? ($state->getStateValue('faceoff')['decider'] ?? null)
+                    : null,
+                // Face-off winner's Play/Pass call — the board flashes a bottom banner.
+                'feud_decision' => $isFamilyFeud ? $state?->getStateValue('feud_decision') : null,
+                // The team that won the round's pool — the board flashes a bottom
+                // "WINS THE ROUND!" banner until the leftover answers are revealed.
+                'feud_round_winner' => $isFamilyFeud ? $state?->getStateValue('feud_round_winner') : null,
+                'round_multiplier' => $isFamilyFeud && $currentQuestion
+                    ? $this->feudRoundMultiplier($gameSession, $currentQuestion)
+                    : null,
+                // Family Feud Fast Money board (rows + totals), null unless active.
+                'fast_money' => $isFamilyFeud ? $this->fastMoneyPayload($gameSession, $state) : null,
                 // True on the last regular round's recap, before the final begins.
                 'final_queued' => $finalQueued,
+                // Family Feud: a team hit the target — the recap crowns the game
+                // winner before Fast Money.
+                'feud_target_reached' => $feudTargetReached,
                 // True when the recap follows the last question of the round.
                 'end_of_round' => $endOfRound,
             ],
@@ -206,6 +253,20 @@ class DisplayController extends Controller
      * squishes the underscores into a continuous line, so the exact character
      * count stays hidden while hyphens still read correctly.
      */
+    /**
+     * The round multiplier for the current Feud question (stored at init as
+     * points_available), falling back to the config schedule, then 1×.
+     */
+    private function feudRoundMultiplier($gameSession, $currentQuestion): int
+    {
+        $mult = (int) $currentQuestion->points_available;
+        if ($mult > 0) {
+            return $mult;
+        }
+        $schedule = $gameSession->getConfig('round_multipliers', []);
+        return (int) ($schedule[(string) ($currentQuestion->round_number ?? 1)] ?? 1);
+    }
+
     private function obfuscateAnswer(string $text): string
     {
         $words = array_map(function ($word) {

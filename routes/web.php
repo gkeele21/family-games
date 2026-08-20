@@ -75,6 +75,25 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/round/end', [HostController::class, 'endRound'])->name('host.round.end');
     Route::post('/host/{gameSession}/steal/start', [HostController::class, 'stealStart'])->name('host.steal.start');
     Route::post('/host/{gameSession}/steal/reveal', [HostController::class, 'setStealReveal'])->name('host.steal.reveal');
+    // Family Feud regular-round flow (face-off → play → strikes → steal → resolve).
+    Route::post('/host/{gameSession}/feud/faceoff/start', [HostController::class, 'feudFaceoffStart'])->name('host.feud.faceoff.start');
+    Route::post('/host/{gameSession}/feud/faceoff/buzz', [HostController::class, 'feudFaceoffBuzz'])->name('host.feud.faceoff.buzz');
+    Route::post('/host/{gameSession}/feud/play', [HostController::class, 'feudStartPlay'])->name('host.feud.play');
+    Route::post('/host/{gameSession}/feud/strike', [HostController::class, 'feudStrike'])->name('host.feud.strike');
+    Route::post('/host/{gameSession}/feud/clear-strikes', [HostController::class, 'feudClearStrikes'])->name('host.feud.clear-strikes');
+    Route::post('/host/{gameSession}/feud/resolve', [HostController::class, 'feudResolve'])->name('host.feud.resolve');
+    Route::post('/host/{gameSession}/feud/finish-reveal', [HostController::class, 'feudFinishReveal'])->name('host.feud.finish-reveal');
+    // Family Feud Fast Money (two timed passes over the same 5 questions).
+    Route::post('/host/{gameSession}/feud/fast-money/start', [HostController::class, 'fmStartPlayer'])->name('host.feud.fm.start');
+    Route::post('/host/{gameSession}/feud/fast-money/capture', [HostController::class, 'fmCapture'])->name('host.feud.fm.capture');
+    Route::post('/host/{gameSession}/feud/fast-money/clear', [HostController::class, 'fmClear'])->name('host.feud.fm.clear');
+    Route::post('/host/{gameSession}/feud/fast-money/miss-text', [HostController::class, 'fmMissText'])->name('host.feud.fm.miss-text');
+    Route::post('/host/{gameSession}/feud/fast-money/to-reveal', [HostController::class, 'fmToReveal'])->name('host.feud.fm.to-reveal');
+    Route::post('/host/{gameSession}/feud/fast-money/reveal-cell', [HostController::class, 'fmRevealCell'])->name('host.feud.fm.reveal-cell');
+    Route::post('/host/{gameSession}/feud/fast-money/next-player', [HostController::class, 'fmNextPlayer'])->name('host.feud.fm.next-player');
+    Route::post('/host/{gameSession}/feud/fast-money/show-previous', [HostController::class, 'fmShowPrevious'])->name('host.feud.fm.show-previous');
+    Route::post('/host/{gameSession}/feud/fast-money/result', [HostController::class, 'fmResult'])->name('host.feud.fm.result');
+    Route::post('/host/{gameSession}/feud/fast-money/back-to-reveal', [HostController::class, 'fmBackToReveal'])->name('host.feud.fm.back-to-reveal');
     Route::post('/host/{gameSession}/final/show', [HostController::class, 'finalShowQuestion'])->name('host.final.show');
     Route::post('/host/{gameSession}/final/start', [HostController::class, 'finalStart'])->name('host.final.start');
     Route::post('/host/{gameSession}/final/next', [HostController::class, 'finalNext'])->name('host.final.next');
@@ -88,7 +107,6 @@ Route::middleware('auth')->group(function () {
     Route::post('/host/{gameSession}/tiebreaker/resolve', [HostController::class, 'tiebreakerResolve'])->name('host.tiebreaker.resolve');
     Route::post('/host/{gameSession}/tiebreaker/to-final', [HostController::class, 'tiebreakerToFinal'])->name('host.tiebreaker.to-final');
     Route::post('/host/{gameSession}/question/next', [HostController::class, 'nextQuestion'])->name('host.question.next');
-    Route::post('/host/{gameSession}/question/previous', [HostController::class, 'previousQuestion'])->name('host.question.previous');
     Route::post('/host/{gameSession}/question/correct', [HostController::class, 'markCorrect'])->name('host.question.correct');
     Route::post('/host/{gameSession}/question/wrong', [HostController::class, 'markWrong'])->name('host.question.wrong');
     Route::post('/host/{gameSession}/buzz/wrong', [HostController::class, 'buzzWrong'])->name('host.buzz.wrong');

@@ -302,22 +302,18 @@ const qsel = computed(() => settingsForm.settings.question_selection as QSelecti
 // Per-game slot shape. Regular grid = rows (rounds) × cols (America Says: one
 // per team; Family Feud: one face-off per round). Final section = America Says'
 // 4 answer-count tiers, or Family Feud's 5 flat Fast Money slots.
+// Family Feud is played like the real show — first to 300 wins — so the round
+// count isn't a setting: we always pre-pick the standard four (single, single,
+// double, triple), and a game that stays tight past them pulls extra questions
+// automatically at play time.
+const FF_ROUNDS = 4;
 const regularCols = computed(() => (gameSlug.value === 'family-feud' ? 1 : teamsCount.value));
 const regularRowCount = computed(() =>
-    gameSlug.value === 'family-feud'
-        ? Math.max(1, Math.min(8, Number(settingsForm.settings.rounds_per_game) || 4))
-        : rounds.value.length,
+    gameSlug.value === 'family-feud' ? FF_ROUNDS : rounds.value.length,
 );
-const regularRowLabel = (i: number) => `Round ${i + 1}`;
-
-// Family Feud rounds stepper (America Says gets its count from Rounds & scoring).
-const ffRoundsInput = ref(regularRowCount.value);
-watch(regularRowCount, (n) => (ffRoundsInput.value = n));
-const applyFfRounds = (n: number) => {
-    const target = Math.max(1, Math.min(8, Number(n) || 1));
-    ffRoundsInput.value = target;
-    settingsForm.settings.rounds_per_game = target;
-};
+const ffRoundMultiplier = (i: number) => (i < 2 ? '×1' : i === 2 ? '×2' : '×3');
+const regularRowLabel = (i: number) =>
+    gameSlug.value === 'family-feud' ? `Round ${i + 1} · ${ffRoundMultiplier(i)}` : `Round ${i + 1}`;
 
 // Final-section config, driven by game.
 const finalEnabledKey = computed(() => (gameSlug.value === 'family-feud' ? 'fast_money_enabled' : 'final_round_enabled'));
@@ -860,18 +856,22 @@ const copyDisplayUrl = () => {
 
             <!-- Family Feud rules -->
             <Card v-if="gameSlug === 'family-feud'" title="Rules">
-                <div class="max-w-xs">
-                    <Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" />
+                <!-- Strikes, the Fast Money toggle, and its two pass clocks on one
+                     row; the timers only appear when Fast Money is on. -->
+                <div class="flex flex-wrap items-end gap-x-5 gap-y-4">
+                    <div class="w-40"><Select v-model="settingsForm.settings.max_strikes" :options="strikeOptions" label="Strikes before steal" /></div>
+                    <div class="flex items-center gap-2 pb-2"><Toggle v-model="settingsForm.settings[finalEnabledKey]" :label="finalToggleLabel" /></div>
+                    <template v-if="finalEnabled">
+                        <div class="w-36"><NumberInput v-model="settingsForm.settings.fast_money_player1_seconds" label="Player 1 timer (s)" :min="5" :max="60" /></div>
+                        <div class="w-36"><NumberInput v-model="settingsForm.settings.fast_money_player2_seconds" label="Player 2 timer (s)" :min="5" :max="60" /></div>
+                    </template>
                 </div>
             </Card>
 
             <!-- Questions (per-slot picker: America Says + Family Feud) -->
             <Card v-if="isPickerGame" title="Questions">
                 <template #headerActions>
-                    <div v-if="gameSlug === 'family-feud'" class="flex items-center gap-3">
-                        <span class="text-sm text-muted">Rounds</span>
-                        <NumberInput :model-value="ffRoundsInput" :min="1" :max="8" @update:model-value="applyFfRounds" />
-                    </div>
+                    <span v-if="gameSlug === 'family-feud'" class="text-sm text-muted">First to 300 · 1×/1×/2×/3×</span>
                     <span v-else class="text-sm text-muted">{{ rounds.length }} rounds × {{ teamsCount }} {{ teamsCount === 1 ? 'team' : 'teams' }}</span>
                 </template>
 
@@ -912,12 +912,14 @@ const copyDisplayUrl = () => {
                             </div>
                         </div>
 
-                        <div class="mt-4 flex items-center gap-2 border-t border-border pt-4">
+                        <!-- America Says toggles its Final round here (beside the slots).
+                             Family Feud's Fast Money toggle lives in the Rules card. -->
+                        <div v-if="gameSlug === 'america-says'" class="mt-4 flex items-center gap-2 border-t border-border pt-4">
                             <Toggle v-model="settingsForm.settings[finalEnabledKey]" :label="finalToggleLabel" />
                             <span class="ml-auto text-xs text-subtle">{{ finalHint }}</span>
                         </div>
 
-                        <div v-if="finalEnabled" class="mt-3">
+                        <div v-if="finalEnabled" class="mt-3" :class="{ 'border-t border-border pt-4': gameSlug === 'family-feud' }">
                             <div class="mb-2 flex items-center gap-2">
                                 <h4 class="text-sm font-semibold text-body">{{ finalSectionTitle }}</h4>
                                 <span class="text-xs text-subtle">{{ finalSlotCount }} slots</span>

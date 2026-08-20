@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AmericaSaysDisplay from './AmericaSaysDisplay.vue';
+import FamilyFeudDisplay from './FamilyFeudDisplay.vue';
 import OodlesDisplay from './OodlesDisplay.vue';
-import GameTimer from '@/Components/GameTimer.vue';
 import DisplayFrame from '@/Components/Display/DisplayFrame.vue';
 import { Head } from '@inertiajs/vue3';
 import { ref, onMounted, onUnmounted, computed } from 'vue';
@@ -111,13 +111,6 @@ const winningTeam = computed(() => {
     if (teams.value.length === 0) return null;
     return teams.value.reduce((a, b) => a.total_score > b.total_score ? a : b);
 });
-
-const getControllingTeam = () => {
-    if (!currentQuestion.value?.controlling_team_id) return null;
-    return teams.value.find(t => t.id === currentQuestion.value?.controlling_team_id);
-};
-
-const isAllPlay = computed(() => currentQuestion.value?.control_status === 'all_play');
 </script>
 
 <template>
@@ -141,6 +134,17 @@ const isAllPlay = computed(() => currentQuestion.value?.control_status === 'all_
              playing / paused / completed) so the neon map is a constant backdrop. -->
         <AmericaSaysDisplay
             v-if="isAmericaSays"
+            :status="status"
+            :teams="teams"
+            :game-state="gameState"
+            :current-question="currentQuestion"
+            :invite-code="gameSession.invite_code"
+        />
+
+        <!-- Family Feud: one board handles every state (lobby / playing / paused /
+             completed) so the lit set is a constant backdrop, like America Says. -->
+        <FamilyFeudDisplay
+            v-else-if="isFamilyFeud"
             :status="status"
             :teams="teams"
             :game-state="gameState"
@@ -211,100 +215,8 @@ const isAllPlay = computed(() => currentQuestion.value?.control_status === 'all_
             :invite-code="gameSession.invite_code"
         />
 
-        <!-- Family Feud (fallback to generic display for now) -->
-        <div v-else class="min-h-screen bg-gradient-to-br from-red-900 via-orange-900 to-yellow-900 text-white flex flex-col">
-            <!-- Header -->
-            <div class="bg-black/40 p-4">
-                <div class="flex justify-between items-center">
-                    <h1 class="text-2xl font-bold">{{ gameSession.game_type.name }}</h1>
-
-                    <!-- Scoreboard -->
-                    <div class="flex items-center gap-6">
-                        <div
-                            v-for="team in sortedTeams"
-                            :key="team.id"
-                            class="flex items-center gap-3 px-4 py-2 rounded-lg transition-all"
-                            :class="{
-                                'ring-4 ring-yellow-400': currentQuestion?.controlling_team_id === team.id,
-                                'bg-white/10': currentQuestion?.controlling_team_id !== team.id,
-                            }"
-                            :style="{
-                                backgroundColor: currentQuestion?.controlling_team_id === team.id ? team.color : undefined,
-                            }"
-                        >
-                            <div
-                                class="w-4 h-4 rounded-full"
-                                :style="{ backgroundColor: team.color }"
-                            ></div>
-                            <span class="font-bold text-xl">{{ team.name }}</span>
-                            <span class="text-2xl font-mono font-bold">{{ team.total_score }}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Main Game Area -->
-            <div class="flex-1 flex flex-col p-6">
-                <!-- Control Status Banner -->
-                <div v-if="currentQuestion" class="mb-4">
-                    <div v-if="isAllPlay" class="bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 text-white rounded-xl p-4 text-center animate-pulse">
-                        <span class="text-3xl font-bold">ALL PLAY!</span>
-                    </div>
-                    <div
-                        v-else-if="getControllingTeam()"
-                        class="rounded-xl p-4 text-center text-white"
-                        :style="{ backgroundColor: getControllingTeam()?.color }"
-                    >
-                        <span class="text-3xl font-bold">{{ getControllingTeam()?.name }}</span>
-                        <span class="text-2xl ml-3">has control</span>
-                    </div>
-                </div>
-
-                <!-- Timer -->
-                <div v-if="gameState?.timer_started_at" class="flex justify-center mb-6">
-                    <div class="scale-150">
-                        <GameTimer
-                            :timer-started-at="gameState.timer_started_at"
-                            :timer-duration="gameState.timer_duration"
-                            :is-host="false"
-                        />
-                    </div>
-                </div>
-
-                <!-- Question & Answers -->
-                <div v-if="currentQuestion" class="flex-1 flex flex-col">
-                    <h2 class="text-5xl font-bold text-center mb-8 px-8">
-                        {{ currentQuestion.question_text }}
-                    </h2>
-
-                    <div class="flex-1 grid grid-cols-2 gap-4 px-8 max-w-6xl mx-auto w-full">
-                        <div
-                            v-for="answer in currentQuestion.answers"
-                            :key="answer.id"
-                            class="flex items-center justify-between p-6 rounded-xl text-center transition-all duration-500"
-                            :class="{
-                                'bg-green-500 text-white scale-105 shadow-2xl shadow-green-500/50': answer.revealed,
-                                'bg-white/10 backdrop-blur': !answer.revealed,
-                            }"
-                        >
-                            <div class="text-2xl font-semibold flex-1">
-                                {{ answer.answer_text }}
-                            </div>
-                            <div
-                                v-if="answer.revealed && answer.points"
-                                class="text-xl font-bold bg-black/30 px-4 py-2 rounded-lg ml-4"
-                            >
-                                {{ answer.points }}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div v-else class="flex-1 flex items-center justify-center">
-                    <p class="text-3xl text-gray-400">Waiting for next question...</p>
-                </div>
-            </div>
-        </div>
+        <!-- Family Feud is handled by <FamilyFeudDisplay> at the top level (it
+             owns every status), so it never reaches this generic branch. -->
     </template>
 
     <!-- Paused State -->

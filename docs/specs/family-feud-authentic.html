@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <title>Family Feud — Authentic Board Mockup</title>
 <style>
   /* =====================================================================
@@ -24,30 +25,43 @@
 
   .board{position:relative;width:100vw;height:100vh;overflow:hidden;
     background:
-      radial-gradient(120% 95% at 50% -10%, var(--set-core) 0%, var(--set-mid) 42%, var(--set-deep) 82%),
-      var(--set-deep);}
+      repeating-linear-gradient(90deg, rgba(160,120,45,.10) 0 2px, rgba(0,0,0,0) 2px 96px),
+      linear-gradient(90deg, rgba(180,130,50,.55) 0%, rgba(34,25,14,0) 18%, rgba(34,25,14,0) 82%, rgba(180,130,50,.55) 100%),
+      radial-gradient(120% 100% at 50% 40%, #362a18 0%, #201810 56%, #120c07 100%);}
+  /* gold proscenium — drawn as ONE continuous shape (SVG): an elliptical ring that
+     bulges into a pod on each side, with the blue score screen nested INSIDE each
+     pod (the box sits inside the bar, not overlapping it). */
+  .ffsvg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:min(94vw,1620px);aspect-ratio:1620/880;z-index:1;pointer-events:none;display:none;
+    filter:drop-shadow(0 0 30px rgba(240,180,60,.4)) drop-shadow(0 16px 40px rgba(0,0,0,.5));overflow:visible}
+  .ffsvg.show{display:block}
+  .ffscore{fill:#fff;font-family:"Arial Narrow","Helvetica Neue",Arial,sans-serif;font-weight:900;font-size:56px;
+    paint-order:stroke;stroke:#081026;stroke-width:4px;stroke-linejoin:round}
+  .ffname{fill:#fff;font-family:"Arial Narrow","Helvetica Neue",Arial,sans-serif;font-weight:900;
+    font-size:30px;text-transform:uppercase;letter-spacing:.5px;
+    paint-order:stroke;stroke:#0a0a12;stroke-width:5px;stroke-linejoin:round}
+  #ffsvg .ctrl rect{stroke:var(--tc,#4bd6ff);stroke-width:6px;
+    filter:drop-shadow(0 0 12px var(--tc,#4bd6ff))}
   /* Full back WALL of light bulbs — the whole set is a lit board, not just a ring
      around the answers. A tiled dot grid is the bulb field; a soft radial mask
      fades it toward the edges for depth; a slow twinkle makes it breathe. */
+  /* big blue glowing bulbs across the dark bronze wall */
   .board::before{content:"";position:absolute;inset:-2%;pointer-events:none;z-index:0;
     background-image:radial-gradient(circle,
-      rgba(216,235,255,.95) 0 1.5px,
-      rgba(120,170,255,.5) 2.2px 3.1px,
-      rgba(40,84,196,.14) 3.4px 5px,
-      transparent 5.4px);
-    background-size:44px 44px;
-    -webkit-mask-image:radial-gradient(125% 108% at 50% 34%, #000 38%, rgba(0,0,0,.4) 72%, transparent 100%);
-    mask-image:radial-gradient(125% 108% at 50% 34%, #000 38%, rgba(0,0,0,.4) 72%, transparent 100%);
+      rgba(175,222,255,1) 0 2.6px,
+      rgba(70,160,255,.82) 3.2px 4.7px,
+      rgba(20,72,178,.28) 5.4px 7px,
+      transparent 7.6px);
+    background-size:52px 52px;
+    -webkit-mask-image:radial-gradient(135% 122% at 50% 42%, #000 60%, rgba(0,0,0,.5) 84%, transparent 100%);
+    mask-image:radial-gradient(135% 122% at 50% 42%, #000 60%, rgba(0,0,0,.5) 84%, transparent 100%);
     animation:twinkle 4s ease-in-out infinite}
-  @keyframes twinkle{0%,100%{opacity:.6}50%{opacity:.85}}
-  /* Colored light washes drifting across the bulb wall (the set's moving lighting). */
+  @keyframes twinkle{0%,100%{opacity:.7}50%{opacity:.95}}
+  /* gentle blue light pooling over the wall */
   .wallglow{position:absolute;inset:0;z-index:0;pointer-events:none;mix-blend-mode:screen;
-    background:
-      radial-gradient(32% 26% at 22% 20%, rgba(80,150,255,.55), transparent 70%),
-      radial-gradient(30% 24% at 78% 26%, rgba(150,90,255,.42), transparent 70%),
-      radial-gradient(36% 30% at 60% 80%, rgba(60,120,255,.40), transparent 72%);
-    animation:drift 12s ease-in-out infinite alternate}
-  @keyframes drift{0%{transform:translate3d(-2%,-1%,0) scale(1.02)}100%{transform:translate3d(3%,2%,0) scale(1.08)}}
+    background:radial-gradient(62% 52% at 50% 44%, rgba(40,95,210,.3), transparent 76%);
+    animation:drift 14s ease-in-out infinite alternate}
+  @keyframes drift{0%{transform:translate3d(-1%,0,0)}100%{transform:translate3d(1%,1%,0)}}
   /* blue stage-floor glow */
   .board::after{content:"";position:absolute;left:0;right:0;bottom:0;height:30%;
     background:linear-gradient(0deg, rgba(60,110,255,.40), rgba(60,110,255,0) 100%);
@@ -73,82 +87,87 @@
     font-weight:800;margin-bottom:.25em;opacity:.9}
 
   /* ---- The answer board ------------------------------------------------- */
-  .boardwrap{position:absolute;left:50%;top:22%;transform:translateX(-50%);
-    width:68%;max-width:1120px;z-index:10}
-  /* marquee: a ring of chasing round bulbs around the board, like the show's set.
-     The frame color follows the round — gold on neutral / early rounds, blue on
-     triple & Fast Money (mirrors the real board's yellow→blue border change). */
-  .frame{position:relative;padding:clamp(16px,2.1vw,32px);border-radius:34px;
-    background:linear-gradient(180deg, rgba(10,26,94,.55), rgba(5,12,44,.6));
-    box-shadow:0 0 46px color-mix(in srgb, var(--frame) 55%, transparent),
-      inset 0 0 30px rgba(0,0,0,.5)}
-  .bulbs{position:absolute;inset:0;pointer-events:none;z-index:5}
-  .bulb{position:absolute;width:clamp(7px,.95vw,15px);height:clamp(7px,.95vw,15px);
-    border-radius:50%;transform:translate(-50%,-50%);opacity:.3;
-    background:radial-gradient(circle at 36% 30%, #fff, var(--frame) 58%, rgba(0,0,0,.35));
-    box-shadow:0 0 5px var(--frame);animation:bulb 1.5s linear infinite}
-  /* Traveling wave — bulbs light in sequence around the ring (staggered delay). */
-  @keyframes bulb{0%{opacity:.26;box-shadow:0 0 4px var(--frame)}
-    8%{opacity:1;box-shadow:0 0 10px var(--frame),0 0 22px var(--frame)}
-    22%{opacity:.26;box-shadow:0 0 4px var(--frame)}100%{opacity:.26}}
-  .panel{position:relative;border-radius:24px;padding:clamp(10px,1.6vw,22px);
-    background:linear-gradient(180deg,var(--board-1),var(--board-2));
-    border:3px solid var(--frame);
-    box-shadow:0 0 30px color-mix(in srgb, var(--frame) 45%, transparent),
-      inset 0 0 40px rgba(0,0,0,.45), 0 20px 50px rgba(0,0,0,.55)}
-  /* the amber running-total "pot" clipped into the top rail of the board */
-  .pot{position:absolute;top:0;left:50%;transform:translate(-50%,-52%);z-index:3;
-    min-width:2.6em;text-align:center;
-    padding:.06em .5em;border-radius:12px;
-    font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:.06em;
-    font-size:clamp(30px,3.6vw,64px);color:var(--led);
-    background:linear-gradient(180deg,#0a1a52,var(--pts-box));
-    border:3px solid var(--frame);
-    text-shadow:0 0 14px rgba(255,210,63,.7);
-    box-shadow:0 0 26px rgba(75,214,255,.5), inset 0 0 18px rgba(0,0,0,.6)}
+  .boardwrap{position:absolute;left:50%;top:47%;transform:translate(-50%,-50%);
+    width:min(58vw,1000px);z-index:10}
+  /* bright glowing YELLOW frame around the board (neon inner edge). */
+  .frame{position:relative;padding:clamp(7px,1vw,15px);border-radius:16px;
+    background:linear-gradient(180deg,#f3c145,#e2a62c);
+    border:2px solid #6f440f;
+    box-shadow:0 0 24px rgba(255,200,70,.4), 0 14px 36px rgba(0,0,0,.6),
+      inset 0 0 0 2px rgba(255,244,180,.85), inset 0 -2px 5px rgba(0,0,0,.35)}
+  /* black inner board the slots sit on */
+  .panel{position:relative;border-radius:10px;padding:clamp(8px,1.05vw,16px);
+    background:linear-gradient(180deg,#0c0f1a,#05070f);
+    border:2px solid #000;box-shadow:inset 0 0 34px rgba(0,0,0,.75)}
+  /* running-total "pot" — white number on a blue box inside a GOLD frame, centered
+     ABOVE the answer board (matches the current set). */
+  .pot{width:max-content;margin:0 auto clamp(8px,1.5vh,20px);
+    padding:clamp(4px,.5vw,8px);border-radius:9px;
+    background:linear-gradient(180deg,#9096a1,#565c66);   /* gray screen bezel */
+    border:1px solid #33383f;
+    box-shadow:0 10px 24px rgba(0,0,0,.55), inset 0 1px 2px rgba(255,255,255,.55)}
+  .pot .potnum{display:block;min-width:1.8em;text-align:center;padding:.04em .42em;border-radius:5px;
+    color:#fff;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:.02em;
+    font-size:clamp(30px,3.7vw,66px);
+    background:
+      radial-gradient(circle, rgba(150,205,255,.85) 0 1.4px, transparent 2.4px) 0 0/13px 13px,
+      linear-gradient(180deg,#2f8bf2,#1560d6);
+    border:1px solid #0f3f9e;text-shadow:0 2px 6px rgba(0,0,0,.6)}
 
-  .slots{display:grid;grid-template-columns:1fr 1fr;gap:clamp(7px,1vw,14px)}
-  .slots.single{grid-template-columns:1fr;max-width:70%;margin:0 auto}
-  .slot{position:relative;height:clamp(42px,6.4vh,78px);border-radius:12px;
-    perspective:900px}
-  .slot .inner{position:absolute;inset:0;transition:transform .5s cubic-bezier(.2,.7,.2,1);
+  .slots{display:grid;grid-template-columns:1fr 1fr;gap:clamp(6px,.85vw,13px)}
+  .slot{position:relative;height:clamp(40px,6.6vh,80px);border-radius:7px;perspective:900px}
+  .slot .inner{position:absolute;inset:0;transition:transform .6s cubic-bezier(.34,1.2,.5,1);
     transform-style:preserve-3d}
   .slot.open .inner{transform:rotateX(180deg)}
-  .face{position:absolute;inset:0;border-radius:12px;backface-visibility:hidden;
-    display:flex;align-items:center;overflow:hidden}
-  /* blank face: big centered number */
-  .blank{justify-content:center;
-    background:linear-gradient(180deg,var(--slot-1),var(--slot-2));
-    border:2px solid rgba(120,190,255,.6);
-    box-shadow:inset 0 2px 0 rgba(255,255,255,.18), inset 0 -6px 14px rgba(0,0,0,.4)}
-  .blank .num{font-weight:900;color:#eaf3ff;font-size:clamp(22px,3vw,44px);
-    text-shadow:0 0 14px rgba(120,190,255,.8),0 2px 4px rgba(0,0,0,.5)}
-  /* revealed face (back of the flip): answer text + points box */
-  .reveal{transform:rotateX(180deg);
-    background:linear-gradient(180deg,var(--ans-1),var(--ans-2));
-    border:2px solid rgba(150,210,255,.75);
-    box-shadow:inset 0 2px 0 rgba(255,255,255,.25)}
-  .reveal .atext{flex:1 1 auto;padding:0 .6em 0 .9em;color:#fff;font-weight:800;
-    text-transform:uppercase;letter-spacing:.02em;white-space:nowrap;overflow:hidden;
-    text-overflow:ellipsis;font-size:clamp(15px,1.9vw,32px);
-    text-shadow:0 2px 4px rgba(0,0,0,.5)}
-  .reveal .apts{flex:0 0 auto;align-self:stretch;min-width:2.1em;display:flex;
-    align-items:center;justify-content:center;color:var(--led);font-weight:900;
-    font-variant-numeric:tabular-nums;font-size:clamp(18px,2.2vw,38px);
-    background:linear-gradient(180deg,#0a1a52,var(--pts-box));
-    border-left:2px solid rgba(150,210,255,.5);
-    text-shadow:0 0 12px rgba(255,210,63,.7)}
+  .face{position:absolute;inset:0;border-radius:6px;backface-visibility:hidden;
+    display:flex;align-items:center;overflow:hidden;
+    border:clamp(2px,.32vw,5px) solid #e3ecf6;                 /* silver/chrome bevel */
+    box-shadow:0 0 0 1.5px #04060d,                            /* thin dark outer line */
+      inset 0 0 0 2px rgba(24,52,110,.75),                     /* thin dark inner line */
+      inset 0 5px 9px rgba(255,255,255,.5), inset 0 -9px 13px rgba(0,10,40,.42)}
+  /* glossy blue slot fill (shared by blank + revealed faces) */
+  .blank,.reveal{background:
+      linear-gradient(180deg, rgba(255,255,255,.5) 0%, rgba(255,255,255,0) 16%),
+      radial-gradient(120% 85% at 42% 40%, #5fb8ff 0%, #2b86f0 44%, #1560d6 100%)}
+  .blank{justify-content:center}
+  /* white number inside a raised navy OVAL badge with a shadow beneath it */
+  .blank .num{display:flex;align-items:center;justify-content:center;
+    width:clamp(46px,6.2vw,88px);height:clamp(28px,3.9vh,52px);border-radius:50%;
+    font-weight:900;color:#fff;font-size:clamp(18px,2.5vw,40px);
+    background:radial-gradient(120% 120% at 44% 32%, #3a72dc 0%, #0f327e 78%);
+    border:2px solid #cfe6ff;
+    box-shadow:0 6px 7px rgba(0,0,0,.5), inset 0 2px 3px rgba(255,255,255,.5),
+      inset 0 -3px 6px rgba(0,0,0,.5);
+    text-shadow:0 1px 2px rgba(0,0,0,.6)}
+  /* revealed face (back of the flip): white answer text + a lighter-blue points sub-box */
+  .reveal{transform:rotateX(180deg)}
+  .reveal .atext{flex:1 1 auto;padding:0 .35em 0 .7em;color:#fff;font-weight:900;
+    text-transform:uppercase;letter-spacing:.01em;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;font-size:clamp(15px,2vw,34px);
+    text-shadow:0 2px 3px rgba(0,0,0,.6),0 0 2px rgba(0,0,0,.5)}
+  .reveal .apts{flex:0 0 auto;align-self:stretch;min-width:1.7em;display:flex;
+    align-items:center;justify-content:center;color:#fff;font-weight:900;
+    font-variant-numeric:tabular-nums;font-size:clamp(17px,2.2vw,38px);
+    background:radial-gradient(120% 90% at 40% 38%, #86ccff, #3a93f4);
+    border-left:3px solid rgba(4,6,13,.7);
+    box-shadow:inset 2px 0 0 rgba(160,215,255,.7);
+    text-shadow:0 2px 3px rgba(0,0,0,.5)}
 
   /* ---- Strikes overlay -------------------------------------------------- */
   .strikes{position:absolute;inset:0;z-index:30;display:none;align-items:center;
     justify-content:center;gap:clamp(14px,3vw,60px)}
   .strikes.show{display:flex;animation:pop .25s ease-out}
-  .xmark{font-weight:900;color:#fff;font-size:clamp(90px,18vw,300px);line-height:.8;
+  /* Strike: a red rounded-square box with a glowing pink-white neon rim and a red X
+     inside — transparent between, so the board shows through the box. */
+  .xmark{font-weight:900;color:var(--strike);font-size:clamp(90px,18vw,300px);line-height:.8;
     width:1.05em;height:1.05em;display:flex;align-items:center;justify-content:center;
-    border:.14em solid #fff;border-radius:16px;
-    background:radial-gradient(120% 120% at 50% 30%, #ff5a4d, var(--strike));
-    box-shadow:0 0 50px rgba(239,43,29,.85), inset 0 0 30px rgba(0,0,0,.35);
-    text-shadow:0 4px 10px rgba(0,0,0,.5)}
+    border:.11em solid var(--strike);border-radius:.14em;background:transparent;
+    box-shadow:
+      inset 0 0 0 .02em rgba(255,205,205,.95),        /* bright neon rim inside the red border */
+      inset 0 0 .12em .01em rgba(255,150,150,.8),
+      0 0 .18em rgba(255,120,120,.7),
+      0 0 50px rgba(239,43,29,.75);
+    text-shadow:0 0 .06em rgba(255,190,190,.9), 0 0 22px rgba(239,43,29,.9)}
   @keyframes pop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
 
   /* ---- Team scoreboards (bottom corners) -------------------------------- */
@@ -204,16 +223,34 @@
   .chip .cp{font-weight:900;color:#fff;font-variant-numeric:tabular-nums;
     font-size:clamp(34px,4.4vw,74px);text-shadow:0 0 16px rgba(150,200,255,.5)}
 
-  /* Family Feud show lockup (stylized) */
-  .logo{display:inline-flex;flex-direction:column;align-items:center;line-height:1;
-    filter:drop-shadow(0 0 .12em rgba(190,220,255,.8)) drop-shadow(0 .04em .09em rgba(0,0,0,.55))}
-  .logo .w{color:#04102e;background:linear-gradient(180deg,#fff,#dfe9ff);
-    font-weight:900;text-transform:uppercase;border-radius:.12em;
-    padding:.06em .34em;transform:skewX(-8deg)}
-  .logo .w1{font-size:clamp(30px,5vw,80px);letter-spacing:.02em}
-  .logo .w2{font-size:clamp(46px,8vw,132px);letter-spacing:.01em;margin-top:.08em;
-    color:#fff;background:linear-gradient(180deg,#3f7bff,#1743bd);
-    box-shadow:0 0 30px rgba(75,214,255,.5)}
+  /* Family Feud show lockup — yellow/orange wordmark on a navy OVAL badge with
+     stacked gold + orange rings (the oval "badge behind it"). */
+  .ff-logo{position:relative;display:inline-grid;place-items:center;
+    padding:clamp(30px,6vw,84px) clamp(64px,13vw,210px)}
+  /* blue dotted oval badge behind the logo: blue field + dots, ringed by an orange
+     band inside a silver-blue chrome rim (part of the logo — shown on the lobby). */
+  .ff-logo::before{content:"";position:absolute;inset:0;border-radius:50%;
+    background:
+      radial-gradient(circle, rgba(150,185,245,.55) 0 1.3px, transparent 2.1px) 0 0/17px 17px,
+      radial-gradient(125% 125% at 50% 28%, #5474c6 0%, #33529f 55%, #274088 100%);
+    box-shadow:
+      inset 0 0 0 clamp(2px,.28vw,5px) rgba(190,215,255,.85),
+      0 0 0 clamp(4px,.55vw,9px) #d5852a,
+      0 0 0 clamp(9px,1.15vw,19px) #b3c4e0,
+      0 0 0 clamp(10px,1.3vw,21px) #5f6f8e,
+      0 0 34px rgba(80,120,220,.4),
+      inset 0 8px 20px rgba(255,255,255,.28), inset 0 -14px 32px rgba(0,0,0,.42)}
+  .ff-text{position:relative;display:flex;flex-direction:column;align-items:center;line-height:.84;
+    /* depth via filter so it can't interfere with the gradient text fill */
+    filter:drop-shadow(2px 3px 1px rgba(0,0,0,.5)) drop-shadow(1px 2px 0 #9c4418)}
+  /* bold SERIF letters, orange(top)→yellow(bottom) gradient clipped to the text */
+  .ff-1,.ff-2{font-family:Georgia,"Times New Roman",serif;font-weight:900;
+    text-transform:uppercase;line-height:1;
+    background-image:linear-gradient(180deg,#ef7a0e 0%,#ff9c1a 30%,#ffc21e 62%,#ffe83e 100%);
+    -webkit-background-clip:text;background-clip:text;
+    -webkit-text-fill-color:transparent;color:transparent}
+  .ff-1{letter-spacing:.01em;font-size:clamp(30px,5vw,86px)}
+  .ff-2{letter-spacing:.01em;font-size:clamp(34px,5.8vw,100px);margin-top:-.02em}
 
   /* ---- Fast Money board ------------------------------------------------- */
   .fm{width:min(1100px,86vw);display:flex;flex-direction:column;gap:1.6vh}
@@ -250,21 +287,53 @@
 
 <div class="board" id="board">
 
-  <!-- drifting colored light washes over the bulb wall -->
+  <!-- drifting light washes over the bulb wall -->
   <div class="wallglow"></div>
+
+  <!-- gold proscenium: one continuous ring that bulges into a pod on each side,
+       with the blue score screen nested inside each pod -->
+  <svg class="ffsvg" id="ffsvg" viewBox="0 0 1620 880" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <defs>
+      <linearGradient id="ffgold" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#f3c145"/><stop offset=".5" stop-color="#eab234"/>
+        <stop offset="1" stop-color="#dda328"/>
+      </linearGradient>
+      <pattern id="ffdots" width="12" height="12" patternUnits="userSpaceOnUse">
+        <rect width="12" height="12" fill="#1a5fd0"/>
+        <circle cx="3" cy="3" r="1.3" fill="#a8d6ff" opacity=".85"/>
+      </pattern>
+    </defs>
+    <!-- ONE continuous gold bar: oval arcs that run into each score box and trace its
+         outer three sides, then rejoin the oval (the box interrupts the oval). -->
+    <path id="ffring" fill="none" stroke-linejoin="round" stroke-linecap="round"
+      d="M1490,350 L1600,350 L1600,530 L1490,530 A740,485 0 0 1 130,530 L20,530 L20,350 L130,350 A740,485 0 0 1 1490,350 Z"/>
+    <use href="#ffring" stroke="#6f420f" stroke-width="40"/>
+    <use href="#ffring" stroke="url(#ffgold)" stroke-width="32"/>
+    <use href="#ffring" stroke="#ffe27a" stroke-width="5" opacity=".55"/>
+    <!-- blue score screens nested in the side pockets (tall rectangles) -->
+    <g id="scoreLwrap">
+      <rect x="42" y="376" width="92" height="128" rx="9" fill="url(#ffdots)" stroke="#0f3f9e" stroke-width="3"/>
+      <text id="scoreL" class="ffscore" x="88" y="440" text-anchor="middle" dominant-baseline="central">0</text>
+      <text id="nameL" class="ffname" x="6" y="668" text-anchor="start"></text>
+    </g>
+    <g id="scoreRwrap">
+      <rect x="1486" y="376" width="92" height="128" rx="9" fill="url(#ffdots)" stroke="#0f3f9e" stroke-width="3"/>
+      <text id="scoreR" class="ffscore" x="1532" y="440" text-anchor="middle" dominant-baseline="central">0</text>
+      <text id="nameR" class="ffname" x="1614" y="668" text-anchor="end"></text>
+    </g>
+  </svg>
 
   <!-- survey question + round / multiplier -->
   <div class="topbar" id="topbar">
     <div class="roundtag"><span id="roundlabel">Round 3</span><span class="mult" id="mult">Double</span></div>
-    <div class="survey"><span class="lead">We surveyed 100 people…</span><span id="survey"></span></div>
+    <div class="survey"><span id="survey"></span></div>
   </div>
 
   <!-- the answer board -->
   <div class="boardwrap" id="boardwrap">
+    <div class="pot"><span class="potnum" id="pot">0</span></div>
     <div class="frame">
-      <div class="bulbs" id="bulbs"></div>
       <div class="panel">
-        <div class="pot" id="pot">0</div>
         <div class="slots" id="slots"></div>
       </div>
     </div>
@@ -274,12 +343,9 @@
   <!-- steal banner -->
   <div class="stealbar" id="stealbar"></div>
 
-  <!-- team scoreboards -->
-  <div class="teams" id="teams"></div>
-
   <!-- ===== centered overlays ===== -->
   <div class="center" id="lobby">
-    <div class="logo"><span class="w w1">Family</span><span class="w w2">Feud</span></div>
+    <div class="ff-logo"><span class="ff-text"><span class="ff-1">Family</span><span class="ff-2">Feud</span></span></div>
     <div class="matchup" id="lobbyMatch"></div>
     <div class="subhead">Waiting to Start</div>
   </div>
@@ -323,6 +389,15 @@
     <button id="strikeBtn">Strike</button>
     <button id="stealBtn">Steal</button>
     <button id="resetBtn">Reset round</button></span>
+  <span class="sep"></span>
+  <span class="grp"><span>Fast&nbsp;Money:</span>
+    <button id="fmTimer1Btn">Timer 1</button>
+    <button id="fmTimer2Btn">Timer 2</button>
+    <button id="fmRevealBtn">Answer</button>
+    <button id="fmPointsBtn">Points</button>
+    <button id="fmZeroBtn">Zero</button></span>
+  <span class="sep"></span>
+  <span class="grp"><button id="muteBtn" class="on">&#128266; Sound</button></span>
 </div>
 
 <script>
@@ -355,19 +430,27 @@
 
   const el = id => document.getElementById(id);
 
-  // Build the marquee bulb ring once. Positions are % of the frame so they scale
-  // with the responsive board. Delays are staggered in clockwise order so the lit
-  // bulb travels around the ring (the show's lights don't flash in sync).
-  function genBulbs(){
-    const box = el('bulbs'); box.innerHTML='';
-    const E=2.5, F=100-E, nx=16, ny=9, dur=1.5, pts=[];
-    for(let i=0;i<nx;i++) pts.push([E+(F-E)*i/(nx-1), E]);              // top L→R
-    for(let i=1;i<=ny;i++) pts.push([F, E+(F-E)*i/(ny+1)]);            // right T→B
-    for(let i=0;i<nx;i++) pts.push([F-(F-E)*i/(nx-1), F]);            // bottom R→L
-    for(let i=1;i<=ny;i++) pts.push([E, F-(F-E)*i/(ny+1)]);           // left B→T
-    pts.forEach(([x,y],i)=>{ const b=document.createElement('div'); b.className='bulb';
-      b.style.left=x+'%'; b.style.top=y+'%';
-      b.style.animationDelay=(-(i/pts.length)*dur).toFixed(3)+'s'; box.appendChild(b); });
+  // --- sound effects ---------------------------------------------------------
+  // Family Feud clips live in public/sounds/family-feud/. Served from the app
+  // web root at /sounds/family-feud/ when this board runs inside the app; when
+  // the mockup is opened straight from disk (file://), fall back to a relative
+  // path into public/. Each clip is a cached <audio> restarted on replay — the
+  // same behaviour as the app's useSoundEffects() composable.
+  const SOUND_BASE = location.protocol === 'file:'
+    ? '../../public/sounds/family-feud/'
+    : '/sounds/family-feud/';
+  const SFX = {
+    intro:'Intro.m4a', answerReveal:'AnswerReveal.m4a', strike:'Strike.m4a', buzzer:'Buzzer.m4a',
+    fmTimer1:'FastMoneyTimer1.m4a', fmTimer2:'FastMoneyTimer2.m4a',
+    fmAnswer:'FastMoneyAnswerReveal.m4a', fmPoints:'FastMoneyPointsReveal.m4a', fmZero:'FastMoneyZeroPoints.m4a',
+  };
+  const _audio = {};
+  let soundOn = true;
+  function sfx(name){
+    if(!soundOn) return;
+    let a = _audio[name];
+    if(!a){ a = _audio[name] = new Audio(SOUND_BASE + SFX[name]); a.volume = 0.7; }
+    try { a.currentTime = 0; a.play().catch(()=>{}); } catch(e){}
   }
 
   function pot(){
@@ -378,35 +461,30 @@
     return sum * m;
   }
 
+  // The physical board is always 8 panels (two columns of 4). Numbers run 1–4 down
+  // the left column, 5–8 down the right; a question with fewer answers leaves the
+  // extra panels as plain blue bars (no number, no answer) — like the real board.
+  const DOM_ORDER = [0,4,1,5,2,6,3,7]; // grid is row-major 2-col → answer index per cell
   function renderBoard(){
     const data = ROUNDS[numAnswers];
     el('survey').textContent = data.q;
     const slots = el('slots');
-    slots.className = 'slots' + (numAnswers <= 5 ? ' single' : '');
+    slots.className = 'slots';
     slots.innerHTML = '';
-    // Fill column-major so numbers read 1..4 down the left, 5..8 down the right —
-    // like the real two-column board. (Single column when ≤5 answers.)
-    const cols = numAnswers <= 5 ? 1 : 2;
-    const perCol = Math.ceil(numAnswers / cols);
-    const order = [];
-    for (let c=0;c<cols;c++) for (let r=0;r<perCol;r++){ const i=c*perCol+r; if(i<numAnswers) order.push({i, pos:r*cols+c}); }
-    // build in visual position order
-    const cells = new Array(numAnswers);
-    data.a.forEach((ans, i) => {
-      const open = i < openCount;
+    DOM_ORDER.forEach(ai => {
+      const exists = ai < numAnswers;
+      const ans = exists ? data.a[ai] : null;
+      const open = exists && ai < openCount;
       const cell = document.createElement('div');
-      cell.className = 'slot' + (open ? ' open' : '');
+      cell.className = 'slot' + (open ? ' open' : '') + (exists ? '' : ' empty');
+      if (exists) cell.dataset.ai = ai;   // answer index → lets Reveal flip this exact panel
       cell.innerHTML =
         `<div class="inner">
-           <div class="face blank"><span class="num">${i+1}</span></div>
-           <div class="face reveal"><span class="atext">${ans[0]}</span><span class="apts">${ans[1]}</span></div>
+           <div class="face blank">${exists ? `<span class="num">${ai+1}</span>` : ''}</div>
+           <div class="face reveal"><span class="atext">${ans ? ans[0] : ''}</span><span class="apts">${ans ? ans[1] : ''}</span></div>
          </div>`;
-      cells[i] = cell;
+      slots.appendChild(cell);
     });
-    // place into grid by column-major position
-    const positioned = [];
-    for (let c=0;c<cols;c++) for (let r=0;r<perCol;r++){ const i=c*perCol+r; if(i<numAnswers) positioned[r*cols+c]=cells[i]; }
-    positioned.forEach(cell => cell && slots.appendChild(cell));
     el('pot').textContent = pot();
   }
 
@@ -418,19 +496,20 @@
   }
 
   function renderTeams(){
-    const wrap = el('teams');
-    wrap.style.display = (state==='faceoff'||state==='play') ? 'flex' : 'none';
-    wrap.innerHTML = '';
+    const show = (state==='faceoff'||state==='play');
+    el('ffsvg').classList.toggle('show', show);
+    const wraps = [el('scoreLwrap'), el('scoreRwrap')];
+    const texts = [el('scoreL'), el('scoreR')];
+    const names = [el('nameL'), el('nameR')];
+    // control = the team holding the board (or the opponent during a steal)
+    const holder = steal ? (controlTeam + 1) % TEAMS.length : controlTeam;
     TEAMS.forEach((t, idx) => {
-      const d = document.createElement('div');
-      d.className = 'team' + (idx===controlTeam && !steal ? ' control' : '') + (idx!==controlTeam && steal ? ' control' : '');
-      d.style.setProperty('--tc', t.color);
-      const showStrikes = (idx===controlTeam && !steal);
-      d.innerHTML =
-        `<div class="tname">${t.name}</div>
-         <div class="tscore">${t.score}</div>
-         <div class="tstrikes">${showStrikes ? '<b>✕</b>'.repeat(strikes) : ''}</div>`;
-      wrap.appendChild(d);
+      if (!texts[idx]) return;
+      texts[idx].textContent = t.score;          // score stays white (LED look)
+      names[idx].textContent = t.name;           // family name under its score box
+      names[idx].style.fill = t.color;           // inline style beats the .ffname CSS rule
+      wraps[idx].classList.toggle('ctrl', show && idx === holder);
+      wraps[idx].style.setProperty('--tc', t.color);
     });
   }
 
@@ -482,21 +561,17 @@
     const boardVisible = (s==='faceoff'||s==='play');
     el('topbar').style.display = boardVisible ? '' : 'none';
     el('boardwrap').style.display = boardVisible ? '' : 'none';
+    el('ffsvg').classList.toggle('show', boardVisible);   // oval frames the board only
     if (s==='faceoff'){ openCount=0; strikes=0; steal=false; }
     renderAll();
     // per-state overlay content
-    if (s==='lobby') renderLobby();
+    if (s==='lobby'){ renderLobby(); sfx('intro'); }
     if (s==='recap'){ el('recapEye').textContent='End of Round 3 · Scores'; renderChips('recapChips'); }
     if (s==='winner'){ el('winName').textContent=TEAMS[0].name; renderChips('winChips'); }
     if (s==='fastmoney') renderFastMoney();
   }
 
-  function renderAll(){
-    // Board border color follows the round: blue on triple / Fast Money, gold otherwise.
-    const m = Number(el('mult').dataset.m || 2);
-    el('board').style.setProperty('--frame', m >= 3 ? '#4bd6ff' : '#ffd23f');
-    renderRoundTag(); renderBoard(); renderStrikes(); renderTeams(); renderSteal();
-  }
+  function renderAll(){ renderRoundTag(); renderBoard(); renderStrikes(); renderTeams(); renderSteal(); }
 
   // --- controls --------------------------------------------------------------
   document.querySelectorAll('[data-state]').forEach(b=>b.onclick=()=>{
@@ -511,14 +586,37 @@
     document.querySelectorAll('[data-m]').forEach(x=>x.classList.toggle('on', x===b));
     el('mult').dataset.m = b.dataset.m; renderAll();
   });
-  el('revealBtn').onclick=()=>{ if(openCount<numAnswers){openCount++; renderBoard(); renderTeams();} };
+  // Reveal the next answer by flipping its existing panel (add .open → CSS runs the
+  // flip). We do NOT rebuild the board here, or the panel would appear already-turned.
+  el('revealBtn').onclick=()=>{
+    if(openCount>=numAnswers) return;
+    const cell = el('slots').querySelector('.slot[data-ai="'+openCount+'"]');
+    if(cell) cell.classList.add('open');
+    openCount++;
+    el('pot').textContent = pot();
+    renderTeams();
+    sfx('answerReveal');
+  };
   el('strikeBtn').onclick=()=>{ strikes=(strikes%3)+1; renderStrikes(); renderTeams();
-    setTimeout(()=>{ if(strikes>=3){/* leave up so you can see 3-strike */} }, 10); };
+    // Third strike ends the team's turn → the buzzer; the 1st/2nd get the strike honk.
+    sfx(strikes>=3 ? 'buzzer' : 'strike'); };
   el('stealBtn').onclick=()=>{ steal=!steal; renderSteal(); renderTeams(); };
   el('resetBtn').onclick=()=>{ openCount=0; strikes=0; steal=false; renderAll(); };
 
+  // Fast Money clips — no per-answer sim on this board, so trigger them directly.
+  el('fmTimer1Btn').onclick=()=>sfx('fmTimer1');
+  el('fmTimer2Btn').onclick=()=>sfx('fmTimer2');
+  el('fmRevealBtn').onclick=()=>sfx('fmAnswer');
+  el('fmPointsBtn').onclick=()=>sfx('fmPoints');
+  el('fmZeroBtn').onclick=()=>sfx('fmZero');
+
+  // Mute toggle — stop the effects while working on the visual design.
+  el('muteBtn').onclick=function(){ soundOn=!soundOn;
+    this.classList.toggle('on', soundOn);
+    this.innerHTML = soundOn ? '&#128266; Sound' : '&#128263; Muted';
+    if(!soundOn) Object.values(_audio).forEach(a=>{ a.pause(); a.currentTime=0; }); };
+
   // default: mid-round play with a few answers up and one strike
-  genBulbs();
   el('mult').dataset.m = 2;
   openCount = 4; strikes = 1;
   setState('play');
